@@ -16,3 +16,8 @@
 | 5 | Reports: καρτέλες, πωλήσεις, ΦΠΑ, ελάχιστο απόθεμα |
 | 6 | Ταμείο και Ζ |
 | 7 | Web ταμείο |
+
+## Φάκελοι
+
+- `db/`: η βάση (`CREATE_USER.sql`, `INSTALL.sql`, `UNINSTALL.sql`). Οδηγίες στο [docs/ODIGIES_VASI.md](docs/ODIGIES_VASI.md).
+- `tests/`: tests σε Python (`pytest`, `oracledb`) πάνω σε ζωντανή βάση.
