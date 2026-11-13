@@ -36,6 +36,19 @@ prompt == the tables
 @MM_TABLES.sql
 prompt == the VAT and the kinds of documents
 @MM_BASE.sql
+prompt == the package MM_CORE
+whenever sqlerror continue
+@MM_CORE.sql
+whenever sqlerror exit failure rollback
+declare
+  n number;
+begin
+  select count(*) into n from user_errors where name = 'MM_CORE';
+  if n > 0 then
+    raise_application_error(-20002, 'MM_CORE: ' || n || ' errors (show errors package body mm_core)');
+  end if;
+end;
+/
 set define on
 prompt == &demo_file
 @&demo_file
