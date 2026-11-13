@@ -91,6 +91,8 @@ def xml_of(name):
 def test_xml_ascii_and_references(name):
     xml = BUILT[name][0]
     assert all(ord(c) < 128 for c in xml)
+    # what the schema of XML2Forms 14.1.2 refused (XML-24535, XML-24523)
+    assert 'DMLDataTargetName' not in xml and 'ColumnDataType="Char"' not in xml
     root = xml_of(name)
     items = {'%s.%s' % (b.get('Name'), i.get('Name'))
              for b in root.iter('{%s}Block' % NS['f']) for i in b.findall('f:Item', NS)}

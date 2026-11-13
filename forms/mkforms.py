@@ -228,9 +228,11 @@ def build(name, f):
         rg = 'RG' + lov[3:]
         groups.append('    <RecordGroup Name="%s" RecordGroupType="Query" RecordGroupQuery=%s>' % (rg, quoteattr(query)))
         for cn, w, t, r in cols:
+            # ColumnDataType: "Number"; a column of characters is the default ("Char" is not a
+            # value of the schema of XML2Forms 14.1.2: XML-24523)
             num = cn in ('ID', 'RATE', 'O')
-            groups.append('      <RecordGroupColumn Name="%s" ColumnDataType="%s" MaximumLength="%d"/>'
-                          % (cn, 'Number' if num else 'Char', 40 if num else 400))
+            groups.append('      <RecordGroupColumn Name="%s"%s MaximumLength="%d"/>'
+                          % (cn, ' ColumnDataType="Number"' if num else '', 40 if num else 400))
         groups.append('    </RecordGroup>')
         lw = sum(w for _, w, _, _ in cols) + 40
         lovx.append('    <LOV Name="%s" RecordGroupName="%s" Title=%s Width="%d" Height="300" '
@@ -255,7 +257,7 @@ def build(name, f):
            % (name, quoteattr(greeklish(f['title'])), WINDOW),
            '    <Coordinate CharacterCellWidth="7" CharacterCellHeight="14" CoordinateSystem="Real" '
            'RealUnit="Pixel" DefaultFontScaling="true"/>',
-           '    <Block Name="%s" QueryDataSourceName="%s" DMLDataTargetName="%s" OrderByClause="%s" '
+           '    <Block Name="%s" QueryDataSourceName="%s" DMLDataName="%s" OrderByClause="%s" '
            'RecordsDisplayCount="%d">' % (blk, f['table'], f['table'], f['order'], ROWS)]
     out += ['      <Item %s/>' % attrs(a) for a in out_items]
     out += [trigger('POST-QUERY', 'ui.post_query(:SYSTEM.TRIGGER_BLOCK);', '      '),
