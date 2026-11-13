@@ -59,6 +59,17 @@ create or replace package mm_core as
   function reveal_pin(p_serial_id number, p_user varchar2 default null) return varchar2;
   function receipt_pin(p_serial_id number) return varchar2;             -- a card sold today
 
+  -- reservations (e.g. New Year cakes): a name, a phone, the day of the pickup; their quantities are
+  -- reserved (MM_ITEM_AVAIL) until the delivery, a receipt that counts the deposit
+  function new_reservation(p_name varchar2, p_phone varchar2, p_pickup_date date,
+                           p_customer_id number default null, p_notes varchar2 default null) return number;
+  procedure reserve(p_res_id number, p_item_id number, p_qty number, p_price number default null);  -- 0: out
+  procedure take_deposit(p_res_id number, p_register_id number, p_amount number,
+                         p_payment varchar2 default 'CASH');
+  function deliver(p_res_id number, p_register_id number, p_payment varchar2 default 'CASH') return number;
+  procedure cancel_reservation(p_res_id number, p_register_id number default null,
+                               p_refund varchar2 default 'Y');
+
   -- the count of the stock: start, scan (from the phones), post
   function start_count(p_name varchar2) return number;
   function scan(p_count_id number, p_code varchar2, p_qty number default 1,
@@ -281,6 +292,7 @@ create or replace package body mm_core as
     for l in (select id from mm_doc_line where doc_id = p_doc_id) loop
       release_line(l.id);
     end loop;
+    update mm_reservation set doc_id = null where doc_id = p_doc_id;   -- its delivery again later
     delete from mm_doc where id = p_doc_id;
   end;
 
@@ -340,9 +352,13 @@ create or replace package body mm_core as
         fail(28, 'Το ' || l.code || ': ' || l.qty || ' τεμάχια, ' || lines || ' serials');
       end if;
     end loop;
+    recalc(p_doc_id);
+    select total into d.total from mm_doc where id = p_doc_id;
+    if d.deposit > d.total then
+      fail(47, 'Η προκαταβολή (' || d.deposit || ') είναι πάνω από το σύνολο (' || d.total || ')');
+    end if;
     no_ := t.next_no;
     update mm_doc_type set next_no = next_no + 1 where code = t.code;
-    recalc(p_doc_id);
     update mm_doc set doc_no = no_, status = 'P', z_id = z where id = p_doc_id
     returning total into d.total;
 
@@ -355,11 +371,13 @@ create or replace package body mm_core as
     update mm_serial set status = 'A' where in_doc_id = p_doc_id and status = 'N';
     update mm_serial set status = 'S', sold_at = sysdate where out_doc_id = p_doc_id and status = 'R';
 
-    if z is not null and d.payment in ('CASH', 'CARD') then
+    -- the money of now: the total less a deposit paid before (a reservation)
+    if z is not null and d.payment in ('CASH', 'CARD') and d.total - d.deposit <> 0 then
       insert into mm_cash_move (register_id, z_id, kind, payment, amount, doc_id)
       values (d.register_id, z, case when t.stock_sign > 0 then 'REFUND' else 'SALE' end, d.payment,
-              case when t.stock_sign > 0 then -d.total else d.total end, p_doc_id);
+              case when t.stock_sign > 0 then -(d.total - d.deposit) else d.total - d.deposit end, p_doc_id);
     end if;
+    update mm_reservation set status = 'D' where doc_id = p_doc_id;
     return no_;
   end;
 
@@ -397,6 +415,7 @@ create or replace package body mm_core as
     insert into mm_cash_move (register_id, z_id, kind, payment, amount, doc_id, note)
     select register_id, z_id, case kind when 'SALE' then 'REFUND' else 'SALE' end, payment, -amount, doc_id, 'Ακύρωση'
     from mm_cash_move where doc_id = p_doc_id and kind in ('SALE', 'REFUND');
+    update mm_reservation set status = 'O', doc_id = null where doc_id = p_doc_id;
     update mm_doc set status = 'C' where id = p_doc_id;
   end;
 
@@ -502,10 +521,12 @@ create or replace package body mm_core as
                   nvl(sum(-t.stock_sign * d.total), 0)
            from mm_doc d join mm_doc_type t on t.code = d.doc_type
            where d.z_id = m.id and d.status = 'P'),
-        (cash, card) =
+        -- the money of the sales and of the deposits, as it came in (a deposit on its day)
+        (cash, card, deposits) =
           (select nvl(sum(case when payment = 'CASH' then amount end), 0),
-                  nvl(sum(case when payment = 'CARD' then amount end), 0)
-           from mm_cash_move where z_id = m.id and kind in ('SALE', 'REFUND')),
+                  nvl(sum(case when payment = 'CARD' then amount end), 0),
+                  nvl(sum(case when kind = 'DEPOSIT' then amount end), 0)
+           from mm_cash_move where z_id = m.id and kind in ('SALE', 'REFUND', 'DEPOSIT')),
         status = 'C', closed_at = greatest(sysdate, opened_at)
     where m.id = z;
     return z;
@@ -688,6 +709,124 @@ create or replace package body mm_core as
       fail(44, 'Το PIN τυπώνεται μόνο για κάρτα που πουλήθηκε σήμερα');
     end if;
     return pin_of(p_serial_id, nvl(upper(sys_context('USERENV', 'CLIENT_IDENTIFIER')), 'RECEIPT'), 'RECEIPT');
+  end;
+
+  -- ---------------------------------------------------------------------------------------------
+  -- the reservation locked, for a change: open, and no receipt of its delivery waiting
+  function open_res(p_res_id number) return mm_reservation%rowtype is
+    r mm_reservation%rowtype;
+  begin
+    select * into r from mm_reservation where id = p_res_id for update;
+    if r.status <> 'O' or r.doc_id is not null then
+      fail(46, 'Η κράτηση ' || p_res_id || ' δεν είναι ανοιχτή' ||
+               case when r.doc_id is not null then ' (έχει απόδειξη παράδοσης)' end);
+    end if;
+    return r;
+  exception
+    when no_data_found then fail(50, 'Δεν υπάρχει κράτηση ' || p_res_id);
+  end;
+
+  function new_reservation(p_name varchar2, p_phone varchar2, p_pickup_date date,
+                           p_customer_id number default null, p_notes varchar2 default null) return number is
+    v number;
+  begin
+    if trim(p_name) is null or p_phone is null or not regexp_like(p_phone, '^[0-9+ ]{5,20}$') then
+      fail(45, 'Η κράτηση θέλει όνομα και τηλέφωνο');
+    end if;
+    if p_pickup_date is null or trunc(p_pickup_date) < trunc(sysdate) then
+      fail(49, 'Η ημερομηνία παραλαβής δεν μπορεί να είναι στο παρελθόν');
+    end if;
+    insert into mm_reservation (name, phone, customer_id, pickup_date, notes)
+    values (trim(p_name), p_phone, p_customer_id, trunc(p_pickup_date), p_notes)
+    returning id into v;
+    return v;
+  end;
+
+  procedure reserve(p_res_id number, p_item_id number, p_qty number, p_price number default null) is
+    r mm_reservation%rowtype := open_res(p_res_id);
+    i mm_item%rowtype;
+  begin
+    begin
+      select * into i from mm_item where id = p_item_id;
+    exception
+      when no_data_found then fail(6, 'Δεν υπάρχει είδος ' || p_item_id);
+    end;
+    if i.active = 'N' then
+      fail(7, 'Το είδος ' || i.code || ' δεν είναι ενεργό');
+    end if;
+    if i.serial_tracked = 'Y' then
+      fail(52, 'Τα είδη με serials δεν μπαίνουν σε κράτηση');
+    end if;
+    if p_qty is null or p_qty < 0 then
+      fail(24, 'Λάθος ποσότητα');
+    end if;
+    if p_qty = 0 then
+      delete from mm_reservation_line where reservation_id = p_res_id and item_id = p_item_id;
+    else
+      merge into mm_reservation_line l
+      using (select p_res_id reservation_id, p_item_id item_id from dual) s
+      on (l.reservation_id = s.reservation_id and l.item_id = s.item_id)
+      when matched then update set qty = p_qty, price = nvl(p_price, l.price)
+      when not matched then insert (reservation_id, item_id, qty, price)
+        values (p_res_id, p_item_id, p_qty, nvl(p_price, i.price));
+    end if;
+  end;
+
+  procedure take_deposit(p_res_id number, p_register_id number, p_amount number,
+                         p_payment varchar2 default 'CASH') is
+    r mm_reservation%rowtype := open_res(p_res_id);
+    z number := open_z_of(p_register_id);
+  begin
+    if z is null then
+      fail(12, 'Το ταμείο δεν έχει ανοιχτό Ζ');
+    end if;
+    if nvl(p_amount, 0) <= 0 or p_payment not in ('CASH', 'CARD') then
+      fail(48, 'Η προκαταβολή θέλει θετικό ποσό, με μετρητά ή κάρτα');
+    end if;
+    insert into mm_cash_move (register_id, z_id, kind, payment, amount, reservation_id, note)
+    values (p_register_id, z, 'DEPOSIT', p_payment, p_amount, p_res_id, 'Κράτηση ' || p_res_id);
+    update mm_reservation set deposit = deposit + p_amount where id = p_res_id;
+  end;
+
+  -- the receipt of the delivery: a draft on the register, the lines at the prices of the
+  -- reservation, the deposit on it (post_doc takes only the rest); post_doc makes it delivered
+  function deliver(p_res_id number, p_register_id number, p_payment varchar2 default 'CASH') return number is
+    r mm_reservation%rowtype := open_res(p_res_id);
+    d number;
+    l number;
+    n number;
+  begin
+    select count(*) into n from mm_reservation_line where reservation_id = p_res_id;
+    if n = 0 then
+      fail(51, 'Η κράτηση δεν έχει είδη');
+    end if;
+    d := new_doc('ALP', r.customer_id, null, p_register_id, p_payment);
+    for x in (select * from mm_reservation_line where reservation_id = p_res_id order by id) loop
+      l := add_line(d, x.item_id, x.qty, x.price);
+    end loop;
+    update mm_doc set deposit = r.deposit,
+                      notes = 'Κράτηση ' || p_res_id || ': ' || r.name || ', ' || r.phone where id = d;
+    update mm_reservation set doc_id = d where id = p_res_id;
+    return d;
+  end;
+
+  -- cancelled: the deposit back (the same ways it came), or kept (p_refund = 'N')
+  procedure cancel_reservation(p_res_id number, p_register_id number default null,
+                               p_refund varchar2 default 'Y') is
+    r mm_reservation%rowtype := open_res(p_res_id);
+    z number;
+  begin
+    if p_refund = 'Y' and r.deposit > 0 then
+      z := open_z_of(p_register_id);
+      if z is null then
+        fail(12, 'Το ταμείο δεν έχει ανοιχτό Ζ');
+      end if;
+      insert into mm_cash_move (register_id, z_id, kind, payment, amount, reservation_id, note)
+      select p_register_id, z, 'DEPOSIT', payment, -sum(amount), p_res_id, 'Επιστροφή προκαταβολής'
+      from mm_cash_move where reservation_id = p_res_id and kind = 'DEPOSIT'
+      group by payment having sum(amount) <> 0;
+    end if;
+    update mm_reservation set status = 'C' where id = p_res_id;
   end;
 
   -- ---------------------------------------------------------------------------------------------

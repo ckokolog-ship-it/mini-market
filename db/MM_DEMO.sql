@@ -87,6 +87,27 @@ begin
 end;
 /
 
+-- a reservation item: the New Year cake, and two reservations for the last day of this year
+insert into mm_item (code, barcode, name, category_id, vat_code, unit, price, cost, min_stock)
+select 'VAS01', '2000000000343', 'Βασιλόπιτα 1 kg', c.id, 'B', 'PCS', 14.00, 8.00, 0
+from mm_category c
+where c.name = 'Αρτοποιήματα' and not exists (select 1 from mm_item where code = 'VAS01');
+
+declare
+  r number;
+begin
+  for x in (select * from (values ('Μαρία Παπαδοπούλου', '6900000001', 2),
+                                  ('Γιώργος Νικολάου',   '6900000002', 1)) v (name, phone, qty)
+            where not exists (select 1 from mm_reservation m where m.phone = v.phone)) loop
+    insert into mm_reservation (name, phone, pickup_date, notes)
+    values (x.name, x.phone, add_months(trunc(sysdate, 'YYYY'), 12) - 1, 'Επίδειξη')
+    returning id into r;
+    insert into mm_reservation_line (reservation_id, item_id, qty, price)
+    select r, id, x.qty, price from mm_item where code = 'VAS01';
+  end loop;
+end;
+/
+
 -- the cards of mobile phones: items with serials, 5 cards each (made-up serials and PINs), when
 -- MM_PIN works (DBMS_CRYPTO: GRANT_CRYPTO.sql)
 insert into mm_category (name)
