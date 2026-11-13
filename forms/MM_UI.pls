@@ -92,12 +92,15 @@ PACKAGE BODY ui IS
     n VARCHAR2(100);
     r NUMBER;
     s NUMBER;
+    id_ NUMBER;
   BEGIN
     IF p_block = 'ITEM' THEN
+      -- NAME_IN outside the SELECT: a built-in of the Forms "may not be used in SQL" (PL/SQL 231)
+      id_ := to_number(name_in('ITEM.ID'));
       BEGIN
         SELECT c.name, v.rate, i.stock INTO n, r, s
         FROM mm_item i, mm_category c, mm_vat v
-        WHERE i.id = to_number(name_in('ITEM.ID')) AND c.id = i.category_id AND v.code = i.vat_code;
+        WHERE i.id = id_ AND c.id = i.category_id AND v.code = i.vat_code;
         copy(n, 'ITEM.CAT_NAME');
         copy(to_char(r), 'ITEM.VAT_RATE');
         copy(to_char(s), 'ITEM.STOCK');
