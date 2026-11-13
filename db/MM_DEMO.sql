@@ -73,6 +73,7 @@ insert into mm_stock_move (item_id, kind, qty, note)
 select i.id, 'INIT', i.min_stock * 3, 'Πρώτη απογραφή'
 from mm_item i
 where i.min_stock > 0
+  and i.serial_tracked = 'N'      -- the stock of the cards is their serials
   and not exists (select 1 from mm_stock_move m where m.item_id = i.id);
 
 -- MM_ITEM.STOCK is reservable: only "stock = stock + n", one item at a time, by its id
@@ -82,6 +83,40 @@ begin
             group by i.id, i.stock
             having nvl(sum(m.qty), 0) <> i.stock) loop
     update mm_item set stock = stock + r.d where id = r.id;
+  end loop;
+end;
+/
+
+-- the cards of mobile phones: items with serials, 5 cards each (made-up serials and PINs), when
+-- MM_PIN works (DBMS_CRYPTO: GRANT_CRYPTO.sql)
+insert into mm_category (name)
+select 'Κάρτες κινητής' from dual where not exists (select 1 from mm_category where name = 'Κάρτες κινητής');
+
+insert into mm_item (code, barcode, name, category_id, vat_code, unit, price, cost, min_stock, serial_tracked)
+select v.code, v.barcode, v.name, c.id, 'A', 'PCS', v.price, v.cost, 2, 'Y'
+from (values
+  ('CRD05', '2000000000312', 'Κάρτα κινητής 5 €',  5.00,  4.75),
+  ('CRD10', '2000000000329', 'Κάρτα κινητής 10 €', 10.00,  9.50),
+  ('CRD20', '2000000000336', 'Κάρτα κινητής 20 €', 20.00, 19.00)
+) v (code, barcode, name, price, cost)
+join mm_category c on c.name = 'Κάρτες κινητής'
+where not exists (select 1 from mm_item i where i.code = v.code);
+
+declare
+  n number;
+  s number;
+begin
+  select count(*) into n from user_objects where object_name = 'MM_PIN' and object_type = 'PACKAGE BODY'
+  and status = 'VALID';
+  if n = 0 then
+    return;
+  end if;
+  for i in (select id, code from mm_item where serial_tracked = 'Y' and code like 'CRD%'
+            and not exists (select 1 from mm_serial s where s.item_id = mm_item.id)) loop
+    for k in 1 .. 5 loop
+      s := mm_core.load_serial(i.id, 'DEMO-' || i.code || '-' || lpad(k, 4, '0'),
+                               lpad(trunc(dbms_random.value(0, 1e12)), 12, '0'), 'Κάρτες επίδειξης');
+    end loop;
   end loop;
 end;
 /

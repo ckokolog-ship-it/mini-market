@@ -96,6 +96,9 @@ TEST_DOCS = (f"select doc_id from mm_doc_line where item_id in ({TEST_ITEMS}) un
 
 
 def cleanup(c):
+    c.execute(f'delete from mm_pin_log where serial_id in (select id from mm_serial where item_id in ({TEST_ITEMS}))')
+    c.execute(f'delete from mm_serial where item_id in ({TEST_ITEMS})')
+    c.execute("delete from mm_pin_user where username like 'TST%'")
     c.execute(f'update mm_doc set ref_doc_id = null where ref_doc_id in ({TEST_DOCS})')
     c.execute(f'delete from mm_stock_move where item_id in ({TEST_ITEMS}) or doc_id in ({TEST_DOCS})')
     c.execute(f'delete from mm_count_line where item_id in ({TEST_ITEMS})')

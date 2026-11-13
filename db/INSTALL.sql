@@ -36,11 +36,24 @@ prompt == the tables
 @MM_TABLES.sql
 prompt == the VAT and the kinds of documents
 @MM_BASE.sql
-prompt == the package MM_CORE, and MM_TEXT (the Greek of the forms)
+prompt == the packages MM_PIN (the PINs of the cards), MM_CORE, and MM_TEXT (the Greek of the forms)
 whenever sqlerror continue
+@MM_PIN.sql
 @MM_CORE.sql
 @MM_TEXT.sql
 whenever sqlerror exit failure rollback
+-- MM_PIN needs DBMS_CRYPTO (GRANT_CRYPTO.sql, as SYS): without it only the PINs do not work
+set serveroutput on
+declare
+  n number;
+begin
+  select count(*) into n from user_objects where object_name = 'MM_PIN' and status <> 'VALID';
+  if n > 0 then
+    dbms_output.put_line('== [!] MM_PIN is not valid: no PINs for the cards. As SYS: @GRANT_CRYPTO.sql, then INSTALL.sql again');
+  end if;
+end;
+/
+set serveroutput off
 declare
   n number;
 begin

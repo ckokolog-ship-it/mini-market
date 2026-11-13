@@ -5,6 +5,12 @@ set feedback off
 prompt == drop the package and the tables of the mini market
 drop package if exists mm_core;
 drop package if exists mm_text;
+drop package if exists mm_pin;
+drop view if exists mm_serial_check;
+drop table if exists mm_pin_log cascade constraints purge;
+drop table if exists mm_pin_user cascade constraints purge;
+drop table if exists mm_secret cascade constraints purge;
+drop table if exists mm_serial cascade constraints purge;
 drop table if exists mm_count_line cascade constraints purge;
 drop table if exists mm_count cascade constraints purge;
 drop table if exists mm_cash_move cascade constraints purge;

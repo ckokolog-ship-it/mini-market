@@ -48,6 +48,17 @@ create or replace package mm_core as
   function open_z_of(p_register_id number) return number;  -- null when closed
   function close_z(p_register_id number) return number;    -- returns the id of the Z
 
+  -- the cards with serial numbers (items with SERIAL_TRACKED = 'Y'); the PIN is kept encrypted
+  function load_serial(p_item_id number, p_serial varchar2, p_pin varchar2 default null,
+                       p_note varchar2 default null) return number;     -- straight to the stock (+1)
+  function add_serial(p_line_id number, p_serial varchar2, p_pin varchar2 default null) return number;
+                                                                         -- to a line of a draft purchase
+  function sell_serial(p_doc_id number, p_item_id number default null,
+                       p_serial varchar2 default null) return number;   -- the oldest available, or this one
+  procedure release_serial(p_serial_id number);                         -- back from a draft sale
+  function reveal_pin(p_serial_id number, p_user varchar2 default null) return varchar2;
+  function receipt_pin(p_serial_id number) return varchar2;             -- a card sold today
+
   -- the count of the stock: start, scan (from the phones), post
   function start_count(p_name varchar2) return number;
   function scan(p_count_id number, p_code varchar2, p_qty number default 1,
@@ -63,6 +74,23 @@ create or replace package body mm_core as
   procedure fail(p_no pls_integer, p_text varchar2) is
   begin
     raise_application_error(-20100 - p_no, 'MM-' || to_char(100 + p_no) || ': ' || p_text);
+  end;
+
+  function tracked(p_item_id number) return boolean is
+    v varchar2(1);
+  begin
+    select serial_tracked into v from mm_item where id = p_item_id;
+    return v = 'Y';
+  exception
+    when no_data_found then return false;
+  end;
+
+  -- the cards of a line of a draft: a sale gives them back, a purchase forgets them
+  procedure release_line(p_line_id number) is
+  begin
+    update mm_serial set status = 'A', out_line_id = null, out_doc_id = null
+    where out_line_id = p_line_id and status = 'R';
+    delete from mm_serial where in_line_id = p_line_id and status = 'N';
   end;
 
   -- ---------------------------------------------------------------------------------------------
@@ -201,6 +229,9 @@ create or replace package body mm_core as
     if i.active = 'N' then
       fail(7, 'Το είδος ' || i.code || ' δεν είναι ενεργό');
     end if;
+    if i.serial_tracked = 'Y' and not (t.side = 'P' and t.stock_sign = 1) then
+      fail(27, 'Το ' || i.code || ' έχει serials: πώληση με sell_serial, φόρτωση με τιμολόγιο αγοράς');
+    end if;
     select rate into r from mm_vat where code = i.vat_code;
     p := nvl(p_price, default_price(d.doc_type, p_item_id));
     amounts(p, p_qty, p_discount, r, t.prices_incl_vat, n, v, tot);
@@ -219,6 +250,9 @@ create or replace package body mm_core as
   begin
     select * into l from mm_doc_line where id = p_line_id;
     d := draft(l.doc_id);
+    if tracked(l.item_id) and p_qty <> l.qty then
+      fail(26, 'Η ποσότητα ενός είδους με serials αλλάζει με τα serials');
+    end if;
     amounts(p_price, p_qty, p_discount, l.vat_rate, doc_type_row(d.doc_type).prices_incl_vat, n, v, tot);
     update mm_doc_line
     set qty = p_qty, price = p_price, discount = nvl(p_discount, 0), net = n, vat = v, total = tot
@@ -234,6 +268,7 @@ create or replace package body mm_core as
   begin
     select * into l from mm_doc_line where id = p_line_id;
     d := draft(l.doc_id);
+    release_line(p_line_id);
     delete from mm_doc_line where id = p_line_id;
     recalc(l.doc_id);
   exception
@@ -243,6 +278,9 @@ create or replace package body mm_core as
   procedure delete_doc(p_doc_id number) is
     d mm_doc%rowtype := draft(p_doc_id);
   begin
+    for l in (select id from mm_doc_line where doc_id = p_doc_id) loop
+      release_line(l.id);
+    end loop;
     delete from mm_doc where id = p_doc_id;
   end;
 
@@ -294,6 +332,14 @@ create or replace package body mm_core as
         fail(12, 'Το ταμείο δεν έχει ανοιχτό Ζ');
       end if;
     end if;
+    -- a line of cards: as many serials as its quantity
+    for l in (select l.id, l.qty, i.code from mm_doc_line l join mm_item i on i.id = l.item_id
+              where l.doc_id = p_doc_id and i.serial_tracked = 'Y') loop
+      select count(*) into lines from mm_serial where in_line_id = l.id or out_line_id = l.id;
+      if lines <> l.qty then
+        fail(28, 'Το ' || l.code || ': ' || l.qty || ' τεμάχια, ' || lines || ' serials');
+      end if;
+    end loop;
     no_ := t.next_no;
     update mm_doc_type set next_no = next_no + 1 where code = t.code;
     recalc(p_doc_id);
@@ -306,6 +352,8 @@ create or replace package body mm_core as
         update mm_item set cost = round(l.net / l.qty, 4) where id = l.item_id;   -- the last cost
       end if;
     end loop;
+    update mm_serial set status = 'A' where in_doc_id = p_doc_id and status = 'N';
+    update mm_serial set status = 'S', sold_at = sysdate where out_doc_id = p_doc_id and status = 'R';
 
     if z is not null and d.payment in ('CASH', 'CARD') then
       insert into mm_cash_move (register_id, z_id, kind, payment, amount, doc_id)
@@ -319,6 +367,7 @@ create or replace package body mm_core as
     d mm_doc%rowtype;
     t mm_doc_type%rowtype;
     zs varchar2(1);
+    lines number;
   begin
     begin
       select * into d from mm_doc where id = p_doc_id for update;
@@ -335,9 +384,16 @@ create or replace package body mm_core as
       end if;
     end if;
     t := doc_type_row(d.doc_type);
+    select count(*) into lines from mm_serial where in_doc_id = p_doc_id and status <> 'A';
+    if lines > 0 then
+      fail(30, 'Από τις κάρτες αυτής της αγοράς έχουν πουληθεί ή δεσμευτεί ' || lines);
+    end if;
     for l in (select * from mm_doc_line where doc_id = p_doc_id) loop
       stock_move(l.item_id, 'DOC', -t.stock_sign * l.qty, p_doc_id, l.id, 'Ακύρωση');
     end loop;
+    update mm_serial set status = 'X' where in_doc_id = p_doc_id;
+    update mm_serial set status = 'A', sold_at = null, out_line_id = null, out_doc_id = null
+    where out_doc_id = p_doc_id and status = 'S';
     insert into mm_cash_move (register_id, z_id, kind, payment, amount, doc_id, note)
     select register_id, z_id, case kind when 'SALE' then 'REFUND' else 'SALE' end, payment, -amount, doc_id, 'Ακύρωση'
     from mm_cash_move where doc_id = p_doc_id and kind in ('SALE', 'REFUND');
@@ -359,6 +415,11 @@ create or replace package body mm_core as
     if c is null or d.status <> 'P' then
       fail(15, 'Πιστωτικό γίνεται μόνο για καταχωρημένο τιμολόγιο');
     end if;
+    select count(*) into v from mm_doc_line l join mm_item i on i.id = l.item_id
+    where l.doc_id = p_doc_id and i.serial_tracked = 'Y';
+    if v > 0 then
+      fail(29, 'Το παραστατικό έχει κάρτες με serials: ακύρωσέ το (όσο το Ζ είναι ανοιχτό)');
+    end if;
     v := new_doc(c, d.customer_id, d.supplier_id, d.register_id, d.payment);
     update mm_doc set ref_doc_id = p_doc_id where id = v;
     insert into mm_doc_line (doc_id, line_no, item_id, qty, price, discount, vat_code, vat_rate, net, vat, total)
@@ -372,6 +433,9 @@ create or replace package body mm_core as
   begin
     if p_note is null then
       fail(16, 'Η διόρθωση αποθέματος θέλει αιτιολογία');
+    end if;
+    if tracked(p_item_id) then
+      fail(33, 'Το απόθεμα ενός είδους με serials αλλάζει με τα serials (load_serial)');
     end if;
     stock_move(p_item_id, 'ADJ', p_qty, p_note => p_note);
   end;
@@ -448,6 +512,185 @@ create or replace package body mm_core as
   end;
 
   -- ---------------------------------------------------------------------------------------------
+  procedure check_serial(p_item_id number, p_serial varchar2, p_pin varchar2) is
+  begin
+    if not tracked(p_item_id) then
+      fail(25, 'Το είδος ' || p_item_id || ' δεν έχει serials');
+    end if;
+    if p_serial is null or not regexp_like(p_serial, '^[0-9A-Za-z-]{4,40}$') then
+      fail(34, 'Λάθος serial: 4 έως 40 γράμματα, ψηφία ή -');
+    end if;
+    if p_pin is not null and not regexp_like(p_pin, '^[0-9]{4,20}$') then
+      fail(35, 'Λάθος PIN: 4 έως 20 ψηφία');
+    end if;
+  end;
+
+  function new_serial(p_item_id number, p_serial varchar2, p_pin varchar2, p_status varchar2,
+                      p_doc_id number, p_line_id number) return number is
+    v number;
+  begin
+    check_serial(p_item_id, p_serial, p_pin);
+    insert into mm_serial (item_id, serial, pin_enc, status, in_doc_id, in_line_id)
+    values (p_item_id, p_serial, mm_pin.enc(p_pin), p_status, p_doc_id, p_line_id)
+    returning id into v;
+    return v;
+  exception
+    when dup_val_on_index then fail(36, 'Το serial ' || p_serial || ' υπάρχει ήδη');
+  end;
+
+  function load_serial(p_item_id number, p_serial varchar2, p_pin varchar2 default null,
+                       p_note varchar2 default null) return number is
+    v number := new_serial(p_item_id, p_serial, p_pin, 'A', null, null);
+  begin
+    stock_move(p_item_id, 'ADJ', 1, p_note => nvl(p_note, 'Serial ' || p_serial));
+    return v;
+  end;
+
+  function add_serial(p_line_id number, p_serial varchar2, p_pin varchar2 default null) return number is
+    l mm_doc_line%rowtype;
+    d mm_doc%rowtype;
+    t mm_doc_type%rowtype;
+  begin
+    begin
+      select * into l from mm_doc_line where id = p_line_id;
+    exception
+      when no_data_found then fail(8, 'Δεν υπάρχει γραμμή ' || p_line_id);
+    end;
+    d := draft(l.doc_id);
+    t := doc_type_row(d.doc_type);
+    if not (t.side = 'P' and t.stock_sign = 1) then
+      fail(37, 'Τα serials φορτώνονται σε τιμολόγιο αγοράς');
+    end if;
+    return new_serial(l.item_id, p_serial, p_pin, 'N', l.doc_id, p_line_id);
+  end;
+
+  function sell_serial(p_doc_id number, p_item_id number default null,
+                       p_serial varchar2 default null) return number is
+    d mm_doc%rowtype := draft(p_doc_id);
+    t mm_doc_type%rowtype := doc_type_row(d.doc_type);
+    sid number;
+    it number;
+    ln mm_doc_line%rowtype;
+    found boolean := false;
+    n number; v number; tot number;
+    cursor c is
+      select id, item_id from mm_serial
+      where status = 'A'
+        and (p_item_id is null or item_id = p_item_id)
+        and (p_serial is null or serial = p_serial)
+      order by id
+      for update skip locked;     -- two tills never take the same card
+  begin
+    if not (t.side = 'S' and t.stock_sign = -1) then
+      fail(38, 'Οι κάρτες πουλιούνται με απόδειξη ή τιμολόγιο πώλησης');
+    end if;
+    if p_item_id is null and p_serial is null then
+      fail(39, 'Δώσε είδος ή serial');
+    end if;
+    open c;
+    fetch c into sid, it;
+    close c;
+    if sid is null then
+      fail(40, 'Δεν υπάρχει διαθέσιμη κάρτα' || case when p_serial is not null then ' με serial ' || p_serial end);
+    end if;
+    -- the line of this item in the document: one more, or a new one
+    for r in (select * from mm_doc_line where doc_id = p_doc_id and item_id = it order by line_no) loop
+      ln := r;
+      found := true;
+      exit;
+    end loop;
+    if found then
+      amounts(ln.price, ln.qty + 1, ln.discount, ln.vat_rate, t.prices_incl_vat, n, v, tot);
+      update mm_doc_line set qty = qty + 1, net = n, vat = v, total = tot where id = ln.id;
+      recalc(p_doc_id);
+    else
+      -- add_line refuses an item with serials in a sale: the line is made here
+      declare
+        i mm_item%rowtype;
+        r number;
+        p number;
+        no_ number;
+      begin
+        select * into i from mm_item where id = it;
+        if i.active = 'N' then
+          fail(7, 'Το είδος ' || i.code || ' δεν είναι ενεργό');
+        end if;
+        select rate into r from mm_vat where code = i.vat_code;
+        p := default_price(d.doc_type, it);
+        amounts(p, 1, 0, r, t.prices_incl_vat, n, v, tot);
+        select nvl(max(line_no), 0) + 1 into no_ from mm_doc_line where doc_id = p_doc_id;
+        insert into mm_doc_line (doc_id, line_no, item_id, qty, price, discount, vat_code, vat_rate, net, vat, total)
+        values (p_doc_id, no_, it, 1, p, 0, i.vat_code, r, n, v, tot)
+        returning id into ln.id;
+        recalc(p_doc_id);
+      end;
+    end if;
+    update mm_serial set status = 'R', out_line_id = ln.id, out_doc_id = p_doc_id where id = sid;
+    return sid;
+  end;
+
+  procedure release_serial(p_serial_id number) is
+    s mm_serial%rowtype;
+    l mm_doc_line%rowtype;
+    d mm_doc%rowtype;
+    n number; v number; tot number;
+  begin
+    begin
+      select * into s from mm_serial where id = p_serial_id;
+    exception
+      when no_data_found then fail(41, 'Δεν υπάρχει κάρτα ' || p_serial_id);
+    end;
+    if s.status <> 'R' then
+      fail(42, 'Η κάρτα δεν είναι δεσμευμένη σε πρόχειρο');
+    end if;
+    select * into l from mm_doc_line where id = s.out_line_id;
+    d := draft(l.doc_id);
+    update mm_serial set status = 'A', out_line_id = null, out_doc_id = null where id = p_serial_id;
+    if l.qty <= 1 then
+      delete from mm_doc_line where id = l.id;
+    else
+      amounts(l.price, l.qty - 1, l.discount, l.vat_rate, doc_type_row(d.doc_type).prices_incl_vat, n, v, tot);
+      update mm_doc_line set qty = qty - 1, net = n, vat = v, total = tot where id = l.id;
+    end if;
+    recalc(l.doc_id);
+  end;
+
+  function pin_of(p_serial_id number, p_user varchar2, p_reason varchar2) return varchar2 is
+    e raw(64);
+  begin
+    select pin_enc into e from mm_serial where id = p_serial_id;
+    insert into mm_pin_log (serial_id, username, reason) values (p_serial_id, p_user, p_reason);
+    return mm_pin.dec(e);
+  exception
+    when no_data_found then fail(41, 'Δεν υπάρχει κάρτα ' || p_serial_id);
+  end;
+
+  -- the PIN for a user who may see it; every time in MM_PIN_LOG. The user: the name given, or the
+  -- CLIENT_IDENTIFIER of the session (the login of step 7a sets it)
+  function reveal_pin(p_serial_id number, p_user varchar2 default null) return varchar2 is
+    u varchar2(60) := upper(nvl(p_user, sys_context('USERENV', 'CLIENT_IDENTIFIER')));
+    n number;
+  begin
+    select count(*) into n from mm_pin_user where username = u;
+    if u is null or n = 0 then
+      fail(43, 'Δεν έχεις δικαίωμα να δεις το PIN');
+    end if;
+    return pin_of(p_serial_id, u, 'REVEAL');
+  end;
+
+  -- the PIN on the receipt: only of a card sold today, by a posted document
+  function receipt_pin(p_serial_id number) return varchar2 is
+    n number;
+  begin
+    select count(*) into n from mm_serial s join mm_doc d on d.id = s.out_doc_id
+    where s.id = p_serial_id and s.status = 'S' and d.status = 'P' and s.sold_at >= trunc(sysdate);
+    if n = 0 then
+      fail(44, 'Το PIN τυπώνεται μόνο για κάρτα που πουλήθηκε σήμερα');
+    end if;
+    return pin_of(p_serial_id, nvl(upper(sys_context('USERENV', 'CLIENT_IDENTIFIER')), 'RECEIPT'), 'RECEIPT');
+  end;
+
+  -- ---------------------------------------------------------------------------------------------
   function open_count(p_count_id number) return mm_count%rowtype is
     c mm_count%rowtype;
   begin
@@ -476,6 +719,9 @@ create or replace package body mm_core as
   begin
     if it is null then
       fail(23, 'Δεν βρέθηκε είδος με κωδικό ' || p_code);
+    end if;
+    if tracked(it) then
+      fail(31, 'Τα είδη με serials δεν μετριούνται στην απογραφή: το απόθεμά τους είναι οι κάρτες τους');
     end if;
     if p_mode not in ('ADD', 'SET') or p_qty is null or p_qty < 0 then
       fail(24, 'Λάθος ποσότητα ή τρόπος (ADD/SET)');
