@@ -194,3 +194,36 @@ def test_one_open_z_for_each_register(cur):
     cur.execute("update mm_z set status = 'C', closed_at = sysdate + 1/24 "
                 'where register_id = :r and z_no = 900001', r=reg)
     cur.execute(ins, r=reg, n=900002)  # now the next one can open
+
+
+# -- MM_ITEM.STOCK: lock-free reservations ------------------------------------------------------
+
+def test_stock_reservable_rules(cur):
+    assert one(cur, "select reservable_column from user_tab_cols "
+                    "where table_name = 'MM_ITEM' and column_name = 'STOCK'")[0] == 'YES'
+    it = item_id(cur)
+    rejects(cur, 'update mm_item set stock = stock - 1, price = price where id = :i', 'ORA-55735', i=it)
+    rejects(cur, 'update mm_item set stock = 5 where id = :i', 'ORA-55746', i=it)
+    rejects(cur, "update mm_item set stock = stock - 1 where code = 'ART01'", 'ORA-55732')
+    cur.execute('update mm_item set stock = stock - 1 where id = :i', i=it)
+
+
+def test_two_tills_do_not_wait(conn):
+    """Two sessions take 1 of the same item; the second does not wait for the first to commit."""
+    user, rest = DSN.split('/', 1)
+    pw, where = rest.rsplit('@', 1)
+    other = oracledb.connect(user=user, password=pw, dsn=where)
+    other.call_timeout = 3000  # a row lock would wait here until the timeout
+    a, b = conn.cursor(), other.cursor()
+    it = item_id(a, 'POT01')
+    before = one(a, 'select stock from mm_item where id = :i', i=it)[0]
+    try:
+        a.execute('update mm_item set stock = stock - 1 where id = :i', i=it)
+        b.execute('update mm_item set stock = stock - 1 where id = :i', i=it)
+        other.commit()
+        conn.commit()
+        assert one(a, 'select stock from mm_item where id = :i', i=it)[0] == before - 2
+    finally:
+        a.execute('update mm_item set stock = stock + 2 where id = :i', i=it)
+        conn.commit()
+        other.close()

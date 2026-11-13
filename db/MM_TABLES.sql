@@ -31,7 +31,12 @@ create table if not exists mm_item (
   price       number(12,2)  not null constraint mm_item_price_ck check (price >= 0),  -- retail, with VAT
   cost        number(12,4)  default 0 not null constraint mm_item_cost_ck check (cost >= 0), -- last purchase, net
   min_stock   number(12,3)  default 0 not null constraint mm_item_min_ck check (min_stock >= 0),
-  stock       number(12,3)  default 0 not null,                -- the sum of MM_STOCK_MOVE (MM_CORE)
+  -- the sum of MM_STOCK_MOVE (MM_CORE). RESERVABLE (lock-free reservations, 23ai): two tills
+  -- that sell the same item at the same time do not wait for each other; the change is applied at
+  -- COMMIT. Only "update mm_item set stock = stock +/- :q where id = :id" (the primary key),
+  -- without other columns in the same update. No check (stock >= 0): a shop sells what is on the
+  -- shelf even if the goods-in note is not yet typed.
+  stock       number(12,3)  reservable default 0 not null,
   active      varchar2(1)   default 'Y' not null constraint mm_item_active_ck check (active in ('Y', 'N'))
 );
 create index if not exists mm_item_category_ix on mm_item (category_id);

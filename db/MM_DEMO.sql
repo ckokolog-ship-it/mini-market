@@ -75,8 +75,15 @@ from mm_item i
 where i.min_stock > 0
   and not exists (select 1 from mm_stock_move m where m.item_id = i.id);
 
-update mm_item i
-set i.stock = (select nvl(sum(m.qty), 0) from mm_stock_move m where m.item_id = i.id)
-where i.stock <> (select nvl(sum(m.qty), 0) from mm_stock_move m where m.item_id = i.id);
+-- MM_ITEM.STOCK is reservable: only "stock = stock + n", one item at a time, by its id
+begin
+  for r in (select i.id, nvl(sum(m.qty), 0) - i.stock d
+            from mm_item i left join mm_stock_move m on m.item_id = i.id
+            group by i.id, i.stock
+            having nvl(sum(m.qty), 0) <> i.stock) loop
+    update mm_item set stock = stock + r.d where id = r.id;
+  end loop;
+end;
+/
 
 commit;
