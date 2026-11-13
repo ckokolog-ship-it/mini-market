@@ -2,7 +2,7 @@
 <Module version="141200000" xmlns="http://xmlns.oracle.com/Forms">
   <FormModule Name="MM_CUSTOMERS" Title="Pelates" ConsoleWindow="WIN" MenuModule="DEFAULT&amp;SMARTBAR">
     <Coordinate CharacterCellWidth="7" CharacterCellHeight="14" CoordinateSystem="Real" RealUnit="Pixel" DefaultFontScaling="true"/>
-    <Block Name="PARTNER" QueryDataSourceName="MM_CUSTOMER" DMLDataTargetName="MM_CUSTOMER" OrderByClause="name" RecordsDisplayCount="15">
+    <Block Name="PARTNER" QueryDataSourceName="MM_CUSTOMER" DMLDataName="MM_CUSTOMER" OrderByClause="name" RecordsDisplayCount="15">
       <Item Name="ID" ItemType="Text Item" Visible="false" DataType="Number" MaximumLength="14" ColumnName="ID" InsertAllowed="false" UpdateAllowed="false"/>
       <Item Name="NAME" ItemType="Text Item" CanvasName="CNV" XPosition="10" YPosition="80" Width="230" Height="22" Prompt="Eponymia" PromptAttachmentEdge="Top" PromptAttachmentOffset="2" DataType="Char" MaximumLength="100" ColumnName="NAME" Required="true"/>
       <Item Name="AFM" ItemType="Text Item" CanvasName="CNV" XPosition="244" YPosition="80" Width="90" Height="22" Prompt="AFM" PromptAttachmentEdge="Top" PromptAttachmentOffset="2" DataType="Char" MaximumLength="9" ColumnName="AFM"/>
@@ -24,12 +24,12 @@
     <Canvas Name="CNV" WindowName="WIN" Width="1058" Height="450"/>
     <RecordGroup Name="RG_FIND" RecordGroupType="Query" RecordGroupQuery="select id, name, afm, phone from mm_customer order by name">
       <RecordGroupColumn Name="ID" ColumnDataType="Number" MaximumLength="40"/>
-      <RecordGroupColumn Name="NAME" ColumnDataType="Char" MaximumLength="400"/>
-      <RecordGroupColumn Name="AFM" ColumnDataType="Char" MaximumLength="400"/>
-      <RecordGroupColumn Name="PHONE" ColumnDataType="Char" MaximumLength="400"/>
+      <RecordGroupColumn Name="NAME" MaximumLength="400"/>
+      <RecordGroupColumn Name="AFM" MaximumLength="400"/>
+      <RecordGroupColumn Name="PHONE" MaximumLength="400"/>
     </RecordGroup>
     <RecordGroup Name="RG_DOY" RecordGroupType="Query" RecordGroupQuery="select doy from (select doy from mm_customer union select doy from mm_supplier) where doy is not null order by 1">
-      <RecordGroupColumn Name="DOY" ColumnDataType="Char" MaximumLength="400"/>
+      <RecordGroupColumn Name="DOY" MaximumLength="400"/>
     </RecordGroup>
     <LOV Name="LOV_FIND" RecordGroupName="RG_FIND" Title="Pelates" Width="490" Height="300" AutoColumnWidth="false" AutoPosition="true" AutoRefresh="true" FilterBeforeDisplay="false">
       <LOVColumnMapping Name="ID" Title="Kod." DisplayWidth="0" ReturnItem="CTL.FIND_ID"/>

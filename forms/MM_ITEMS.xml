@@ -2,7 +2,7 @@
 <Module version="141200000" xmlns="http://xmlns.oracle.com/Forms">
   <FormModule Name="MM_ITEMS" Title="Eidi" ConsoleWindow="WIN" MenuModule="DEFAULT&amp;SMARTBAR">
     <Coordinate CharacterCellWidth="7" CharacterCellHeight="14" CoordinateSystem="Real" RealUnit="Pixel" DefaultFontScaling="true"/>
-    <Block Name="ITEM" QueryDataSourceName="MM_ITEM" DMLDataTargetName="MM_ITEM" OrderByClause="code" RecordsDisplayCount="15">
+    <Block Name="ITEM" QueryDataSourceName="MM_ITEM" DMLDataName="MM_ITEM" OrderByClause="code" RecordsDisplayCount="15">
       <Item Name="ID" ItemType="Text Item" Visible="false" DataType="Number" MaximumLength="14" ColumnName="ID" InsertAllowed="false" UpdateAllowed="false"/>
       <Item Name="CODE" ItemType="Text Item" CanvasName="CNV" XPosition="10" YPosition="80" Width="90" Height="22" Prompt="Kodikos" PromptAttachmentEdge="Top" PromptAttachmentOffset="2" DataType="Char" MaximumLength="20" ColumnName="CODE" Required="true" CaseRestriction="Upper"/>
       <Item Name="BARCODE" ItemType="Text Item" CanvasName="CNV" XPosition="104" YPosition="80" Width="110" Height="22" Prompt="Barcode" PromptAttachmentEdge="Top" PromptAttachmentOffset="2" DataType="Char" MaximumLength="14" ColumnName="BARCODE"/>
@@ -30,22 +30,22 @@
     <Canvas Name="CNV" WindowName="WIN" Width="1108" Height="450"/>
     <RecordGroup Name="RG_FIND" RecordGroupType="Query" RecordGroupQuery="select id, code, name, barcode from mm_item order by code">
       <RecordGroupColumn Name="ID" ColumnDataType="Number" MaximumLength="40"/>
-      <RecordGroupColumn Name="CODE" ColumnDataType="Char" MaximumLength="400"/>
-      <RecordGroupColumn Name="NAME" ColumnDataType="Char" MaximumLength="400"/>
-      <RecordGroupColumn Name="BARCODE" ColumnDataType="Char" MaximumLength="400"/>
+      <RecordGroupColumn Name="CODE" MaximumLength="400"/>
+      <RecordGroupColumn Name="NAME" MaximumLength="400"/>
+      <RecordGroupColumn Name="BARCODE" MaximumLength="400"/>
     </RecordGroup>
     <RecordGroup Name="RG_CAT" RecordGroupType="Query" RecordGroupQuery="select id, name from mm_category order by name">
       <RecordGroupColumn Name="ID" ColumnDataType="Number" MaximumLength="40"/>
-      <RecordGroupColumn Name="NAME" ColumnDataType="Char" MaximumLength="400"/>
+      <RecordGroupColumn Name="NAME" MaximumLength="400"/>
     </RecordGroup>
     <RecordGroup Name="RG_VAT" RecordGroupType="Query" RecordGroupQuery="select code, rate, descr from mm_vat order by code">
-      <RecordGroupColumn Name="CODE" ColumnDataType="Char" MaximumLength="400"/>
+      <RecordGroupColumn Name="CODE" MaximumLength="400"/>
       <RecordGroupColumn Name="RATE" ColumnDataType="Number" MaximumLength="40"/>
-      <RecordGroupColumn Name="DESCR" ColumnDataType="Char" MaximumLength="400"/>
+      <RecordGroupColumn Name="DESCR" MaximumLength="400"/>
     </RecordGroup>
     <RecordGroup Name="RG_UNIT" RecordGroupType="Query" RecordGroupQuery="select 'PCS' code, mm_text.t('T10F856C7') descr, 0 o from dual union all select 'KG' code, mm_text.t('T364317ED') descr, 1 o from dual union all select 'L' code, mm_text.t('T6DD60741') descr, 2 o from dual order by 3">
-      <RecordGroupColumn Name="CODE" ColumnDataType="Char" MaximumLength="400"/>
-      <RecordGroupColumn Name="DESCR" ColumnDataType="Char" MaximumLength="400"/>
+      <RecordGroupColumn Name="CODE" MaximumLength="400"/>
+      <RecordGroupColumn Name="DESCR" MaximumLength="400"/>
       <RecordGroupColumn Name="O" ColumnDataType="Number" MaximumLength="40"/>
     </RecordGroup>
     <LOV Name="LOV_FIND" RecordGroupName="RG_FIND" Title="Eidi" Width="510" Height="300" AutoColumnWidth="false" AutoPosition="true" AutoRefresh="true" FilterBeforeDisplay="false">
