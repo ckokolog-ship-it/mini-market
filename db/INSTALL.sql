@@ -36,16 +36,17 @@ prompt == the tables
 @MM_TABLES.sql
 prompt == the VAT and the kinds of documents
 @MM_BASE.sql
-prompt == the package MM_CORE
+prompt == the package MM_CORE, and MM_TEXT (the Greek of the forms)
 whenever sqlerror continue
 @MM_CORE.sql
+@MM_TEXT.sql
 whenever sqlerror exit failure rollback
 declare
   n number;
 begin
-  select count(*) into n from user_errors where name = 'MM_CORE';
+  select count(*) into n from user_errors where name in ('MM_CORE', 'MM_TEXT');
   if n > 0 then
-    raise_application_error(-20002, 'MM_CORE: ' || n || ' errors (show errors package body mm_core)');
+    raise_application_error(-20002, 'MM_CORE/MM_TEXT: ' || n || ' errors (show errors package body mm_core)');
   end if;
 end;
 /
