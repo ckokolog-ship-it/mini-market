@@ -110,6 +110,20 @@ def test_xml_ascii_and_references(name):
     assert 'LOV_FIND' in lovs
 
 
+BUILTINS = ('NAME_IN', 'COPY', 'SHOW_LOV', 'GO_BLOCK', 'EXECUTE_QUERY', 'MESSAGE', 'TX')
+
+
+@pytest.mark.parametrize('name', list(BUILT))
+def test_no_forms_builtins_in_sql(name):
+    """frmcmp: "function 'NAME_IN' may not be used in SQL" (PL/SQL 231). The stubs of the database
+    are ordinary functions, so the compile in the database does not see it: a check of the text."""
+    import re
+    body = re.sub(r'--[^\n]*', '', BUILT[name][2]).upper()     # without the comments
+    for stmt in re.findall(r'\b(?:SELECT|INSERT|UPDATE|DELETE|MERGE)\b[^;]*;', body):
+        for b in BUILTINS:
+            assert not re.search(r'\b%s\s*\(' % b, stmt), '%s in SQL: %s' % (b, stmt[:120])
+
+
 def test_items_form_stock_is_not_a_column():
     items = {i.get('Name'): i for i in xml_of('MM_ITEMS').iter('{%s}Item' % NS['f'])}
     assert items['STOCK'].get('DatabaseItem') == 'false'           # reservable: never written
