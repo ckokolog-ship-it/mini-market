@@ -1,0 +1,1 @@
+-- MM_NODEMO.sql -- INSTALL.sql without "demo": nothing more (MM_DEMO.sql has the demo rows).
