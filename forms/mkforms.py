@@ -62,6 +62,7 @@ UNITS = (('PCS', 'Τεμάχιο'), ('KG', 'Κιλό'), ('L', 'Λίτρο'))
 #   db=False   not a column of the table;   hidden=True  not on the canvas
 #   num=True   a number;   len   the maximum length;   lov   its LOV;   display=True  read only
 #   check=True a check box Y/N;   init  the initial value;   req=True  required
+#   mask       the format mask of a number
 
 
 def C(name, prompt, width, **o):
@@ -82,10 +83,10 @@ FORMS = {
             C('CATEGORY_ID', '', 0, num=True, hidden=True, req=True),
             C('CAT_NAME', 'Κατηγορία', 150, len=60, db=False, req=True, lov='LOV_CAT'),
             C('VAT_CODE', 'ΦΠΑ', 40, len=1, req=True, upper=True, lov='LOV_VAT'),
-            C('VAT_RATE', '%', 40, num=True, db=False, display=True),
+            C('VAT_RATE', '%', 40, num=True, db=False, display=True, mask='90'),
             C('UNIT', 'Μονάδα', 60, len=3, req=True, upper=True, lov='LOV_UNIT', init='PCS'),
-            C('PRICE', 'Τιμή λιαν.', 70, num=True, req=True),
-            C('COST', 'Κόστος', 70, num=True, req=True, init='0'),
+            C('PRICE', 'Τιμή λιαν.', 70, num=True, req=True, mask='99G990D00'),
+            C('COST', 'Κόστος', 70, num=True, req=True, init='0', mask='99G990D00'),
             C('MIN_STOCK', 'Ελάχιστο', 64, num=True, req=True, init='0'),
             C('STOCK', 'Απόθεμα', 70, num=True, db=False, display=True),
             C('ACTIVE', 'Ενεργό', 50, check=True, init='Y'),
@@ -189,6 +190,8 @@ def build(name, f):
                      MaximumLength=c.get('len', 14 if c.get('num') else 30))
         if c.get('num') and not c.get('hidden'):
             a['Justification'] = 'Right'
+        if c.get('mask'):
+            a['FormatMask'] = c['mask']      # 0,45 not ,45; 4,60 not 4,6 (D and G: the NLS of the runtime)
         if c.get('db', True):
             a['ColumnName'] = c['name']
         else:

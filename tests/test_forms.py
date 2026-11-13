@@ -129,6 +129,7 @@ def test_items_form_stock_is_not_a_column():
     assert items['STOCK'].get('DatabaseItem') == 'false'           # reservable: never written
     assert items['CAT_NAME'].get('LovName') == 'LOV_CAT' and items['CAT_NAME'].get('ValidateFromList') == 'true'
     assert items['ACTIVE'].get('ItemType') == 'Check Box' and items['ACTIVE'].get('InitializeValue') == 'Y'
+    assert items['PRICE'].get('FormatMask') == '99G990D00'        # 0,45 and 4,60
 
 
 # -- in the database ---------------------------------------------------------------------------
