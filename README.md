@@ -20,7 +20,8 @@ Oracle Forms ──────────────────────�
 |---|------|---|
 | 1 | Βάση: πίνακες, constraints, δεδομένα επίδειξης | ✔ |
 | 2 | Πακέτο `MM_CORE`: παραστατικά, απόθεμα, ΦΠΑ, αρίθμηση, ακυρώσεις, πιστωτικά, Ζ, απογραφή | ✔ |
-| 3 | Φόρμες: είδη, πελάτες, προμηθευτές | |
+| 3 | Φόρμες: είδη, πελάτες, προμηθευτές, με LOV | ✔ |
+| 3α | Κάρτες κινητής: serial numbers, φόρτωση και πώληση | |
 | 4 | Παραστατικό (master-detail) | |
 | 5 | Reports: καρτέλες, πωλήσεις, ΦΠΑ, ελάχιστο απόθεμα | |
 | 6 | Ταμείο και Ζ στις φόρμες | |
@@ -31,4 +32,5 @@ Oracle Forms ──────────────────────�
 ## Φάκελοι
 
 - `db/`: η βάση (`CREATE_USER.sql`, `INSTALL.sql`, `UNINSTALL.sql`) και το `MM_CORE.sql`. Οδηγίες στο [docs/ODIGIES_VASI.md](docs/ODIGIES_VASI.md).
+- `forms/`: οι φόρμες (`mkforms.py` → `MM_*.xml`, `build_forms.ps1`). Οδηγίες στο [docs/ODIGIES_FORMS.md](docs/ODIGIES_FORMS.md).
 - `tests/`: tests σε Python (`pytest`, `oracledb`) πάνω σε ζωντανή βάση.
