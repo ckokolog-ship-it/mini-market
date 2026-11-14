@@ -1,5 +1,5 @@
 -- MM_UI.pls -- the package UI of the forms of the mini market (MM_ITEMS, MM_CUSTOMERS,
--- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, MM_INVOICES, MM_PAYMENTS, MM_LEDGER, MM_REPORTS,
+-- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, MM_INVOICES, MM_PAYMENTS, MM_LEDGER, MM_REPORTS, MM_POS,
 -- the menu MM_MAIN):
 -- mkforms.py puts it in each form. The triggers only call it:
 --   WHEN-NEW-FORM-INSTANCE  ui.init
@@ -34,6 +34,8 @@ PACKAGE BODY ui IS
   g_lfrom VARCHAR2(10);
   g_lto VARCHAR2(10);
 
+  PROCEDURE pos_refresh;            -- (the till: below)
+
   FUNCTION num(p_item VARCHAR2) RETURN NUMBER IS
   BEGIN
     RETURN to_number(name_in(p_item));
@@ -57,6 +59,9 @@ PACKAGE BODY ui IS
       go_block(c_block);
       set_block_property(c_block, DEFAULT_WHERE, c_where);
       execute_query;
+    END IF;
+    IF c_block = 'PL' THEN               -- the till: its Z and an open receipt
+      pos_refresh;
     END IF;
   END;
 
@@ -155,8 +160,55 @@ PACKAGE BODY ui IS
     RETURN '&P_FROM=' || to_char(a, 'DD/MM/YYYY') || '&P_TO=' || to_char(b, 'DD/MM/YYYY');
   END;
 
+  -- the till (MM_POS): the draft receipt of the register (made at the first scan), its lines and
+  -- total on the screen, the state of its Z
+  FUNCTION pos_doc(p_new BOOLEAN) RETURN NUMBER IS
+    r NUMBER := register_id;
+    d NUMBER;
+  BEGIN
+    SELECT MAX(id) INTO d FROM mm_doc WHERE register_id = r AND doc_type = 'ALP' AND status = 'D';
+    IF d IS NULL AND p_new THEN
+      d := mm_core.new_doc('ALP', NULL, NULL, r, 'CASH');
+    END IF;
+    RETURN d;
+  END;
+
+  PROCEDURE pos_show(p_doc NUMBER) IS
+    t NUMBER;
+  BEGIN
+    go_block('PL');
+    set_block_property('PL', DEFAULT_WHERE, 'doc_id = ' || to_char(nvl(p_doc, -1)));
+    execute_query;
+    IF p_doc IS NOT NULL THEN
+      SELECT total INTO t FROM mm_doc WHERE id = p_doc;
+    END IF;
+    copy(to_char(t), 'CTL.T_TOTAL');
+  END;
+
+  PROCEDURE z_show IS
+    r NUMBER := register_id;
+    z NUMBER := mm_core.open_z_of(r);
+    n NUMBER;
+    a DATE;
+  BEGIN
+    IF z IS NULL THEN
+      copy('Κλειστό: «Άνοιγμα Ζ» για να ξεκινήσεις', 'CTL.Z_TEXT');
+    ELSE
+      SELECT z_no, opened_at INTO n, a FROM mm_z WHERE id = z;
+      copy('Ζ ' || to_char(n) || ', ανοιχτό από ' || to_char(a, 'DD/MM HH24:MI'), 'CTL.Z_TEXT');
+    END IF;
+  END;
+
+  PROCEDURE pos_refresh IS
+  BEGIN
+    z_show;
+    pos_show(pos_doc(FALSE));
+  END;
+
   PROCEDURE action(p_item VARCHAR2) IS
-    s_ VARCHAR2(30);
+    s_ VARCHAR2(40);
+    d_ NUMBER;
+    tr_n NUMBER;
     v NUMBER;
     n NUMBER;
     s NUMBER;
@@ -425,6 +477,91 @@ PACKAGE BODY ui IS
         s_ := 'MM_LEDGER_P';
       END IF;
       open_report(s_, '&P_KIND=' || g_lwhat || '&P_ID=' || to_char(g_lid) || '&P_FROM=' || g_lfrom || '&P_TO=' || g_lto);
+    -- the till: a scan (Enter in CTL.SCAN, or "Put"): an item by barcode or code (QTY of it; a card of
+    -- mobile: one, the oldest), or a card by its serial
+    ELSIF p_item IN ('CTL.SCAN', 'CTL.ADDSCAN') THEN
+      s_ := name_in('CTL.SCAN');
+      IF s_ IS NULL THEN
+        RETURN;
+      END IF;
+      IF mm_core.open_z_of(register_id) IS NULL THEN
+        fail('Το ταμείο δεν έχει ανοιχτό Ζ: «Άνοιγμα Ζ»');
+      END IF;
+      v := mm_core.find_item(s_);
+      IF v IS NULL THEN
+        SELECT COUNT(*) INTO n FROM mm_serial WHERE serial = s_ AND status = 'A';
+        IF n = 0 THEN
+          fail('Δεν βρέθηκε είδος ή κάρτα: ' || s_);
+        END IF;
+        d_ := pos_doc(TRUE);
+        n := mm_core.sell_serial(d_, NULL, s_);
+      ELSE
+        SELECT serial_tracked INTO tr FROM mm_item WHERE id = v;
+        d_ := pos_doc(TRUE);
+        IF tr = 'Y' THEN
+          n := mm_core.sell_serial(d_, v);
+        ELSE
+          n := mm_core.add_line(d_, v, nvl(num('CTL.QTY'), 1));
+        END IF;
+      END IF;
+      forms_ddl('COMMIT');
+      copy('', 'CTL.SCAN');
+      copy('1', 'CTL.QTY');
+      copy('', 'CTL.CHANGE');
+      pos_show(d_);
+      go_item('CTL.SCAN');
+    ELSIF p_item IN ('CTL.PAYCASH', 'CTL.PAYCARD') THEN
+      d_ := pos_doc(FALSE);
+      IF d_ IS NULL THEN
+        fail('Δεν υπάρχει απόδειξη: σάρωσε πρώτα τα είδη');
+      END IF;
+      IF p_item = 'CTL.PAYCASH' THEN
+        mm_core.set_payment(d_, 'CASH');
+      ELSE
+        mm_core.set_payment(d_, 'CARD');
+      END IF;
+      n := mm_core.post_doc(d_);
+      SELECT total INTO v FROM mm_doc WHERE id = d_;
+      IF p_item = 'CTL.PAYCASH' AND num('CTL.GIVEN') IS NOT NULL THEN
+        IF num('CTL.GIVEN') < v THEN
+          forms_ddl('ROLLBACK');
+          fail('Δόθηκαν ' || to_char(num('CTL.GIVEN')) || ', η απόδειξη είναι ' || to_char(v));
+        END IF;
+        copy(to_char(num('CTL.GIVEN') - v), 'CTL.CHANGE');
+      ELSE
+        copy('', 'CTL.CHANGE');
+      END IF;
+      forms_ddl('COMMIT');
+      copy('ΑΛΠ ' || to_char(n) || ': ' || to_char(v, 'FM999G990D00'), 'CTL.LAST_TEXT');
+      copy('', 'CTL.GIVEN');
+      pos_show(NULL);
+      go_item('CTL.SCAN');
+      message('Απόδειξη ' || to_char(n) || ' καταχωρήθηκε');
+    ELSIF p_item = 'CTL.POSDEL' THEN
+      d_ := pos_doc(FALSE);
+      mm_core.delete_line(num('PL.ID'));
+      forms_ddl('COMMIT');
+      pos_show(d_);
+    ELSIF p_item = 'CTL.VOIDREC' THEN
+      d_ := pos_doc(FALSE);
+      IF d_ IS NOT NULL THEN
+        mm_core.delete_doc(d_);
+        forms_ddl('COMMIT');
+      END IF;
+      pos_show(NULL);
+      message('Η απόδειξη ακυρώθηκε');
+    ELSIF p_item = 'CTL.OPENZ' THEN
+      v := mm_core.open_z(register_id, nvl(num('CTL.Z_CASH'), 0));
+      forms_ddl('COMMIT');
+      copy('', 'CTL.Z_CASH');
+      pos_refresh;
+    ELSIF p_item = 'CTL.CLOSEZ' THEN
+      v := mm_core.close_z(register_id);
+      forms_ddl('COMMIT');
+      SELECT z_no, total, cash, card INTO n, s, d_, tr_n FROM mm_z WHERE id = v;
+      z_show;
+      message('Ζ ' || to_char(n) || ' έκλεισε: σύνολο ' || to_char(s, 'FM999G990D00') || ', μετρητά '
+              || to_char(d_, 'FM999G990D00') || ', κάρτα ' || to_char(tr_n, 'FM999G990D00'));
     -- the reports of MM_REPORTS
     ELSIF p_item = 'CTL.RPT_SALES' THEN
       open_report('MM_SALES', period_params);
@@ -587,6 +724,10 @@ PACKAGE BODY ui IS
       id_ := num('DL.ITEM_ID');
       SELECT code || ' ' || name INTO n FROM mm_item WHERE id = id_;
       copy(n, 'DL.ITEM_TEXT');
+    ELSIF p_block = 'PL' THEN
+      id_ := num('PL.ITEM_ID');
+      SELECT code || ' ' || name INTO n FROM mm_item WHERE id = id_;
+      copy(n, 'PL.ITEM_TEXT');
     ELSIF p_block = 'RL' THEN
       id_ := num('RL.ITEM_ID');
       SELECT code || ' ' || name INTO n FROM mm_item WHERE id = id_;

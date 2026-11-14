@@ -70,6 +70,16 @@ foreach ($r in $Reports) {
     "batch=$(if ($Interactive) { 'no' } else { 'yes' })", "source=$xml", 'stype=xmlfile', "dest=$rdf", 'dtype=rdffile', 'overwrite=yes',
     'compile_all=yes', "userid=$UserId", "logfile=$log")
   if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host "   $_" } }
+  if (-not $Interactive -and -not (Test-Path $rdf)) {
+    # "Conversion ... canceled" with batch=yes, and the same XML fine with batch=no (MM_SALES, the
+    # first time): once more so
+    Write-Host "== ${name}: once more with batch=no"
+    Remove-Item $log -ErrorAction SilentlyContinue
+    $p = Start-Process $conv -Wait -PassThru -NoNewWindow -WorkingDirectory $Out -ArgumentList @(
+      'batch=no', "source=$xml", 'stype=xmlfile', "dest=$rdf", 'dtype=rdffile', 'overwrite=yes',
+      'compile_all=yes', "userid=$UserId", "logfile=$log")
+    if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host "   $_" } }
+  }
   if ($p.ExitCode -ne 0 -or -not (Test-Path $rdf)) {
     throw "${name}: rwconverter $($p.ExitCode), no .rdf (the messages above, $log; the reason: -Interactive)"
   }

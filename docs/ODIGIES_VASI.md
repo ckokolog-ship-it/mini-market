@@ -77,7 +77,7 @@ update mm_item set stock = stock - :qty where id = :id;
 |---|---|
 | Έλεγχοι | `afm_ok`, `ean_ok`, `find_item` (barcode ή κωδικός) |
 | Ποσά | `amounts` (καθαρό, ΦΠΑ, σύνολο, με ή χωρίς ΦΠΑ στην τιμή), `default_price` |
-| Παραστατικά | `new_doc`, `add_line`, `update_line`, `delete_line`, `delete_doc` (μόνο πρόχειρα), `post_doc`, `cancel_doc`, `credit_note` |
+| Παραστατικά | `new_doc`, `add_line`, `update_line`, `delete_line`, `delete_doc` (μόνο πρόχειρα), `set_payment` (πρόχειρο: μετρητά, κάρτα, πίστωση), `post_doc`, `cancel_doc`, `credit_note` |
 | Απόθεμα | `adjust_stock` (με αιτιολογία) |
 | Ταμείο | `open_z`, `cash_in_out`, `open_z_of`, `close_z` |
 | Απογραφή | `start_count`, `scan`, `post_count`, `cancel_count` |

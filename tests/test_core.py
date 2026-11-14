@@ -423,3 +423,20 @@ def test_max_per_sale(env):
     finally:
         db.cur.execute('update mm_item set max_per_sale = null where id = :i', i=ids['b'])
         db.commit()
+
+
+def test_set_payment(env):
+    db, ids = env
+    d = db.fn('new_doc', int, 'TPY', p_customer_id=ids['customer'])
+    db.proc('set_payment', d, 'CREDIT')
+    assert db.one('select payment from mm_doc where id = :d', d=d)[0] == 'CREDIT'
+    db.conn.rollback()
+    close_open_z(db, ids['reg'])
+    r = db.fn('new_doc', int, 'ALP', p_register_id=ids['reg'])
+    db.commit()
+    db.fails(111, 'set_payment', r, 'CREDIT')                         # retail: cash or card
+    db.fails(111, 'set_payment', r, 'GOLD')
+    db.proc('set_payment', r, 'CARD')
+    assert db.one('select payment from mm_doc where id = :d', d=r)[0] == 'CARD'
+    db.proc('delete_doc', r)
+    db.commit()

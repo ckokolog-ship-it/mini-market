@@ -70,6 +70,7 @@ begin fstub.props('LOV ' || upper(l) || '.' || c || '#' || p) := v; end;""",
     """create or replace procedure set_block_property(b varchar2, p number, v varchar2) is
 begin fstub.props('BLOCK ' || upper(b) || '#' || p) := v; end;""",
     "create or replace procedure go_block(b varchar2) is begin fstub.block := upper(b); end;",
+    "create or replace procedure go_item(i varchar2) is begin fstub.props('GO_ITEM') := upper(i); end;",
     """create or replace procedure execute_query is
   w varchar2(4000);
 begin
@@ -97,7 +98,7 @@ begin
 end;""",
 ]
 DROP = ['package ui', 'package web', 'function lov_name', 'function get_item_property', 'function status', 'function query_status', 'procedure set_record_property',
-        'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
+        'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block', 'procedure go_item',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
         'procedure set_item_property', 'procedure set_window_property', 'function default_where', 'function format_mask',
         'function prompt_text', 'function label', 'function title', 'procedure message', 'procedure copy',
@@ -130,7 +131,7 @@ def test_xml_ascii_and_references(name):
         for m in lv.findall('f:LOVColumnMapping', NS):
             if m.get('ReturnItem'):
                 assert m.get('ReturnItem') in items, m.get('ReturnItem')
-    assert 'LOV_FIND' in lovs or name in ('MM_MAIN', 'MM_LEDGER', 'MM_REPORTS')   # (nothing to find)
+    assert 'LOV_FIND' in lovs or name in ('MM_MAIN', 'MM_LEDGER', 'MM_REPORTS', 'MM_POS')   # (nothing to find)
 
 
 BUILTINS = ('NAME_IN', 'COPY', 'SHOW_LOV', 'GO_BLOCK', 'EXECUTE_QUERY', 'MESSAGE', 'TX')
@@ -763,3 +764,65 @@ def test_reports_form(cur):
     run(cur, "ui.press('CTL.GO_MM_LEDGER');")
     assert prop(cur, 'CALL_FORM') == 'MM_LEDGER'
     cur.connection.rollback()
+
+
+def test_pos_form_shape():
+    """Enter in the scan: KEY-NEXT-ITEM on that item only"""
+    root = xml_of('MM_POS')
+    trig = {i.get('Name'): [t.get('Name') for t in i.findall('f:Trigger', NS)]
+            for b in root.iter('{%s}Block' % NS['f']) if b.get('Name') == 'CTL' for i in b.findall('f:Item', NS)}
+    assert trig['SCAN'] == ['KEY-NEXT-ITEM']
+    assert [k for k, v in trig.items() if v] == ['SCAN']
+
+
+@needs_db
+def test_pos_form(cur, env):
+    db, ids = env
+    compile_ui(cur, 'MM_POS')
+    run(cur, 'ui.init;')
+    assert item(cur, 'CTL.REG_CODE') == 'T1' and item(cur, 'CTL.QTY') == '1'
+    test_core.close_open_z(db, ids['reg'])
+    cur.execute("delete from mm_doc where register_id = :r and status = 'D'", r=ids['reg'])
+    cur.connection.commit()
+    reg = dict(CTL__REG_CODE='TST')
+    a, b = 'TST%sA' % ids['tag'], 'TST%sB' % ids['tag']
+
+    def draft():
+        return db.one("select max(id) from mm_doc where register_id = :r and status = 'D'", r=ids['reg'])[0]
+
+    def num(name):
+        return float(item(cur, name).replace(',', '.'))
+    assert 'Ζ' in fails(cur, "ui.press('CTL.SCAN');", CTL__SCAN=a, **reg)        # no Z
+    run(cur, "ui.press('CTL.OPENZ');", CTL__Z_CASH='50', **reg)
+    assert item(cur, 'CTL.Z_TEXT').startswith('Ζ ')
+    # a scan (Enter): a draft receipt with the line; the scan empty again, the cursor there
+    run(cur, "ui.press('CTL.SCAN');", CTL__SCAN=a, CTL__QTY='2', **reg)
+    d = draft()
+    assert db.one('select count(*), sum(qty) from mm_doc_line where doc_id = :d', d=d) == (1, 2)
+    assert num('CTL.T_TOTAL') == float(db.one('select total from mm_doc where id = :d', d=d)[0])
+    assert item(cur, 'CTL.SCAN') is None and item(cur, 'CTL.QTY') == '1' and prop(cur, 'GO_ITEM') == 'CTL.SCAN'
+    assert 'Δεν βρέθηκε' in fails(cur, "ui.press('CTL.ADDSCAN');", CTL__SCAN='NOPE-123', **reg)
+    run(cur, "ui.press('CTL.ADDSCAN');", CTL__SCAN=b, **reg)
+    assert draft() == d and db.one('select count(*) from mm_doc_line where doc_id = :d', d=d)[0] == 2
+    lb = db.one('select id from mm_doc_line where doc_id = :d and item_id = :i', d=d, i=ids['b'])[0]
+    run(cur, "ui.press('CTL.POSDEL');", PL__ID=str(lb), **reg)
+    assert db.one('select count(*) from mm_doc_line where doc_id = :d', d=d)[0] == 1
+    # cash: given less than the receipt, a message and still a draft; then the change
+    assert 'Δόθηκαν' in fails(cur, "ui.press('CTL.PAYCASH');", CTL__GIVEN='1', **reg)
+    assert db.one('select status from mm_doc where id = :d', d=d)[0] == 'D'
+    run(cur, "ui.press('CTL.PAYCASH');", CTL__GIVEN='100', **reg)
+    total = float(db.one('select total from mm_doc where id = :d', d=d)[0])
+    assert db.one('select status, payment from mm_doc where id = :d', d=d) == ('P', 'CASH')
+    assert abs(num('CTL.CHANGE') - (100 - total)) < 0.005 and item(cur, 'CTL.LAST_TEXT').startswith('ΑΛΠ ')
+    # card; a receipt dropped
+    run(cur, "ui.press('CTL.SCAN');", CTL__SCAN=a, **reg)
+    d2 = draft()
+    run(cur, "ui.press('CTL.PAYCARD');", **reg)
+    assert db.one('select status, payment from mm_doc where id = :d', d=d2) == ('P', 'CARD')
+    run(cur, "ui.press('CTL.SCAN');", CTL__SCAN=a, **reg)
+    run(cur, "ui.press('CTL.VOIDREC');", **reg)
+    assert draft() is None
+    # the Z: closed, with its money
+    run(cur, "ui.press('CTL.CLOSEZ');", **reg)
+    assert 'έκλεισε' in msgs(cur)
+    assert db.one("select count(*) from mm_z where register_id = :r and status = 'O'", r=ids['reg'])[0] == 0
