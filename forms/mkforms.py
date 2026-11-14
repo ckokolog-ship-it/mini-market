@@ -352,6 +352,61 @@ FORMS['MM_MAIN'] = dict(
         [('EXIT', 'button', 135, 20 + (len(MENU_FORMS) + 1) // 2 * 44 + 16, 220, 'Έξοδος', {})])
 
 
+# the bar of pull-down menus of all the forms (the menu module MM_MENU, in place of DEFAULT&SMARTBAR):
+# (menu, label, [(item, label, PL/SQL)]); a form opens in the place of the one on the screen (NEW_FORM:
+# unsaved changes are asked first). Its Greek: ui.init of each form (SET_MENU_ITEM_PROPERTY).
+MENU_MODULE = 'MM_MENU'
+MENU_BAR = [
+    ('FILE', 'Αρχείο', [('MAIN', 'Αρχικό μενού', "new_form('MM_MAIN');"),
+                        ('EXIT', 'Έξοδος', "do_key('EXIT_FORM');")]),
+    ('REC', 'Εγγραφές', [('SAVE', 'Αποθήκευση (F10)', "do_key('COMMIT_FORM');"),
+                         ('ENTERQ', 'Αναζήτηση (F7)', "do_key('ENTER_QUERY');"),
+                         ('EXECQ', 'Εκτέλεση αναζήτησης (F8)', "do_key('EXECUTE_QUERY');"),
+                         ('NEWREC', 'Νέα εγγραφή', "do_key('CREATE_RECORD');"),
+                         ('DELREC', 'Διαγραφή εγγραφής', "do_key('DELETE_RECORD');")]),
+    ('STOCK', 'Αποθήκη', [('ITEMS', 'Είδη', "new_form('MM_ITEMS');"),
+                          ('VARIANTS', 'Ρούχα και παπούτσια', "new_form('MM_VARIANTS');"),
+                          ('KITS', 'Καλάθια και σετ', "new_form('MM_KITS');"),
+                          ('CARDS', 'Κάρτες κινητής', "new_form('MM_CARDS');")]),
+    ('SALES', 'Πωλήσεις', [('CUSTOMERS', 'Πελάτες', "new_form('MM_CUSTOMERS');"),
+                           ('RESERV', 'Κρατήσεις', "new_form('MM_RESERVATIONS');"),
+                           ('PROMOS', 'Προσφορές', "new_form('MM_PROMOS');")]),
+    ('BUY', 'Αγορές', [('SUPPLIERS', 'Προμηθευτές', "new_form('MM_SUPPLIERS');")]),
+]
+
+
+def menu_texts():
+    """the Greek labels of the bar, for ui.init of every form"""
+    out = []
+    for m, label, items in MENU_BAR:
+        out.append("SET_MENU_ITEM_PROPERTY('MAIN_MENU.%s', LABEL, tx('%s'));" % (m, WORDS.key(label)))
+        for i, il, _ in items:
+            out.append("SET_MENU_ITEM_PROPERTY('%s_MENU.%s', LABEL, tx('%s'));" % (m, i, WORDS.key(il)))
+    return out
+
+
+def menu_xml():
+    """the menu module MM_MENU (XML2Forms makes MM_MENU.mmb, frmcmp module_type=menu MM_MENU.mmx)"""
+    out = ['<?xml version="1.0" encoding="UTF-8"?>',
+           '<Module version="141200000" xmlns="http://xmlns.oracle.com/Forms">',
+           '  <MenuModule Name="%s" MainMenu="MAIN_MENU">' % MENU_MODULE,
+           '    <Menu Name="MAIN_MENU">']
+    for m, label, _ in MENU_BAR:
+        out.append('      <MenuItem %s/>' % attrs(dict(Name=m, Label=ascii_text(label), CommandType='Menu',
+                                                         SubMenuName=m + '_MENU')))
+    out.append('    </Menu>')
+    for m, _, items in MENU_BAR:
+        out.append('    <Menu Name="%s_MENU">' % m)
+        for i, il, code in items:
+            out.append('      <MenuItem %s/>' % attrs(dict(Name=i, Label=ascii_text(il), CommandType='PL/SQL',
+                                                             MenuItemCode=code)))
+        out.append('    </Menu>')
+    out += ['  </MenuModule>', '</Module>']
+    xml = '\n'.join(out) + '\n'
+    assert all(ord(c) < 128 for c in xml)
+    return xml
+
+
 def attrs(a):
     return ' '.join('%s=%s' % (k, quoteattr(str(v))) for k, v in a.items())
 
@@ -508,7 +563,7 @@ FIND_CTL = [('FIND', 'button', 10, 10, 110, 'Βρες...', {}),
 def build(name, f):
     """a form: f['blocks'] (the first the master; a detail with 'where' on the master), or one block
     (f['block'], f['table'], f['cols']); the block CTL (Find..., All, and f['ctl']); the LOVs"""
-    texts = ["SET_WINDOW_PROPERTY('%s', TITLE, tx('%s'));" % (WINDOW, WORDS.key(f['title']))]
+    texts = ["SET_WINDOW_PROPERTY('%s', TITLE, tx('%s'));" % (WINDOW, WORDS.key(f['title']))] + menu_texts()
 
     def say(item, prop, text):
         if nonascii(text):
@@ -542,8 +597,8 @@ def build(name, f):
     spec, body = program(name, dict(block=master['name'], where=master.get('where', ''), detail=detail), texts)
     out = ['<?xml version="1.0" encoding="UTF-8"?>',
            '<Module version="141200000" xmlns="http://xmlns.oracle.com/Forms">',
-           '  <FormModule Name="%s" Title=%s ConsoleWindow="%s" MenuModule="DEFAULT&amp;SMARTBAR">'
-           % (name, quoteattr(greeklish(f['title'])), WINDOW),
+           '  <FormModule Name="%s" Title=%s ConsoleWindow="%s" MenuModule="%s">'
+           % (name, quoteattr(greeklish(f['title'])), WINDOW, MENU_MODULE),
            '    <Coordinate CharacterCellWidth="7" CharacterCellHeight="14" CoordinateSystem="Real" '
            'RealUnit="Pixel" DefaultFontScaling="true"/>']
     for b, items in out_blocks:
@@ -605,8 +660,9 @@ def main():
         made[name] = build(name, f)
     for name, (xml, _, _) in made.items():
         open(os.path.join(HERE, name + '.xml'), 'w', encoding='ascii', newline='\n').write(xml)
+    open(os.path.join(HERE, MENU_MODULE + '.xml'), 'w', encoding='ascii', newline='\n').write(menu_xml())
     open(os.path.join(DB, 'MM_TEXT.sql'), 'w', encoding='utf-8', newline='\n').write(text_sql())
-    print('%s; MM_TEXT.sql: %d words' % (', '.join(made), len(WORDS.words)))
+    print('%s, %s (menu); MM_TEXT.sql: %d words' % (', '.join(made), MENU_MODULE, len(WORDS.words)))
     return made
 
 

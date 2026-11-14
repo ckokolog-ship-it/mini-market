@@ -15,7 +15,7 @@
 # - frmcmp.exe with batch=yes; NLS_LANG EL8MSWIN1253 for the tools (the forms are ASCII).
 # This file is ASCII on purpose: Windows PowerShell 5 reads a file without BOM as ANSI.
 param(
-  [string[]]$Forms = @('MM_MAIN', 'MM_ITEMS', 'MM_CUSTOMERS', 'MM_SUPPLIERS', 'MM_CARDS', 'MM_RESERVATIONS', 'MM_KITS', 'MM_PROMOS', 'MM_VARIANTS'),
+  [string[]]$Forms = @('MM_MENU', 'MM_MAIN', 'MM_ITEMS', 'MM_CUSTOMERS', 'MM_SUPPLIERS', 'MM_CARDS', 'MM_RESERVATIONS', 'MM_KITS', 'MM_PROMOS', 'MM_VARIANTS'),
   [string]$UserId = '/@MM_DB',
   [string]$OracleHome = 'C:\Oracle\Middleware\Oracle_Home',
   [string]$Domain = 'C:\Oracle\Middleware\Oracle_Home\user_projects\domains\forms_domain',
@@ -56,26 +56,30 @@ $env:NLS_LANG = 'AMERICAN_GREECE.EL8MSWIN1253'
 $done = @()
 foreach ($form in $Forms) {
   $name = $form.ToUpper()
+  # MM_MENU: the menu module of all the forms (.mmb -> .mmx, module_type=menu)
+  $src = if ($name -eq 'MM_MENU') { 'mmb' } else { 'fmb' }
+  $bin = if ($name -eq 'MM_MENU') { 'mmx' } else { 'fmx' }
+  $type = if ($name -eq 'MM_MENU') { 'menu' } else { 'form' }
   if (-not (Test-Path "$here\$name.xml")) { Write-Host "== ${name}: no $here\$name.xml"; continue }
   Push-Location $here
   try {
-    Remove-Item "$name.fmb" -ErrorAction SilentlyContinue
-    Write-Host "== $name.xml -> $name.fmb"
+    Remove-Item "$name.$src" -ErrorAction SilentlyContinue
+    Write-Host "== $name.xml -> $name.$src"
     & $java -cp $cp oracle.forms.util.xmltools.XML2Forms OVERWRITE=YES "$name.xml"
-    if (-not (Test-Path "$name.fmb")) { Write-Host "== no $name.fmb: the messages above"; continue }
-    Move-Item "$name.fmb" $Out -Force
+    if (-not (Test-Path "$name.$src")) { Write-Host "== no $name.${src}: the messages above"; continue }
+    Move-Item "$name.$src" $Out -Force
   } finally { Pop-Location }
 
   Push-Location $Out
   try {
-    Remove-Item "$name.fmx", "$name.err" -ErrorAction SilentlyContinue
-    Write-Host "== $name.fmb -> $Out\$name.fmx"
-    & $cmp module="$name.fmb" userid=$UserId module_type=form compile_all=yes batch=yes | Out-Host
-    if (Test-Path "$name.fmx") {
-      Write-Host "== $Out\$name.fmx: OK"
+    Remove-Item "$name.$bin", "$name.err" -ErrorAction SilentlyContinue
+    Write-Host "== $name.$src -> $Out\$name.$bin"
+    & $cmp module="$name.$src" userid=$UserId module_type=$type compile_all=yes batch=yes | Out-Host
+    if (Test-Path "$name.$bin") {
+      Write-Host "== $Out\$name.${bin}: OK"
       $done += $name
     } else {
-      Write-Host "== no $name.fmx: $Out\$name.err"
+      Write-Host "== no $name.${bin}: $Out\$name.err"
       if (Test-Path "$name.err") { Get-Content "$name.err" -Tail 30 | Out-Host }
     }
   } finally { Pop-Location }

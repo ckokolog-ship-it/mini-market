@@ -73,6 +73,8 @@ begin
 end;""",
     "create or replace procedure forms_ddl(p varchar2) is begin execute immediate p; end;",
     "create or replace procedure call_form(f varchar2) is begin fstub.props('CALL_FORM') := f; end;",
+    """create or replace procedure set_menu_item_property(m varchar2, p number, v varchar2) is
+begin fstub.props('MENU ' || upper(m) || '#' || p) := v; end;""",
     "create or replace procedure exit_form is begin fstub.props('EXIT_FORM') := 'Y'; end;",
     """create or replace function show_lov(l varchar2) return boolean is
 begin
@@ -80,7 +82,7 @@ begin
   return fstub.lov_answer;
 end;""",
 ]
-DROP = ['package ui', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
+DROP = ['package ui', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
         'procedure set_item_property', 'procedure set_window_property', 'function default_where',
         'function prompt_text', 'function label', 'function title', 'procedure message', 'procedure copy',
@@ -476,3 +478,36 @@ def test_menu_form(cur):
     assert prop(cur, 'CALL_FORM') == 'MM_RESERVATIONS'
     run(cur, "ui.press('CTL.EXIT');")
     assert prop(cur, 'EXIT_FORM') == 'Y'
+
+
+def test_pulldown_menu():
+    """MM_MENU: every form hangs from it; each item of the bar has its menu; each item opens a form
+    that exists (or does a known key)"""
+    import re
+    menu = ET.fromstring(mkforms.menu_xml())
+    assert all(ord(c) < 128 for c in mkforms.menu_xml())
+    mm = menu.find('f:MenuModule', NS)
+    menus = {m.get('Name'): m for m in mm.findall('f:Menu', NS)}
+    assert mm.get('MainMenu') in menus
+    for it in menus['MAIN_MENU'].findall('f:MenuItem', NS):
+        assert it.get('CommandType') == 'Menu' and it.get('SubMenuName') in menus
+    opened = set()
+    for name, m in menus.items():
+        if name == 'MAIN_MENU':
+            continue
+        for it in m.findall('f:MenuItem', NS):
+            code = it.get('MenuItemCode')
+            assert it.get('CommandType') == 'PL/SQL' and code.endswith(';')
+            opened |= set(re.findall(r"new_form\('(\w+)'\)", code))
+            assert re.fullmatch(r"(new_form\('\w+'\)|do_key\('\w+'\));", code), code
+    assert opened == set(BUILT)                                             # every form, once
+    for name in BUILT:
+        assert xml_of(name).find('f:FormModule', NS).get('MenuModule') == 'MM_MENU'
+
+
+@needs_db
+def test_menu_labels_in_greek(cur):
+    compile_ui(cur, 'MM_ITEMS')
+    run(cur, 'ui.init;')
+    assert prop(cur, 'MENU MAIN_MENU.SALES#2') == 'Πωλήσεις'
+    assert prop(cur, 'MENU STOCK_MENU.VARIANTS#2') == 'Ρούχα και παπούτσια'

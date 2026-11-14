@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Module version="141200000" xmlns="http://xmlns.oracle.com/Forms">
+  <MenuModule Name="MM_MENU" MainMenu="MAIN_MENU">
+    <Menu Name="MAIN_MENU">
+      <MenuItem Name="FILE" Label="Archeio" CommandType="Menu" SubMenuName="FILE_MENU"/>
+      <MenuItem Name="REC" Label="Eggrafes" CommandType="Menu" SubMenuName="REC_MENU"/>
+      <MenuItem Name="STOCK" Label="Apothiki" CommandType="Menu" SubMenuName="STOCK_MENU"/>
+      <MenuItem Name="SALES" Label="Poliseis" CommandType="Menu" SubMenuName="SALES_MENU"/>
+      <MenuItem Name="BUY" Label="Agores" CommandType="Menu" SubMenuName="BUY_MENU"/>
+    </Menu>
+    <Menu Name="FILE_MENU">
+      <MenuItem Name="MAIN" Label="Archiko menoy" CommandType="PL/SQL" MenuItemCode="new_form('MM_MAIN');"/>
+      <MenuItem Name="EXIT" Label="Exodos" CommandType="PL/SQL" MenuItemCode="do_key('EXIT_FORM');"/>
+    </Menu>
+    <Menu Name="REC_MENU">
+      <MenuItem Name="SAVE" Label="Apothikeysi (F10)" CommandType="PL/SQL" MenuItemCode="do_key('COMMIT_FORM');"/>
+      <MenuItem Name="ENTERQ" Label="Anazitisi (F7)" CommandType="PL/SQL" MenuItemCode="do_key('ENTER_QUERY');"/>
+      <MenuItem Name="EXECQ" Label="Ektelesi anazitisis (F8)" CommandType="PL/SQL" MenuItemCode="do_key('EXECUTE_QUERY');"/>
+      <MenuItem Name="NEWREC" Label="Nea eggrafi" CommandType="PL/SQL" MenuItemCode="do_key('CREATE_RECORD');"/>
+      <MenuItem Name="DELREC" Label="Diagrafi eggrafis" CommandType="PL/SQL" MenuItemCode="do_key('DELETE_RECORD');"/>
+    </Menu>
+    <Menu Name="STOCK_MENU">
+      <MenuItem Name="ITEMS" Label="Eidi" CommandType="PL/SQL" MenuItemCode="new_form('MM_ITEMS');"/>
+      <MenuItem Name="VARIANTS" Label="Roycha kai papoytsia" CommandType="PL/SQL" MenuItemCode="new_form('MM_VARIANTS');"/>
+      <MenuItem Name="KITS" Label="Kalathia kai set" CommandType="PL/SQL" MenuItemCode="new_form('MM_KITS');"/>
+      <MenuItem Name="CARDS" Label="Kartes kinitis" CommandType="PL/SQL" MenuItemCode="new_form('MM_CARDS');"/>
+    </Menu>
+    <Menu Name="SALES_MENU">
+      <MenuItem Name="CUSTOMERS" Label="Pelates" CommandType="PL/SQL" MenuItemCode="new_form('MM_CUSTOMERS');"/>
+      <MenuItem Name="RESERV" Label="Kratiseis" CommandType="PL/SQL" MenuItemCode="new_form('MM_RESERVATIONS');"/>
+      <MenuItem Name="PROMOS" Label="Prosfores" CommandType="PL/SQL" MenuItemCode="new_form('MM_PROMOS');"/>
+    </Menu>
+    <Menu Name="BUY_MENU">
+      <MenuItem Name="SUPPLIERS" Label="Promitheytes" CommandType="PL/SQL" MenuItemCode="new_form('MM_SUPPLIERS');"/>
+    </Menu>
+  </MenuModule>
+</Module>
