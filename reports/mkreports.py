@@ -4,6 +4,9 @@ the .rdf: build_reports.ps1 on Windows):
 
   MM_LEDGER_I   the ledger of an item (quantities, 3 decimals)
   MM_LEDGER_P   the ledger of a customer (P_KIND=C) or a supplier (P_KIND=S) (money, 2 decimals)
+  MM_SALES      the sales of each day, by month (P_FROM, P_TO)
+  MM_VAT        the VAT of the sales and of the purchases, by month and rate (P_FROM, P_TO)
+  MM_MIN_STOCK  the items under their minimum stock, by category
 
 The parameters: P_KIND (I, C, S), P_ID, P_FROM and P_TO (DD/MM/YYYY). The rows: mm_ledger.report_rows
 of the database (db/MM_LEDGER.sql). On every page, on top "from the carry-over" (από μεταφορά): the
@@ -14,7 +17,7 @@ totals of the period, the balance before it and at its end.
 The XML is ASCII, as the forms: the Greek (the title, the headings, the words) comes from the
 database when the report runs (mm_ledger.title and mm_ledger.label, in formula columns).
 
-  python3 mkreports.py        (writes MM_LEDGER_I.xml and MM_LEDGER_P.xml here)
+  python3 mkreports.py        (writes MM_*.xml here)
 """
 import os
 from xml.sax.saxutils import quoteattr
@@ -193,11 +196,180 @@ def build(name, r):
     return xml
 
 
+# -- the tables: sales, VAT, minimum stock --------------------------------------------------------
+# A query of a view of db/MM_REPORT.sql; its rows under a break (a month, a category) with the
+# subtotals of the break after them, the grand totals at the end. The headings, the title, the
+# period and the words of the totals from mm_report (the Greek).
+#   items    (name, datatype, width) of the query; brk: the items of the break group (the first is
+#            the order, the second shown)
+#   cols     (item, x, width, alignment, mask): the columns of the rows; their heading mm_report.label(item)
+#   sums     (item, function): subtotal and grand total under that column
+#   words    the keys of the label of a subtotal and of the grand total
+DAY_MASK, MONEY, COUNT = 'DD/MM/YYYY', 'NNNGNNNGNN0D00', 'NNNGNNNGNN0'
+PERIOD = [('P_FROM', 'character', 10), ('P_TO', 'character', 10)]
+BETWEEN = "between to_date(:P_FROM, 'DD/MM/YYYY') and to_date(:P_TO, 'DD/MM/YYYY')"
+TABLES = {
+    'MM_SALES': dict(
+        title='SALES', params=PERIOD,
+        query=("select to_char(day, 'YYYY-MM') month_key, to_char(day, 'MM/YYYY') month_text, day, alp_docs, "
+               "alp_total, tpy_total, ppy_total, total\nfrom mm_sales_day\nwhere day " + BETWEEN + "\norder by day"),
+        items=[('MONTH_KEY', 'vchar2', 7), ('MONTH_TEXT', 'vchar2', 7), ('DAY', 'date', 9), ('ALP_DOCS', 'number', 22),
+               ('ALP_TOTAL', 'number', 22), ('TPY_TOTAL', 'number', 22), ('PPY_TOTAL', 'number', 22),
+               ('TOTAL', 'number', 22)],
+        brk=['MONTH_KEY', 'MONTH_TEXT'],
+        cols=[('DAY', 0.00, 0.90, 'start', DAY_MASK), ('ALP_DOCS', 1.00, 0.80, 'end', COUNT),
+              ('ALP_TOTAL', 1.90, 1.25, 'end', MONEY), ('TPY_TOTAL', 3.25, 1.25, 'end', MONEY),
+              ('PPY_TOTAL', 4.60, 1.25, 'end', MONEY), ('TOTAL', 5.95, 1.30, 'end', MONEY)],
+        sums=[('ALP_DOCS', 'sum'), ('ALP_TOTAL', 'sum'), ('TPY_TOTAL', 'sum'), ('PPY_TOTAL', 'sum'), ('TOTAL', 'sum')],
+        words=('SUBTOTAL', 'GRAND')),
+    'MM_VAT': dict(
+        title='VAT', params=PERIOD,
+        query=("select to_char(day, 'YYYY-MM') month_key, to_char(day, 'MM/YYYY') month_text, "
+               "vat_code || ' ' || vat_rate || '%' vat_text, sum(s_net) s_net, sum(s_vat) s_vat, sum(p_net) p_net, "
+               "sum(p_vat) p_vat, sum(s_vat) - sum(p_vat) payable\nfrom mm_vat_day\nwhere day " + BETWEEN +
+               "\ngroup by to_char(day, 'YYYY-MM'), to_char(day, 'MM/YYYY'), vat_code, vat_rate\norder by 1, 3"),
+        items=[('MONTH_KEY', 'vchar2', 7), ('MONTH_TEXT', 'vchar2', 7), ('VAT_TEXT', 'vchar2', 10),
+               ('S_NET', 'number', 22), ('S_VAT', 'number', 22), ('P_NET', 'number', 22), ('P_VAT', 'number', 22),
+               ('PAYABLE', 'number', 22)],
+        brk=['MONTH_KEY', 'MONTH_TEXT'],
+        cols=[('VAT_TEXT', 0.00, 0.80, 'start', None), ('S_NET', 0.90, 1.20, 'end', MONEY),
+              ('S_VAT', 2.20, 1.15, 'end', MONEY), ('P_NET', 3.45, 1.20, 'end', MONEY),
+              ('P_VAT', 4.75, 1.15, 'end', MONEY), ('PAYABLE', 6.00, 1.25, 'end', MONEY)],
+        sums=[('S_NET', 'sum'), ('S_VAT', 'sum'), ('P_NET', 'sum'), ('P_VAT', 'sum'), ('PAYABLE', 'sum')],
+        words=('SUBTOTAL', 'GRAND')),
+    'MM_MIN_STOCK': dict(
+        title='MIN_STOCK', params=[],
+        query=("select category, code, name, unit, mm_report.qty(stock) stock, mm_report.qty(min_stock) min_stock, "
+               "mm_report.qty(missing) missing, supplier\nfrom mm_min_stock\norder by category, code"),
+        items=[('CATEGORY', 'vchar2', 60), ('CODE', 'vchar2', 20), ('NAME', 'vchar2', 100), ('UNIT', 'vchar2', 3),
+               ('STOCK', 'vchar2', 30), ('MIN_STOCK', 'vchar2', 30), ('MISSING', 'vchar2', 30),
+               ('SUPPLIER', 'vchar2', 100)],
+        brk=['CATEGORY'],
+        cols=[('CODE', 0.00, 0.70, 'start', None), ('NAME', 0.75, 2.15, 'start', None), ('UNIT', 2.95, 0.40, 'start', None),
+              ('STOCK', 3.40, 0.70, 'end', None), ('MIN_STOCK', 4.15, 0.70, 'end', None),
+              ('MISSING', 4.90, 0.70, 'end', None), ('SUPPLIER', 5.70, 1.60, 'start', None)],
+        sums=[('CODE', 'count')],
+        words=('SUBTOTAL_CAT', 'GRAND_CAT')),
+}
+
+
+def build_table(name, t):
+    """a report of rows under a break, with subtotals and grand totals"""
+    brk = t['brk']
+    shown = brk[-1]
+    out = ['<?xml version="1.0" encoding="UTF-8" ?>',
+           '<report name="%s" DTDVersion="9.0.2.0.10" unitOfMeasurement="inch">' % name.lower(),
+           '  <data>']
+    for p, dt, w in t['params']:
+        out.append('    <userParameter %s/>' % attrs(dict(name=p, datatype=dt, width=w)))
+    out += ['    <dataSource name="Q_ROWS">', '      <select>', '      <![CDATA[%s]]>' % t['query'], '      </select>']
+    order = {n: i for i, (n, _, _) in enumerate(t['items'], 1)}
+
+    def item(n, dt, w, pad):
+        return [pad + '<dataItem %s>' % attrs(dict(name=n, datatype=dt, columnOrder=10 + order[n], width=w,
+                                                   defaultLabel=n.title())),
+                pad + '  <dataDescriptor %s/>' % attrs(dict(expression=n.lower(), descriptiveExpression=n,
+                                                            order=order[n], width=w)),
+                pad + '</dataItem>']
+    out.append('      <group name="G_BRK">')
+    for n, dt, w in t['items']:
+        if n in brk:
+            out += item(n, dt, w, '        ')
+    # the subtotals: in the break group, reset at it
+    for n, fn in t['sums']:
+        out.append('        <summary %s/>' % attrs(dict(name='CS_S_' + n, source=n, function=fn, width=22, precision=14,
+                                                        scale=2, reset='G_BRK', compute='report')))
+    out += ['      </group>', '      <group name="G_ROWS">']
+    for n, dt, w in t['items']:
+        if n not in brk:
+            out += item(n, dt, w, '        ')
+    out += ['      </group>', '    </dataSource>']
+    for n, fn in t['sums']:
+        out.append('    <summary %s/>' % attrs(dict(name='CS_G_' + n, source=n, function=fn, width=22, precision=14,
+                                                    scale=2, reset='report', compute='report')))
+    words = ['TITLE', 'PERIOD', 'PAGE', t['words'][0], t['words'][1]] + [c[0] for c in t['cols']]
+    for w in words:
+        out.append('    <formula %s/>' % attrs(dict(name='CF_' + w, source='cf_%sformula' % w.lower(),
+                                                    datatype='character', width=200)))
+    out.append('  </data>')
+
+    cols = {c[0]: c for c in t['cols']}
+    # the word of a total: on the left of the first column with a total (from the left edge), or on
+    # its right if there is no room (the number of the items, under the first column)
+    _, fx, fw, _, _ = cols[t['sums'][0][0]]
+    lx, lw, la = (0.0, fx - 0.05, 'start') if fx >= 0.85 else (fx + fw + 0.05, 2.2, 'start')
+
+    def total_row(prefix, word, y, pad):
+        res = [field('F_%s_L' % prefix, 'CF_' + word, lx, y, lw, align=la, bold=True, pad=pad)]
+        for n, fn in t['sums']:
+            _, x, w, a, mask = cols[n]
+            res.append(field('F_%s_%s' % (prefix, n), 'CS_%s_%s' % (prefix, n), x, y, w, align='end',
+                             mask=COUNT if fn == 'count' else mask, bold=True, pad=pad))
+        return res
+
+    out += ['  <layout>',
+            '  <section name="main" width="%.5f" height="%.5f">' % (PAGE_W, PAGE_H),
+            '    <body width="%.5f" height="%.5f">' % (PAGE_W - 2 * LEFT, BODY_H),
+            '      <location x="%.5f" y="%.5f"/>' % (LEFT, 1.15),
+            '      <frame name="M_ALL">',
+            '        ' + geo(0, 0, 7.30, ROW_H * 9),
+            '        <generalLayout verticalElasticity="variable"/>',
+            '        <repeatingFrame name="R_BRK" source="G_BRK" printDirection="down" minWidowRecords="1" '
+            'columnMode="no">',
+            '          ' + geo(0, 0, 7.30, ROW_H * 4.6),
+            '          <generalLayout verticalElasticity="expand"/>',
+            field('F_BRK', shown, 0, 0, 3.0, bold=True, size=9, pad='          '),
+            '          <repeatingFrame name="R_ROWS" source="G_ROWS" printDirection="down" minWidowRecords="1" '
+            'columnMode="no">',
+            '            ' + geo(0, ROW_H * 1.3, 7.30, ROW_H),
+            '            <generalLayout verticalElasticity="expand"/>']
+    for n, x, w, a, mask in t['cols']:
+        out.append(field('F_' + n, n, x, ROW_H * 1.3, w, align=a, mask=mask, pad='              '))
+    out += ['          </repeatingFrame>',
+            '          <frame name="M_SUB">',
+            '            ' + geo(0, ROW_H * 2.6, 7.30, ROW_H * 1.6)]
+    out += total_row('S', t['words'][0], ROW_H * 2.8, '            ')
+    out += ['          </frame>',
+            '        </repeatingFrame>',
+            '        <frame name="M_GRAND">',
+            '          ' + geo(0, ROW_H * 5.2, 7.30, ROW_H * 1.6)]
+    out += total_row('G', t['words'][1], ROW_H * 5.4, '          ')
+    out += ['        </frame>', '      </frame>', '    </body>', '    <margin>']
+    out.append(field('F_TITLE', 'CF_TITLE', LEFT, 0.30, 5.6, h=0.24, bold=True, size=12))
+    out.append(field('F_PERIOD', 'CF_PERIOD', LEFT, 0.58, 5.0, h=0.2, size=9))
+    out.append(field('F_L_PAGE', 'CF_PAGE', LEFT + 5.9, 0.30, 0.6, h=0.2, align='end', size=9))
+    out.append(field('F_PAGE', 'PageNumber', LEFT + 6.55, 0.30, 0.6, h=0.2, size=9))
+    for n, x, w, a, _ in t['cols']:
+        out.append(field('F_H_' + n, 'CF_' + n, LEFT + x, 0.88, w, align=a, bold=True))
+    out += ['    </margin>', '  </section>', '  </layout>', '  <programUnits>']
+    p = ', '.join(':' + n for n, _, _ in t['params'])
+    for w in words:
+        body = ("return mm_report.title('%s');" % t['title'] if w == 'TITLE' else
+                'return mm_report.period(%s);' % p if w == 'PERIOD' else
+                "return mm_report.label('%s');" % w)
+        out += ['    <function name="cf_%sformula" returnType="character">' % w.lower(),
+                '      <textSource>',
+                '      <![CDATA[function cf_%sformula return Char is\nbegin\n  %s\nend;]]>' % (w.lower(), body),
+                '      </textSource>',
+                '    </function>']
+    out += ['  </programUnits>',
+            '  <reportPrivate defaultReportType="groupAbove" versionFlags2="0" templateName=""/>',
+            '</report>']
+    xml = '\n'.join(out) + '\n'
+    assert all(ord(c) < 128 for c in xml), name
+    return xml
+
+
+def build_all():
+    made = {name: build(name, r) for name, r in REPORTS.items()}
+    made.update({name: build_table(name, t) for name, t in TABLES.items()})
+    return made
+
+
 def main():
-    made = {}
-    for name, r in REPORTS.items():
-        made[name] = build(name, r)
-        open(os.path.join(HERE, name + '.xml'), 'w', encoding='ascii', newline='\n').write(made[name])
+    made = build_all()
+    for name, xml in made.items():
+        open(os.path.join(HERE, name + '.xml'), 'w', encoding='ascii', newline='\n').write(xml)
     print(', '.join(made))
     return made
 

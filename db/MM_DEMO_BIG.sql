@@ -10,7 +10,8 @@
 -- cancelled one), an invoice on credit to a customer every other day (now and then a credit note),
 -- the purchases from the suppliers every Monday (what was sold), the cards of mobile on the 1st
 -- of the month, and every Friday the receipts from the customers and the payments to the
--- suppliers. Each row gets the date and the hour of its day.
+-- suppliers (the dairy and the press are late the last three weeks: their items go under the minimum
+-- stock). Each row gets the date and the hour of its day.
 -- Once: if the register T2 exists, nothing is done. The same random numbers every time
 -- (dbms_random.seed), so two databases get the same year.
 -- About 9.000 documents and 30.000 lines: some minutes.
@@ -230,7 +231,10 @@ begin
           if day_ = 1 or extract(day from d) = 1 then
             purchase(s.id, day_ = 1);
           end if;
-        elsif day_ = 1 or dy = 'MON' then
+        elsif (day_ = 1 or dy = 'MON')
+              -- the last three weeks the dairy and the press are late: their items go under the
+              -- minimum stock (the report MM_MIN_STOCK)
+              and not (day_ > c_days - 21 and s.afm in ('999000067', '999000080')) then
           purchase(s.id, day_ = 1);
         end if;
       end loop;

@@ -1,5 +1,5 @@
 -- MM_UI.pls -- the package UI of the forms of the mini market (MM_ITEMS, MM_CUSTOMERS,
--- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, MM_INVOICES, MM_PAYMENTS, MM_LEDGER,
+-- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, MM_INVOICES, MM_PAYMENTS, MM_LEDGER, MM_REPORTS,
 -- the menu MM_MAIN):
 -- mkforms.py puts it in each form. The triggers only call it:
 --   WHEN-NEW-FORM-INSTANCE  ui.init
@@ -128,7 +128,35 @@ PACKAGE BODY ui IS
     again(c_block);
   END;
 
+  -- a report of the Reports Server in the browser: where and in which format from MM_SETTING
+  -- (SET_REPORTS_URL.sql); the address carries the key of cgicmd.dat, not the password
+  PROCEDURE open_report(p_report VARCHAR2, p_params VARCHAR2) IS
+    u VARCHAR2(400);
+    f VARCHAR2(400);
+  BEGIN
+    SELECT MAX(CASE name WHEN 'REPORTS_URL' THEN value END), MAX(CASE name WHEN 'REPORTS_FORMAT' THEN value END)
+      INTO u, f FROM mm_setting WHERE name IN ('REPORTS_URL', 'REPORTS_FORMAT');
+    IF u IS NULL THEN
+      message('Δεν ξέρω πού είναι τα reports: SET_REPORTS_URL.sql στη βάση');
+    ELSE
+      web.show_document(u || '&report=' || p_report || '.rdf&destype=cache&desformat=' || nvl(f, 'PDF')
+                        || p_params, '_blank');
+    END IF;
+  END;
+
+  -- the period of CTL.R_FROM - R_TO for a report, checked here (else the report says less)
+  FUNCTION period_params RETURN VARCHAR2 IS
+    a DATE := date_in('CTL.R_FROM');
+    b DATE := date_in('CTL.R_TO');
+  BEGIN
+    IF a IS NULL OR b IS NULL OR a > b THEN
+      fail('Το διάστημα θέλει «από» και «έως», με το «από» πριν από το «έως»');
+    END IF;
+    RETURN '&P_FROM=' || to_char(a, 'DD/MM/YYYY') || '&P_TO=' || to_char(b, 'DD/MM/YYYY');
+  END;
+
   PROCEDURE action(p_item VARCHAR2) IS
+    s_ VARCHAR2(30);
     v NUMBER;
     n NUMBER;
     s NUMBER;
@@ -386,33 +414,24 @@ PACKAGE BODY ui IS
         execute_query;
         message('Η καρτέλα είναι έτοιμη');
       END;
-    -- the ledger on the screen as a report (MM_LEDGER_I / MM_LEDGER_P of the Reports Server), in the
-    -- browser: where and in which format from MM_SETTING (SET_REPORTS_URL.sql); the address carries
-    -- the key of cgicmd.dat, not the password
+    -- the ledger on the screen as a report (MM_LEDGER_I / MM_LEDGER_P), in the browser
     ELSIF p_item = 'CTL.PRINTLED' THEN
-      DECLARE
-        u VARCHAR2(400);
-        f VARCHAR2(400);
-        r VARCHAR2(30);
-      BEGIN
-        IF g_lwhat IS NULL THEN
-          fail('Δείξε πρώτα μια καρτέλα, και μετά «Εκτύπωση»');
-        END IF;
-        SELECT MAX(CASE name WHEN 'REPORTS_URL' THEN value END), MAX(CASE name WHEN 'REPORTS_FORMAT' THEN value END)
-          INTO u, f FROM mm_setting WHERE name IN ('REPORTS_URL', 'REPORTS_FORMAT');
-        IF u IS NULL THEN
-          message('Δεν ξέρω πού είναι τα reports: SET_REPORTS_URL.sql στη βάση');
-        ELSE
-          IF g_lwhat = 'I' THEN
-            r := 'MM_LEDGER_I.rdf';
-          ELSE
-            r := 'MM_LEDGER_P.rdf';
-          END IF;
-          web.show_document(u || '&report=' || r || '&destype=cache&desformat=' || nvl(f, 'PDF')
-                            || '&P_KIND=' || g_lwhat || '&P_ID=' || to_char(g_lid)
-                            || '&P_FROM=' || g_lfrom || '&P_TO=' || g_lto, '_blank');
-        END IF;
-      END;
+      IF g_lwhat IS NULL THEN
+        fail('Δείξε πρώτα μια καρτέλα, και μετά «Εκτύπωση»');
+      END IF;
+      IF g_lwhat = 'I' THEN
+        s_ := 'MM_LEDGER_I';
+      ELSE
+        s_ := 'MM_LEDGER_P';
+      END IF;
+      open_report(s_, '&P_KIND=' || g_lwhat || '&P_ID=' || to_char(g_lid) || '&P_FROM=' || g_lfrom || '&P_TO=' || g_lto);
+    -- the reports of MM_REPORTS
+    ELSIF p_item = 'CTL.RPT_SALES' THEN
+      open_report('MM_SALES', period_params);
+    ELSIF p_item = 'CTL.RPT_VAT' THEN
+      open_report('MM_VAT', period_params);
+    ELSIF p_item = 'CTL.RPT_MIN' THEN
+      open_report('MM_MIN_STOCK', NULL);
     ELSIF p_item = 'CTL.DELDOC' THEN
       mm_core.delete_doc(num('DOC.ID'));
       forms_ddl('COMMIT');

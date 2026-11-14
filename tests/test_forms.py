@@ -130,7 +130,7 @@ def test_xml_ascii_and_references(name):
         for m in lv.findall('f:LOVColumnMapping', NS):
             if m.get('ReturnItem'):
                 assert m.get('ReturnItem') in items, m.get('ReturnItem')
-    assert 'LOV_FIND' in lovs or name in ('MM_MAIN', 'MM_LEDGER')   # the menu, the ledgers (lists) find nothing
+    assert 'LOV_FIND' in lovs or name in ('MM_MAIN', 'MM_LEDGER', 'MM_REPORTS')   # (nothing to find)
 
 
 BUILTINS = ('NAME_IN', 'COPY', 'SHOW_LOV', 'GO_BLOCK', 'EXECUTE_QUERY', 'MESSAGE', 'TX')
@@ -740,3 +740,26 @@ def test_ledger_form(cur, env):
     assert 'MM-171' in msgs(cur)
     run(cur, "ui.press('CTL.SHOWSUPP');", CTL__SUPP_ID=str(ids['supplier']), CTL__L_FROM='02/01/2001', CTL__L_TO='01/01/2001')
     assert 'MM-172' in msgs(cur)
+
+
+@needs_db
+def test_reports_form(cur):
+    compile_ui(cur, 'MM_REPORTS')
+    run(cur, 'ui.init;')
+    import datetime
+    today = datetime.date.today()
+    assert item(cur, 'CTL.R_FROM') == '01/01/%d' % today.year
+    cur.execute("delete from mm_setting where name in ('REPORTS_URL', 'REPORTS_FORMAT')")
+    cur.execute("insert into mm_setting values ('REPORTS_URL', 'http://h:9012/reports/rwservlet?mm')")
+    run(cur, "ui.press('CTL.RPT_SALES');", CTL__R_FROM='01/02/2026', CTL__R_TO='28/02/2026')
+    assert prop(cur, 'SHOW_DOCUMENT') == ('http://h:9012/reports/rwservlet?mm&report=MM_SALES.rdf&destype=cache'
+                                          '&desformat=PDF&P_FROM=01/02/2026&P_TO=28/02/2026 _blank')
+    run(cur, "ui.press('CTL.RPT_VAT');", CTL__R_FROM='01/02/2026', CTL__R_TO='28/02/2026')
+    assert 'report=MM_VAT.rdf' in prop(cur, 'SHOW_DOCUMENT')
+    run(cur, "ui.press('CTL.RPT_MIN');")
+    assert prop(cur, 'SHOW_DOCUMENT').endswith('report=MM_MIN_STOCK.rdf&destype=cache&desformat=PDF _blank')
+    msg = fails(cur, "ui.press('CTL.RPT_SALES');", CTL__R_FROM='01/03/2026', CTL__R_TO='01/02/2026')
+    assert '«από»' in msg
+    run(cur, "ui.press('CTL.GO_MM_LEDGER');")
+    assert prop(cur, 'CALL_FORM') == 'MM_LEDGER'
+    cur.connection.rollback()
