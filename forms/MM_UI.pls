@@ -1,6 +1,7 @@
 -- MM_UI.pls -- the package UI of the forms of the mini market (MM_ITEMS, MM_CUSTOMERS,
--- MM_SUPPLIERS): mkforms.py puts it in each form. The triggers only call it:
+-- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS): mkforms.py puts it in each form. The triggers only call it:
 --   WHEN-NEW-FORM-INSTANCE  ui.init
+--   WHEN-NEW-RECORD-INSTANCE ui.master(:SYSTEM.TRIGGER_BLOCK)   (a master: its detail again)
 --   WHEN-BUTTON-PRESSED     ui.press(:SYSTEM.TRIGGER_ITEM)
 --   WHEN-VALIDATE-ITEM      ui.validate(:SYSTEM.TRIGGER_ITEM)
 --   POST-QUERY              ui.post_query(:SYSTEM.TRIGGER_BLOCK)
@@ -12,12 +13,21 @@ PACKAGE ui IS
   PROCEDURE press(p_item VARCHAR2);
   PROCEDURE validate(p_item VARCHAR2);
   PROCEDURE post_query(p_block VARCHAR2);
+  PROCEDURE master(p_block VARCHAR2);
   PROCEDURE on_error(p_code NUMBER, p_type VARCHAR2, p_text VARCHAR2, p_dbtext VARCHAR2);
   FUNCTION friendly(p_dbtext VARCHAR2) RETURN VARCHAR2;
 END;
 -- BODY
 PACKAGE BODY ui IS
   c_block CONSTANT VARCHAR2(30) := 'BLOCK'; -- BLOCK
+  c_where CONSTANT VARCHAR2(400) := ''; -- WHERE
+  c_detail CONSTANT VARCHAR2(30) := ''; -- DETAIL
+  g_master NUMBER;                  -- the master whose detail is on the screen
+
+  FUNCTION num(p_item VARCHAR2) RETURN NUMBER IS
+  BEGIN
+    RETURN to_number(name_in(p_item));
+  END;
 
   FUNCTION tx(p_key VARCHAR2) RETURN VARCHAR2 IS
   BEGIN
@@ -34,7 +44,106 @@ PACKAGE BODY ui IS
   BEGIN
     NULL; -- TEXTS
     go_block(c_block);
+    set_block_property(c_block, DEFAULT_WHERE, c_where);
     execute_query;
+  END;
+
+  -- the detail of the master record on the screen (once for each master record: going back to the
+  -- master brings this trigger again)
+  PROCEDURE master(p_block VARCHAR2) IS
+    id_ NUMBER := num(p_block || '.ID');
+  BEGIN
+    IF c_detail IS NULL OR p_block <> c_block OR id_ IS NULL OR id_ = g_master THEN
+      RETURN;
+    END IF;
+    g_master := id_;
+    go_block(c_detail);
+    execute_query;
+    go_block(c_block);
+  END;
+
+  PROCEDURE again(p_block VARCHAR2) IS
+  BEGIN
+    g_master := NULL;
+    go_block(p_block);
+    execute_query;
+    IF p_block <> c_block THEN
+      go_block(c_block);
+    END IF;
+  END;
+
+  -- the register of the box CTL.REG_CODE (T1 by default)
+  FUNCTION register_id RETURN NUMBER IS
+    c VARCHAR2(10) := upper(nvl(name_in('CTL.REG_CODE'), 'T1'));
+    r NUMBER;
+  BEGIN
+    SELECT id INTO r FROM mm_register WHERE code = c;
+    RETURN r;
+  EXCEPTION
+    WHEN no_data_found THEN
+      message('Δεν υπάρχει ταμείο ' || c);
+      RAISE form_trigger_failure;
+  END;
+
+  -- the buttons of the cards and of the reservations: MM_CORE, then COMMIT (MM_CORE does not commit)
+  PROCEDURE action(p_item VARCHAR2) IS
+    v NUMBER;
+    n NUMBER;
+    s NUMBER;
+    pin VARCHAR2(40);
+  BEGIN
+    IF p_item = 'CTL.LOAD' THEN
+      v := num('CARD.ID');
+      n := mm_core.load_serial(v, name_in('CTL.NEW_SERIAL'), name_in('CTL.NEW_PIN'));
+      forms_ddl('COMMIT');
+      copy('', 'CTL.NEW_SERIAL');
+      copy('', 'CTL.NEW_PIN');
+      SELECT stock INTO s FROM mm_item WHERE id = v;
+      copy(to_char(s), 'CARD.STOCK');
+      again('SER');
+      message('Η κάρτα φορτώθηκε');
+    ELSIF p_item = 'CTL.PIN' THEN
+      pin := mm_core.reveal_pin(num('SER.ID'), name_in('CTL.USERNAME'));
+      forms_ddl('COMMIT');                                     -- the log of who saw it
+      copy(pin, 'SER.PIN_SHOW');
+    ELSIF p_item = 'CTL.NEWRES' THEN
+      v := mm_core.new_reservation(name_in('CTL.R_NAME'), name_in('CTL.R_PHONE'),
+                                   to_date(name_in('CTL.R_DATE'), 'DD/MM/YYYY'));
+      forms_ddl('COMMIT');
+      copy('', 'CTL.R_NAME');
+      copy('', 'CTL.R_PHONE');
+      go_block(c_block);
+      set_block_property(c_block, DEFAULT_WHERE, 'id = ' || to_char(v));
+      again(c_block);
+      message('Νέα κράτηση ' || to_char(v) || ': πρόσθεσε τα είδη της');
+    ELSIF p_item = 'CTL.RESERVE' THEN
+      mm_core.reserve(num('RES.ID'), num('CTL.ITEM_ID'), nvl(num('CTL.QTY'), 1));
+      forms_ddl('COMMIT');
+      again('RL');
+    ELSIF p_item = 'CTL.DEPOSIT' THEN
+      mm_core.take_deposit(num('RES.ID'), register_id, num('CTL.AMOUNT'), upper(nvl(name_in('CTL.PAY'), 'CASH')));
+      forms_ddl('COMMIT');
+      copy('', 'CTL.AMOUNT');
+      again(c_block);
+      message('Η προκαταβολή μπήκε στο ταμείο');
+    ELSIF p_item = 'CTL.DELIVER' THEN
+      v := mm_core.deliver(num('RES.ID'), register_id, upper(nvl(name_in('CTL.PAY'), 'CASH')));
+      n := mm_core.post_doc(v);
+      forms_ddl('COMMIT');
+      again(c_block);
+      message('Παραδόθηκε: απόδειξη ' || to_char(n));
+    ELSIF p_item = 'CTL.CANCELRES' THEN
+      mm_core.cancel_reservation(num('RES.ID'), register_id, 'Y');
+      forms_ddl('COMMIT');
+      again(c_block);
+      message('Η κράτηση ακυρώθηκε');
+    END IF;
+  EXCEPTION
+    WHEN form_trigger_failure THEN
+      RAISE;
+    WHEN OTHERS THEN
+      forms_ddl('ROLLBACK');
+      message(friendly(sqlerrm));
   END;
 
   -- the record chosen in the LOV "find", alone in the block; "all": every record again
@@ -48,15 +157,19 @@ PACKAGE BODY ui IS
         IF v IS NOT NULL THEN
           go_block(c_block);
           set_block_property(c_block, DEFAULT_WHERE, 'id = ' || to_char(to_number(v)));
+          g_master := NULL;
           execute_query;
-          set_block_property(c_block, DEFAULT_WHERE, '');
+          set_block_property(c_block, DEFAULT_WHERE, c_where);
         END IF;
       END IF;
     ELSIF p_item = 'CTL.ALL' THEN
       copy('', 'CTL.FIND_TEXT');
       go_block(c_block);
-      set_block_property(c_block, DEFAULT_WHERE, '');
+      set_block_property(c_block, DEFAULT_WHERE, c_where);
+      g_master := NULL;
       execute_query;
+    ELSE
+      action(p_item);
     END IF;
   END;
 
@@ -89,7 +202,7 @@ PACKAGE BODY ui IS
   -- (MM_ITEM.STOCK is reservable and changes all day: not a database item, so the form never
   -- writes it and never sees "record changed by another user" for it)
   PROCEDURE post_query(p_block VARCHAR2) IS
-    n VARCHAR2(100);
+    n VARCHAR2(200);
     r NUMBER;
     s NUMBER;
     id_ NUMBER;
@@ -107,6 +220,14 @@ PACKAGE BODY ui IS
       EXCEPTION
         WHEN no_data_found THEN NULL;
       END;
+    ELSIF p_block = 'CARD' THEN
+      id_ := num('CARD.ID');
+      SELECT stock INTO s FROM mm_item WHERE id = id_;
+      copy(to_char(s), 'CARD.STOCK');
+    ELSIF p_block = 'RL' THEN
+      id_ := num('RL.ITEM_ID');
+      SELECT code || ' ' || name INTO n FROM mm_item WHERE id = id_;
+      copy(n, 'RL.ITEM_TEXT');
     END IF;
   END;
 
