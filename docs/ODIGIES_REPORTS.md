@@ -54,6 +54,11 @@ powershell -ExecutionPolicy Bypass -File build_reports.ps1
 - **Τι κάνει:** γράφει τα `C:\reports_dev\MM_LEDGER_I.rdf` και `MM_LEDGER_P.rdf`, και δείχνει το log του `rwconverter` (`C:\reports_dev\<όνομα>.log`).
 - **Πριν:** μία φορά το `create_reptools.cmd` του PROPO, όπως για το Reports Builder.
 - **Αν βγάλει λάθος (REP-…):** στείλε μου την έξοδο.
+- **Αν γράψει «Conversion of … canceled», χωρίς REP-…:** σε batch, μια προειδοποίηση που θέλει απάντηση ακυρώνει τη μετατροπή. Με `-Interactive` (`batch=no`) τα μηνύματα βγαίνουν σε παράθυρα και φαίνεται η αιτία:
+  ```bat
+  powershell -ExecutionPolicy Bypass -File build_reports.ps1 -Reports MM_SALES -Interactive
+  ```
+  Άλλος δρόμος: στο Reports Builder (`reports_builder.cmd`, χωρίς ορίσματα), File → Open το `.xml`, και File → Save As το `.rdf` στο `C:\reports_dev`.
 
 ## Άνοιγμα
 
