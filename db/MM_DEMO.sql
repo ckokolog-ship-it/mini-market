@@ -170,6 +170,61 @@ begin
 end;
 /
 
+-- clothes and shoes: colours, sizes, a T-shirt (black/white x S/M/L) and trainers (black x 40..44),
+-- 2 of each variant
+insert into mm_color (code, name)
+select v.code, v.name from (values ('BLK', 'Μαύρο'), ('WHT', 'Λευκό'), ('BLU', 'Μπλε'),
+                                   ('RED', 'Κόκκινο'), ('GRY', 'Γκρι')) v (code, name)
+where not exists (select 1 from mm_color c where c.code = v.code);
+
+insert into mm_size (size_group, code, sort_no)
+select v.g, v.code, v.n from (values ('CLOTHES', 'XS', 1), ('CLOTHES', 'S', 2), ('CLOTHES', 'M', 3),
+                                     ('CLOTHES', 'L', 4), ('CLOTHES', 'XL', 5), ('CLOTHES', 'XXL', 6),
+                                     ('SHOES', '36', 36), ('SHOES', '37', 37), ('SHOES', '38', 38),
+                                     ('SHOES', '39', 39), ('SHOES', '40', 40), ('SHOES', '41', 41),
+                                     ('SHOES', '42', 42), ('SHOES', '43', 43), ('SHOES', '44', 44),
+                                     ('SHOES', '45', 45), ('SHOES', '46', 46)) v (g, code, n)
+where not exists (select 1 from mm_size z where z.size_group = v.g and z.code = v.code);
+
+insert into mm_category (name)
+select v.name from (values ('Ρούχα'), ('Παπούτσια')) v (name)
+where not exists (select 1 from mm_category c where c.name = v.name);
+
+insert into mm_item (code, name, category_id, vat_code, unit, price, cost, min_stock)
+select v.code, v.name, c.id, 'A', 'PCS', v.price, v.cost, 0
+from (values ('TSH01', 'Μπλουζάκι βαμβακερό', 'Ρούχα', 12.90, 5.00),
+             ('SHO01', 'Αθλητικά παπούτσια', 'Παπούτσια', 49.90, 22.00)) v (code, name, cat, price, cost)
+join mm_category c on c.name = v.cat
+where not exists (select 1 from mm_item i where i.code = v.code);
+
+declare
+  n number;
+  v number;
+  function id_of(c varchar2) return number is
+    x number;
+  begin
+    select id into x from mm_item where code = c;
+    return x;
+  end;
+begin
+  v := id_of('TSH01');                  -- (a local function may not be called inside SQL)
+  select count(*) into n from mm_item where parent_id = v;
+  if n = 0 then
+    for c in (select id from mm_color where code in ('BLK', 'WHT') order by code) loop
+      for z in (select id from mm_size where size_group = 'CLOTHES' and code in ('S', 'M', 'L') order by sort_no) loop
+        v := mm_core.make_variant(id_of('TSH01'), c.id, z.id);
+        mm_core.adjust_stock(v, 2, 'Επίδειξη');
+      end loop;
+    end loop;
+    for z in (select id from mm_size where size_group = 'SHOES' and sort_no between 40 and 44 order by sort_no) loop
+      select id into n from mm_color where code = 'BLK';
+      v := mm_core.make_variant(id_of('SHO01'), n, z.id);
+      mm_core.adjust_stock(v, 2, 'Επίδειξη');
+    end loop;
+  end if;
+end;
+/
+
 -- the cards of mobile phones: items with serials, 5 cards each (made-up serials and PINs), when
 -- MM_PIN works (DBMS_CRYPTO: GRANT_CRYPTO.sql)
 insert into mm_category (name)
