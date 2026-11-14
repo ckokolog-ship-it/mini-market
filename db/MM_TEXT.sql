@@ -23,6 +23,8 @@ create or replace package body mm_text as
       when 'T10D45C84' then 'Διαθέσιμα'
       when 'T10F856C7' then 'Τεμάχιο'
       when 'T1BB907E2' then 'Νέα προσφορά: βάλε τα είδη ή τις κατηγορίες της'
+      when 'T1BDD3E84' then 'Έξοδος'
+      when 'T1D0879FA' then 'Mini market'
       when 'T1EC8273B' then 'Το είδος έχει παραστατικά: δεν σβήνεται, κάνε το ανενεργό'
       when 'T1F4CE438' then 'Υπάρχει ήδη είδος με αυτό το barcode'
       when 'T1F500AF7' then 'Τιμή πακέτου'

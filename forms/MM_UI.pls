@@ -1,5 +1,6 @@
 -- MM_UI.pls -- the package UI of the forms of the mini market (MM_ITEMS, MM_CUSTOMERS,
--- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS): mkforms.py puts it in each form. The triggers only call it:
+-- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, and the menu MM_MAIN):
+-- mkforms.py puts it in each form. The triggers only call it:
 --   WHEN-NEW-FORM-INSTANCE  ui.init
 --   WHEN-NEW-RECORD-INSTANCE ui.master(:SYSTEM.TRIGGER_BLOCK)   (a master: its detail again)
 --   WHEN-BUTTON-PRESSED     ui.press(:SYSTEM.TRIGGER_ITEM)
@@ -43,9 +44,11 @@ PACKAGE BODY ui IS
   PROCEDURE init IS
   BEGIN
     NULL; -- TEXTS
-    go_block(c_block);
-    set_block_property(c_block, DEFAULT_WHERE, c_where);
-    execute_query;
+    IF c_block IS NOT NULL THEN          -- (the menu has no block of a table)
+      go_block(c_block);
+      set_block_property(c_block, DEFAULT_WHERE, c_where);
+      execute_query;
+    END IF;
   END;
 
   -- the detail of the master record on the screen (once for each master record: going back to the
@@ -106,7 +109,13 @@ PACKAGE BODY ui IS
     s NUMBER;
     pin VARCHAR2(40);
   BEGIN
-    IF p_item = 'CTL.LOAD' THEN
+    IF p_item LIKE 'CTL.GO\_%' ESCAPE '\' THEN           -- the menu: the form of the button
+      call_form(substr(p_item, 8));
+      RETURN;
+    ELSIF p_item = 'CTL.EXIT' THEN
+      exit_form;
+      RETURN;
+    ELSIF p_item = 'CTL.LOAD' THEN
       v := num('CARD.ID');
       n := mm_core.load_serial(v, name_in('CTL.NEW_SERIAL'), name_in('CTL.NEW_PIN'));
       forms_ddl('COMMIT');

@@ -340,6 +340,18 @@ FORMS['MM_VARIANTS'] = dict(
            [('ID', 0, 'Κωδ.', 'CTL.V_SIZE_ID'), ('TEXT', 160, 'Μέγεθος', 'CTL.V_SIZE_TEXT')])])
 
 
+# the menu: a button for each form (CALL_FORM: closing it comes back here), and the exit
+MENU_FORMS = [('MM_ITEMS', 'Είδη'), ('MM_CUSTOMERS', 'Πελάτες'), ('MM_SUPPLIERS', 'Προμηθευτές'),
+              ('MM_CARDS', 'Κάρτες κινητής'), ('MM_RESERVATIONS', 'Κρατήσεις'), ('MM_KITS', 'Καλάθια και σετ'),
+              ('MM_PROMOS', 'Προσφορές'), ('MM_VARIANTS', 'Ρούχα και παπούτσια')]
+FORMS['MM_MAIN'] = dict(
+    title='Mini market',
+    blocks=[],
+    ctl=[('GO_' + f, 'button', 20 + (i % 2) * 230, 20 + (i // 2) * 44, 220, t, {})
+         for i, (f, t) in enumerate(MENU_FORMS)] +
+        [('EXIT', 'button', 135, 20 + (len(MENU_FORMS) + 1) // 2 * 44 + 16, 220, 'Έξοδος', {})])
+
+
 def attrs(a):
     return ' '.join('%s=%s' % (k, quoteattr(str(v))) for k, v in a.items())
 
@@ -502,15 +514,16 @@ def build(name, f):
         if nonascii(text):
             texts.append("SET_ITEM_PROPERTY('%s', %s, tx('%s'));" % (item, prop, WORDS.key(text)))
 
-    blocks = f.get('blocks') or [dict(name=f['block'], table=f['table'], order=f['order'], cols=f['cols'],
-                                      top=TOP, rows=ROWS)]
+    # no block of a table (the menu): f['blocks'] = []
+    blocks = f['blocks'] if 'blocks' in f else [dict(name=f['block'], table=f['table'], order=f['order'],
+                                                     cols=f['cols'], top=TOP, rows=ROWS)]
     width, height, out_blocks = 0, 0, []
     for b in blocks:
         items, w = block_items(b['name'], b['cols'], b['top'], say)
         width = max(width, w + 6)
         height = max(height, b['top'] + b['rows'] * ROW_H + 40)
         out_blocks.append((b, items))
-    ctl = [ctl_item(c, say) for c in FIND_CTL + f.get('ctl', [])]
+    ctl = [ctl_item(c, say) for c in (FIND_CTL if 'find' in f else []) + f.get('ctl', [])]
     for c in f.get('ctl', []):
         if c[1] == 'date':
             texts.append("COPY(to_char(sysdate, 'DD/MM/YYYY'), 'CTL.%s');" % c[0])
@@ -519,11 +532,12 @@ def build(name, f):
             width = max(width, c[2] + c[4] + 10)
             height = max(height, c[3] + 40)
 
-    lovs = [('LOV_FIND', f['find_title'], f['find'][0],
-             [(n, w, t, 'CTL.' + r if r else None) for n, w, t, r in f['find'][1]])] + f['lovs']
+    lovs = ([('LOV_FIND', f['find_title'], f['find'][0],
+              [(n, w, t, 'CTL.' + r if r else None) for n, w, t, r in f['find'][1]])] if 'find' in f else []) \
+        + f.get('lovs', [])
     groups, lovx = lov_xml(lovs, texts)
 
-    master = blocks[0]
+    master = blocks[0] if blocks else dict(name='')
     detail = blocks[1]['name'] if len(blocks) > 1 else ''
     spec, body = program(name, dict(block=master['name'], where=master.get('where', ''), detail=detail), texts)
     out = ['<?xml version="1.0" encoding="UTF-8"?>',

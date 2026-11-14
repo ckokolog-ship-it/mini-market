@@ -4,6 +4,7 @@
 
 | Φόρμα | Τι κάνει | LOV |
 |---|---|---|
+| `MM_MAIN` | **Το μενού**: ένα κουμπί για κάθε φόρμα (όταν κλείνει, γυρίζεις στο μενού) και «Έξοδος». Αυτή ανοίγεις: `fsal.ps1 -Form MM_MAIN -Config mm` | |
 | `MM_ITEMS` | Είδη: κωδικός, barcode, περιγραφή, κατηγορία, ΦΠΑ, μονάδα, τιμή, κόστος, ελάχιστο απόθεμα, ενεργό. Το απόθεμα φαίνεται, αλλά δεν αλλάζει από εδώ | Κατηγορία, ΦΠΑ, Μονάδα, «Βρες…» |
 | `MM_CUSTOMERS` | Πελάτες: επωνυμία, ΑΦΜ, ΔΟΥ, διεύθυνση, τηλέφωνο, email, ενεργός | ΔΟΥ, «Βρες…» |
 | `MM_SUPPLIERS` | Προμηθευτές, με τα ίδια στοιχεία | ΔΟΥ, «Βρες…» |
@@ -67,10 +68,10 @@ powershell -ExecutionPolicy Bypass -File build_forms.ps1
 **4. Το άνοιγμα:** από τον φάκελο `retro\oracle` του PROPOApplication:
 
 ```
-powershell -ExecutionPolicy Bypass -File fsal.ps1 -Form MM_ITEMS -Config mm
+powershell -ExecutionPolicy Bypass -File fsal.ps1 -Form MM_MAIN -Config mm
 ```
 
-Ή από τον browser: `http://192.168.178.165:9001/forms/frmservlet?config=mm&form=MM_ITEMS`.
+Ή από τον browser: `http://192.168.178.165:9001/forms/frmservlet?config=mm&form=MM_MAIN`. Από το μενού ανοίγουν όλες οι άλλες.
 
 Στο Linux (forms1) το ίδιο κάνει το `forms/build_forms.sh`, με το `forms_wallet.sh` για το `MM_DB`.
 
