@@ -77,6 +77,7 @@ create or replace package mm_core as
                      p_price number default null) return number;
   procedure promo_item(p_promo_id number, p_item_id number default null, p_category_id number default null,
                        p_qty number default 1);
+  procedure promo_active(p_promo_id number, p_active varchar2);         -- 'Y' or 'N'
 
   -- clothes and shoes: a variant of a model (a colour and/or a size), an item of its own; the first one
   -- makes the item a model (not sold, no stock); model_price: the price to the model and its variants
@@ -1123,6 +1124,17 @@ create or replace package body mm_core as
     return v;
   exception
     when dup_val_on_index then fail(58, 'Υπάρχει ήδη προσφορά με όνομα ' || p_name);
+  end;
+
+  procedure promo_active(p_promo_id number, p_active varchar2) is
+  begin
+    if p_active not in ('Y', 'N') then
+      fail(58, 'Ενεργή: Y ή N');
+    end if;
+    update mm_promo set active = p_active where id = p_promo_id;
+    if sql%rowcount = 0 then
+      fail(58, 'Δεν υπάρχει προσφορά ' || p_promo_id);
+    end if;
   end;
 
   procedure promo_item(p_promo_id number, p_item_id number default null, p_category_id number default null,

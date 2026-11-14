@@ -1,5 +1,5 @@
 -- MM_UI.pls -- the package UI of the forms of the mini market (MM_ITEMS, MM_CUSTOMERS,
--- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS): mkforms.py puts it in each form. The triggers only call it:
+-- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS): mkforms.py puts it in each form. The triggers only call it:
 --   WHEN-NEW-FORM-INSTANCE  ui.init
 --   WHEN-NEW-RECORD-INSTANCE ui.master(:SYSTEM.TRIGGER_BLOCK)   (a master: its detail again)
 --   WHEN-BUTTON-PRESSED     ui.press(:SYSTEM.TRIGGER_ITEM)
@@ -86,6 +86,20 @@ PACKAGE BODY ui IS
   END;
 
   -- the buttons of the cards and of the reservations: MM_CORE, then COMMIT (MM_CORE does not commit)
+  -- a date typed in CTL (text DD/MM/YYYY: the same on every runtime)
+  FUNCTION day(p_item VARCHAR2) RETURN DATE IS
+  BEGIN
+    RETURN to_date(name_in(p_item), 'DD/MM/YYYY');
+  END;
+
+  -- after a new master record made from CTL: it alone on the screen
+  PROCEDURE show_only(p_id NUMBER) IS
+  BEGIN
+    go_block(c_block);
+    set_block_property(c_block, DEFAULT_WHERE, 'id = ' || to_char(p_id));
+    again(c_block);
+  END;
+
   PROCEDURE action(p_item VARCHAR2) IS
     v NUMBER;
     n NUMBER;
@@ -107,14 +121,11 @@ PACKAGE BODY ui IS
       forms_ddl('COMMIT');                                     -- the log of who saw it
       copy(pin, 'SER.PIN_SHOW');
     ELSIF p_item = 'CTL.NEWRES' THEN
-      v := mm_core.new_reservation(name_in('CTL.R_NAME'), name_in('CTL.R_PHONE'),
-                                   to_date(name_in('CTL.R_DATE'), 'DD/MM/YYYY'));
+      v := mm_core.new_reservation(name_in('CTL.R_NAME'), name_in('CTL.R_PHONE'), day('CTL.R_DATE'));
       forms_ddl('COMMIT');
       copy('', 'CTL.R_NAME');
       copy('', 'CTL.R_PHONE');
-      go_block(c_block);
-      set_block_property(c_block, DEFAULT_WHERE, 'id = ' || to_char(v));
-      again(c_block);
+      show_only(v);
       message('Νέα κράτηση ' || to_char(v) || ': πρόσθεσε τα είδη της');
     ELSIF p_item = 'CTL.RESERVE' THEN
       mm_core.reserve(num('RES.ID'), num('CTL.ITEM_ID'), nvl(num('CTL.QTY'), 1));
@@ -137,6 +148,63 @@ PACKAGE BODY ui IS
       forms_ddl('COMMIT');
       again(c_block);
       message('Η κράτηση ακυρώθηκε');
+    -- the baskets: a component in or out (0), a new basket from an item, assemble (negative: apart)
+    ELSIF p_item = 'CTL.ADDCOMP' THEN
+      v := nvl(num('CTL.NEWKIT_ID'), num('KIT.ID'));
+      mm_core.set_component(v, num('CTL.COMP_ID'), nvl(num('CTL.COMP_QTY'), 1));
+      forms_ddl('COMMIT');
+      copy('', 'CTL.COMP_ID');
+      copy('', 'CTL.COMP_TEXT');
+      IF name_in('CTL.NEWKIT_ID') IS NOT NULL THEN
+        copy('', 'CTL.NEWKIT_ID');
+        copy('', 'CTL.NEWKIT_TEXT');
+        show_only(v);
+      ELSE
+        again('KC');
+      END IF;
+    ELSIF p_item = 'CTL.ASSEMBLE' THEN
+      n := num('CTL.ASM_QTY');
+      mm_core.assemble_kit(num('KIT.ID'), n);
+      forms_ddl('COMMIT');
+      again(c_block);
+      message('Καλάθια: ' || to_char(n));
+    -- the promotions: new, an item or a category in (0: out), active or not
+    ELSIF p_item = 'CTL.NEWPROMO' THEN
+      v := mm_core.new_promo(name_in('CTL.P_NAME'), upper(name_in('CTL.P_KIND')), day('CTL.P_FROM'), day('CTL.P_TO'),
+                             num('CTL.P_PCT'), num('CTL.P_BUY'), num('CTL.P_FREE'), num('CTL.P_PRICE'));
+      forms_ddl('COMMIT');
+      copy('', 'CTL.P_NAME');
+      show_only(v);
+      message('Νέα προσφορά: βάλε τα είδη ή τις κατηγορίες της');
+    ELSIF p_item = 'CTL.ADDPI' THEN
+      mm_core.promo_item(num('PROMO.ID'), num('CTL.PI_ITEM_ID'), num('CTL.PI_CAT_ID'), nvl(num('CTL.PI_QTY'), 1));
+      forms_ddl('COMMIT');
+      copy('', 'CTL.PI_ITEM_ID');
+      copy('', 'CTL.PI_ITEM_TEXT');
+      copy('', 'CTL.PI_CAT_ID');
+      copy('', 'CTL.PI_CAT_TEXT');
+      again('PI');
+    ELSIF p_item = 'CTL.TOGGLE' THEN
+      mm_core.promo_active(num('PROMO.ID'), CASE name_in('PROMO.ACTIVE') WHEN 'Y' THEN 'N' ELSE 'Y' END);
+      forms_ddl('COMMIT');
+      again(c_block);
+    -- clothes and shoes: a new variant (of the model, or of an item that becomes a model), one price
+    ELSIF p_item = 'CTL.NEWVAR' THEN
+      v := nvl(num('CTL.NEWMODEL_ID'), num('MODEL.ID'));
+      n := mm_core.make_variant(v, num('CTL.V_COLOR_ID'), num('CTL.V_SIZE_ID'), name_in('CTL.V_BARCODE'));
+      forms_ddl('COMMIT');
+      copy('', 'CTL.V_BARCODE');
+      IF name_in('CTL.NEWMODEL_ID') IS NOT NULL THEN
+        copy('', 'CTL.NEWMODEL_ID');
+        copy('', 'CTL.NEWMODEL_TEXT');
+        show_only(v);
+      ELSE
+        again('VG');
+      END IF;
+    ELSIF p_item = 'CTL.MPRICE' THEN
+      mm_core.model_price(num('MODEL.ID'), num('CTL.M_PRICE'));
+      forms_ddl('COMMIT');
+      again(c_block);
     END IF;
   EXCEPTION
     WHEN form_trigger_failure THEN
@@ -203,9 +271,12 @@ PACKAGE BODY ui IS
   -- writes it and never sees "record changed by another user" for it)
   PROCEDURE post_query(p_block VARCHAR2) IS
     n VARCHAR2(200);
+    z VARCHAR2(40);
     r NUMBER;
     s NUMBER;
+    a NUMBER;
     id_ NUMBER;
+    c_ NUMBER;
   BEGIN
     IF p_block = 'ITEM' THEN
       -- NAME_IN outside the SELECT: a built-in of the Forms "may not be used in SQL" (PL/SQL 231)
@@ -228,6 +299,34 @@ PACKAGE BODY ui IS
       id_ := num('RL.ITEM_ID');
       SELECT code || ' ' || name INTO n FROM mm_item WHERE id = id_;
       copy(n, 'RL.ITEM_TEXT');
+    ELSIF p_block = 'KIT' THEN
+      id_ := num('KIT.ID');
+      SELECT ready, can_make INTO s, a FROM mm_kit_avail WHERE kit_id = id_;
+      copy(to_char(s), 'KIT.STOCK');
+      copy(to_char(a), 'KIT.CAN_MAKE');
+    ELSIF p_block = 'KC' THEN
+      id_ := num('KC.COMPONENT_ID');
+      SELECT code || ' ' || name, stock INTO n, s FROM mm_item WHERE id = id_;
+      copy(n, 'KC.COMP_TEXT');
+      copy(to_char(s), 'KC.COMP_STOCK');
+    ELSIF p_block = 'PI' THEN
+      id_ := num('PI.ITEM_ID');
+      c_ := num('PI.CATEGORY_ID');
+      SELECT nvl((SELECT code || ' ' || name FROM mm_item WHERE id = id_),
+                 (SELECT name FROM mm_category WHERE id = c_)) INTO n FROM dual;
+      copy(n, 'PI.TEXT');
+    ELSIF p_block = 'VG' THEN
+      id_ := num('VG.ID');
+      SELECT c.name, z.code, av.stock, av.available INTO n, z, s, a
+      FROM mm_item v
+      LEFT JOIN mm_color c ON c.id = v.color_id
+      LEFT JOIN mm_size z ON z.id = v.size_id
+      JOIN mm_item_avail av ON av.item_id = v.id
+      WHERE v.id = id_;
+      copy(n, 'VG.COLOR_TEXT');
+      copy(z, 'VG.SIZE_TEXT');
+      copy(to_char(s), 'VG.STOCK');
+      copy(to_char(a), 'VG.AVAIL');
     END IF;
   END;
 
