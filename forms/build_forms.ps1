@@ -1,7 +1,7 @@
 # build_forms.ps1 -- Forms 14.1.2 on Windows: the forms of the mini market, from the XML of the repo
 # to the .fmx in the folder of FORMS_PATH (C:\forms_dev). build_forms.sh is the same for Linux.
 #
-#   powershell -ExecutionPolicy Bypass -File build_forms.ps1                    (all three)
+#   powershell -ExecutionPolicy Bypass -File build_forms.ps1                    (all of them)
 #   powershell -ExecutionPolicy Bypass -File build_forms.ps1 -Forms MM_ITEMS
 #
 # Before, once: the database (db\INSTALL.sql demo) and the wallet with the alias MM_DB, from the
@@ -15,7 +15,7 @@
 # - frmcmp.exe with batch=yes; NLS_LANG EL8MSWIN1253 for the tools (the forms are ASCII).
 # This file is ASCII on purpose: Windows PowerShell 5 reads a file without BOM as ANSI.
 param(
-  [string[]]$Forms = @('MM_ITEMS', 'MM_CUSTOMERS', 'MM_SUPPLIERS'),
+  [string[]]$Forms = @('MM_ITEMS', 'MM_CUSTOMERS', 'MM_SUPPLIERS', 'MM_CARDS', 'MM_RESERVATIONS'),
   [string]$UserId = '/@MM_DB',
   [string]$OracleHome = 'C:\Oracle\Middleware\Oracle_Home',
   [string]$Domain = 'C:\Oracle\Middleware\Oracle_Home\user_projects\domains\forms_domain',

@@ -129,6 +129,83 @@ def partner_form(table, title, one):
 FORMS['MM_CUSTOMERS'] = partner_form('MM_CUSTOMER', 'Πελάτες', 'Πελάτης')
 FORMS['MM_SUPPLIERS'] = partner_form('MM_SUPPLIER', 'Προμηθευτές', 'Προμηθευτής')
 
+# the cards of mobile phones: the items with serials (master), their cards (detail), the load of a
+# card (serial, PIN: dots on the screen), and the PIN of a card for a user who may see it
+FORMS['MM_CARDS'] = dict(
+    title='Κάρτες κινητής',
+    blocks=[
+        dict(name='CARD', table='MM_ITEM', order='code', top=80, rows=4, read_only=True,
+             where="serial_tracked = 'Y'",
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('CODE', 'Κωδικός', 90, len=20),
+                   C('NAME', 'Περιγραφή', 260, len=100),
+                   C('PRICE', 'Τιμή', 70, num=True, mask='99G990D00'),
+                   C('MAX_PER_SALE', 'Μέγ./απόδ.', 70, num=True),
+                   C('STOCK', 'Διαθέσιμες', 80, num=True, db=False, display=True)]),
+        dict(name='SER', table='MM_SERIAL', order='id desc', top=250, rows=10, read_only=True,
+             where='item_id = :CARD.ID',
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('SERIAL', 'Serial', 200, len=40),
+                   C('STATUS', 'Κατ.', 40, len=1),
+                   C('CREATED_AT', 'Φόρτωση', 90, date=True),
+                   C('SOLD_AT', 'Πώληση', 90, date=True),
+                   C('PIN_SHOW', 'PIN', 160, len=40, db=False, display=True)])],
+    ctl=[('NEW_SERIAL', 'text', 10, 200, 200, 'Νέο serial', {'len': 40}),
+         ('NEW_PIN', 'secret', 216, 200, 140, 'PIN', {'len': 20}),
+         ('LOAD', 'button', 362, 198, 120, 'Φόρτωσε', {}),
+         ('USERNAME', 'text', 560, 200, 120, 'Χρήστης', {'len': 60, 'upper': True}),
+         ('PIN', 'button', 686, 198, 120, 'Δείξε PIN', {})],
+    find_title='Κάρτες κινητής',
+    find=("select id, code, name from mm_item where serial_tracked = 'Y' order by code",
+          [('ID', 0, 'Κωδ.', 'FIND_ID'), ('CODE', 90, 'Κωδικός', None), ('NAME', 260, 'Περιγραφή', 'FIND_TEXT')]),
+    lovs=[])
+
+# the reservations: the reservations (master), their items (detail); a new reservation, an item and
+# its quantity (0: out), the deposit, the delivery (a retail receipt, posted), the cancel
+FORMS['MM_RESERVATIONS'] = dict(
+    title='Κρατήσεις',
+    blocks=[
+        dict(name='RES', table='MM_RESERVATION', order='pickup_date, id', top=80, rows=6, read_only=True,
+             cols=[C('ID', 'Αρ.', 50, num=True),
+                   C('NAME', 'Όνομα', 200, len=100),
+                   C('PHONE', 'Τηλέφωνο', 100, len=20),
+                   C('PICKUP_DATE', 'Παραλαβή', 90, date=True),
+                   C('STATUS', 'Κατ.', 40, len=1),
+                   C('DEPOSIT', 'Προκαταβολή', 90, num=True, mask='99G990D00')]),
+        dict(name='RL', table='MM_RESERVATION_LINE', order='id', top=330, rows=6, read_only=True,
+             where='reservation_id = :RES.ID',
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('ITEM_ID', '', 0, num=True, hidden=True),
+                   C('ITEM_TEXT', 'Είδος', 300, len=200, db=False, display=True),
+                   C('QTY', 'Ποσότητα', 80, num=True),
+                   C('PRICE', 'Τιμή', 80, num=True, mask='99G990D00')])],
+    ctl=[('R_NAME', 'text', 10, 260, 200, 'Όνομα', {'len': 100}),
+         ('R_PHONE', 'text', 216, 260, 110, 'Τηλέφωνο', {'len': 20}),
+         ('R_DATE', 'date', 332, 260, 90, 'Παραλαβή', {}),
+         ('NEWRES', 'button', 428, 258, 140, 'Νέα κράτηση', {}),
+         ('ITEM_TEXT', 'text', 600, 330, 260, 'Είδος (F9)', {'len': 200, 'lov': 'LOV_ITEMR'}),
+         ('ITEM_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('QTY', 'text', 866, 330, 60, 'Ποσότητα', {'num': True, 'init': '1'}),
+         ('RESERVE', 'button', 932, 328, 120, 'Βάλε / άλλαξε', {}),
+         ('AMOUNT', 'text', 600, 420, 80, 'Ποσό', {'num': True}),
+         ('PAY', 'text', 686, 420, 60, 'Πληρωμή', {'len': 4, 'upper': True, 'init': 'CASH', 'lov': 'LOV_PAY'}),
+         ('REG_CODE', 'text', 752, 420, 50, 'Ταμείο', {'len': 10, 'upper': True, 'init': 'T1'}),
+         ('DEPOSIT', 'button', 808, 418, 120, 'Προκαταβολή', {}),
+         ('DELIVER', 'button', 600, 460, 160, 'Παράδοση (απόδειξη)', {}),
+         ('CANCELRES', 'button', 766, 460, 160, 'Ακύρωση κράτησης', {})],
+    find_title='Κρατήσεις',
+    find=("select id, name, phone, to_char(pickup_date, 'dd/mm/yyyy') pickup from mm_reservation "
+          "order by pickup_date desc, id desc",
+          [('ID', 50, 'Αρ.', 'FIND_ID'), ('NAME', 200, 'Όνομα', 'FIND_TEXT'), ('PHONE', 100, 'Τηλέφωνο', None),
+           ('PICKUP', 90, 'Παραλαβή', None)]),
+    lovs=[('LOV_ITEMR', 'Είδη', "select id, code || ' ' || name text from mm_item where active = 'Y' "
+                               "and is_model = 'N' and serial_tracked = 'N' order by code",
+           [('ID', 0, 'Κωδ.', 'CTL.ITEM_ID'), ('TEXT', 320, 'Είδος', 'CTL.ITEM_TEXT')]),
+          ('LOV_PAY', 'Πληρωμή', ' union all '.join(
+              "select '%s' code, mm_text.t('%s') descr from dual" % (c, WORDS.key(d))
+              for c, d in (('CASH', 'Μετρητά'), ('CARD', 'Κάρτα'))),
+           [('CODE', 60, 'Πληρωμή', 'CTL.PAY'), ('DESCR', 120, 'Περιγραφή', None)])])
+
 
 def attrs(a):
     return ' '.join('%s=%s' % (k, quoteattr(str(v))) for k, v in a.items())
@@ -157,28 +234,26 @@ def program(name, f, texts):
     body = '\n'.join(out)
     body = body.replace("c_block CONSTANT VARCHAR2(30) := 'BLOCK'; -- BLOCK",
                         "c_block CONSTANT VARCHAR2(30) := '%s';" % f['block'])
+    body = body.replace("c_where CONSTANT VARCHAR2(400) := ''; -- WHERE",
+                        "c_where CONSTANT VARCHAR2(400) := '%s';" % f.get('where', '').replace("'", "''"))
+    body = body.replace("c_detail CONSTANT VARCHAR2(30) := ''; -- DETAIL",
+                        "c_detail CONSTANT VARCHAR2(30) := '%s';" % f.get('detail', ''))
     body = body.replace('NULL; -- TEXTS', ('\n' + ' ' * 4).join(texts))
     return spec, body
 
 
-def build(name, f):
-    texts = ["SET_WINDOW_PROPERTY('%s', TITLE, tx('%s'));" % (WINDOW, WORDS.key(f['title']))]
-    blk, out_items, ctl = f['block'], [], []
-
-    def say(item, prop, text):
-        if nonascii(text):
-            texts.append("SET_ITEM_PROPERTY('%s', %s, tx('%s'));" % (item, prop, WORDS.key(text)))
-
-    # the block of the table
-    x = 10
-    for c in f['cols']:
+def block_items(blk, cols, top, say, x0=10):
+    """the items of a block of a table, side by side from x0 on the row top; its width"""
+    out_items = []
+    x = x0
+    for c in cols:
         a = dict(Name=c['name'])
         if c.get('hidden'):
             a.update(ItemType='Text Item', Visible='false')
         else:
             a.update(ItemType='Check Box' if c.get('check') else
                      'Display Item' if c.get('display') else 'Text Item',
-                     CanvasName=CANVAS, XPosition=x, YPosition=TOP, Width=c['width'], Height=ROW_H,
+                     CanvasName=CANVAS, XPosition=x, YPosition=top, Width=c['width'], Height=ROW_H,
                      Prompt=ascii_text(c['prompt']), PromptAttachmentEdge='Top', PromptAttachmentOffset=2)
             x += c['width'] + 4
             say('%s.%s' % (blk, c['name']), 'PROMPT_TEXT', c['prompt'])
@@ -186,12 +261,14 @@ def build(name, f):
             a.update(CheckedValue='Y', UncheckedValue='N', CheckBoxOtherValues='Not Allowed',
                      Label='', DataType='Char', MaximumLength=1)
         else:
-            a.update(DataType='Number' if c.get('num') else 'Char',
-                     MaximumLength=c.get('len', 14 if c.get('num') else 30))
+            a.update(DataType='Number' if c.get('num') else 'Date' if c.get('date') else 'Char',
+                     MaximumLength=c.get('len', 14 if c.get('num') else 10 if c.get('date') else 30))
         if c.get('num') and not c.get('hidden'):
             a['Justification'] = 'Right'
         if c.get('mask'):
             a['FormatMask'] = c['mask']      # 0,45 not ,45; 4,60 not 4,6 (D and G: the NLS of the runtime)
+        if c.get('date'):
+            a['FormatMask'] = 'DD/MM/YYYY'
         if c.get('db', True):
             a['ColumnName'] = c['name']
         else:
@@ -208,24 +285,11 @@ def build(name, f):
             a['LovName'] = c['lov']
             a['ValidateFromList'] = 'false' if c.get('free') else 'true'
         out_items.append(a)
-    width = x + 6
+    return out_items, x
 
-    # the block CTL: Find... (its LOV returns FIND_ID and FIND_TEXT), All
-    ctl.append(dict(Name='FIND', ItemType='Push Button', CanvasName=CANVAS, XPosition=10, YPosition=10,
-                    Width=110, Height=26, Label='Vres...'))
-    say('CTL.FIND', 'LABEL', 'Βρες...')
-    ctl.append(dict(Name='FIND_TEXT', ItemType='Display Item', CanvasName=CANVAS, XPosition=126,
-                    YPosition=12, Width=300, Height=ROW_H, DatabaseItem='false', DataType='Char',
-                    MaximumLength=100))
-    ctl.append(dict(Name='ALL', ItemType='Push Button', CanvasName=CANVAS, XPosition=432, YPosition=10,
-                    Width=110, Height=26, Label='Ola'))
-    say('CTL.ALL', 'LABEL', 'Όλα')
-    ctl.append(dict(Name='FIND_ID', ItemType='Text Item', Visible='false', DatabaseItem='false',
-                    DataType='Number', MaximumLength=20))
 
-    # the record groups and the LOVs: FIND first
-    lovs = [('LOV_FIND', f['find_title'], f['find'][0],
-             [(n, w, t, 'CTL.' + r if r else None) for n, w, t, r in f['find'][1]])] + f['lovs']
+def lov_xml(lovs, texts):
+    """the record groups and the LOVs; their Greek titles to ui.init"""
     groups, lovx = [], []
     for lov, title, query, cols in lovs:
         rg = 'RG' + lov[3:]
@@ -251,22 +315,103 @@ def build(name, f):
             if nonascii(t):
                 texts.append("SET_LOV_COLUMN_PROPERTY('%s', %d, TITLE, tx('%s'));" % (lov, i, WORDS.key(t)))
         lovx.append('    </LOV>')
+    return groups, lovx
 
-    spec, body = program(name, f, texts)
-    height = TOP + ROWS * ROW_H + 40
+
+def ctl_item(c, say):
+    """an item of the block CTL: (name, kind, x, y, width, text, options)
+       kind: button (its label), text / date / secret (a prompt on its left), display, hidden"""
+    name, kind, x, y, w, text, o = c
+    a = dict(Name=name)
+    if kind == 'button':
+        a.update(ItemType='Push Button', CanvasName=CANVAS, XPosition=x, YPosition=y, Width=w, Height=26,
+                 Label=ascii_text(text))
+        say('CTL.' + name, 'LABEL', text)
+        return a
+    if kind == 'hidden':
+        a.update(ItemType='Text Item', Visible='false', DatabaseItem='false',
+                 DataType='Number' if o.get('num') else 'Char', MaximumLength=o.get('len', 40))
+        return a
+    a.update(ItemType='Display Item' if kind == 'display' else 'Text Item', CanvasName=CANVAS,
+             XPosition=x, YPosition=y, Width=w, Height=ROW_H, DatabaseItem='false',
+             DataType='Number' if o.get('num') else 'Date' if kind == 'date' else 'Char',
+             MaximumLength=o.get('len', 14 if o.get('num') else 10 if kind == 'date' else 100))
+    if text:
+        a.update(Prompt=ascii_text(text), PromptAttachmentEdge='Top', PromptAttachmentOffset=2)
+        say('CTL.' + name, 'PROMPT_TEXT', text)
+    if kind == 'date':
+        a.update(FormatMask='DD/MM/YYYY', InitializeValue='$$DATE$$')
+    if kind == 'secret':
+        a['ConcealData'] = 'true'          # a PIN typed: dots on the screen
+    if o.get('num'):
+        a['Justification'] = 'Right'
+    if o.get('upper'):
+        a['CaseRestriction'] = 'Upper'
+    if 'init' in o:
+        a['InitializeValue'] = o['init']
+    if o.get('lov'):
+        a['LovName'] = o['lov']
+        a['ValidateFromList'] = 'false'
+    return a
+
+
+FIND_CTL = [('FIND', 'button', 10, 10, 110, 'Βρες...', {}),
+            ('FIND_TEXT', 'display', 126, 12, 300, '', {}),
+            ('ALL', 'button', 432, 10, 110, 'Όλα', {}),
+            ('FIND_ID', 'hidden', 0, 0, 0, '', {'num': True, 'len': 20})]
+
+
+def build(name, f):
+    """a form: f['blocks'] (the first the master; a detail with 'where' on the master), or one block
+    (f['block'], f['table'], f['cols']); the block CTL (Find..., All, and f['ctl']); the LOVs"""
+    texts = ["SET_WINDOW_PROPERTY('%s', TITLE, tx('%s'));" % (WINDOW, WORDS.key(f['title']))]
+
+    def say(item, prop, text):
+        if nonascii(text):
+            texts.append("SET_ITEM_PROPERTY('%s', %s, tx('%s'));" % (item, prop, WORDS.key(text)))
+
+    blocks = f.get('blocks') or [dict(name=f['block'], table=f['table'], order=f['order'], cols=f['cols'],
+                                      top=TOP, rows=ROWS)]
+    width, height, out_blocks = 0, 0, []
+    for b in blocks:
+        items, w = block_items(b['name'], b['cols'], b['top'], say)
+        width = max(width, w + 6)
+        height = max(height, b['top'] + b['rows'] * ROW_H + 40)
+        out_blocks.append((b, items))
+    ctl = [ctl_item(c, say) for c in FIND_CTL + f.get('ctl', [])]
+    for c in f.get('ctl', []):
+        if c[1] != 'hidden':
+            width = max(width, c[2] + c[4] + 10)
+            height = max(height, c[3] + 40)
+
+    lovs = [('LOV_FIND', f['find_title'], f['find'][0],
+             [(n, w, t, 'CTL.' + r if r else None) for n, w, t, r in f['find'][1]])] + f['lovs']
+    groups, lovx = lov_xml(lovs, texts)
+
+    master = blocks[0]
+    detail = blocks[1]['name'] if len(blocks) > 1 else ''
+    spec, body = program(name, dict(block=master['name'], where=master.get('where', ''), detail=detail), texts)
     out = ['<?xml version="1.0" encoding="UTF-8"?>',
            '<Module version="141200000" xmlns="http://xmlns.oracle.com/Forms">',
            '  <FormModule Name="%s" Title=%s ConsoleWindow="%s" MenuModule="DEFAULT&amp;SMARTBAR">'
            % (name, quoteattr(greeklish(f['title'])), WINDOW),
            '    <Coordinate CharacterCellWidth="7" CharacterCellHeight="14" CoordinateSystem="Real" '
-           'RealUnit="Pixel" DefaultFontScaling="true"/>',
-           '    <Block Name="%s" QueryDataSourceName="%s" DMLDataName="%s" OrderByClause="%s" '
-           'RecordsDisplayCount="%d">' % (blk, f['table'], f['table'], f['order'], ROWS)]
-    out += ['      <Item %s/>' % attrs(a) for a in out_items]
-    out += [trigger('POST-QUERY', 'ui.post_query(:SYSTEM.TRIGGER_BLOCK);', '      '),
-            trigger('WHEN-VALIDATE-ITEM', 'ui.validate(:SYSTEM.TRIGGER_ITEM);', '      '),
-            '    </Block>',
-            '    <Block Name="CTL" DatabaseBlock="false" RecordsDisplayCount="1">']
+           'RealUnit="Pixel" DefaultFontScaling="true"/>']
+    for b, items in out_blocks:
+        extra = ''
+        if b.get('where'):
+            extra += ' WhereClause=%s' % quoteattr(b['where'])
+        if b.get('read_only'):
+            extra += ' InsertAllowed="false" UpdateAllowed="false" DeleteAllowed="false"'
+        out.append('    <Block Name="%s" QueryDataSourceName="%s" DMLDataName="%s" OrderByClause="%s" '
+                   'RecordsDisplayCount="%d"%s>' % (b['name'], b['table'], b['table'], b['order'], b['rows'], extra))
+        out += ['      <Item %s/>' % attrs(a) for a in items]
+        out += [trigger('POST-QUERY', 'ui.post_query(:SYSTEM.TRIGGER_BLOCK);', '      '),
+                trigger('WHEN-VALIDATE-ITEM', 'ui.validate(:SYSTEM.TRIGGER_ITEM);', '      ')]
+        if b is master and detail:
+            out.append(trigger('WHEN-NEW-RECORD-INSTANCE', 'ui.master(:SYSTEM.TRIGGER_BLOCK);', '      '))
+        out.append('    </Block>')
+    out.append('    <Block Name="CTL" DatabaseBlock="false" RecordsDisplayCount="1">')
     out += ['      <Item %s/>' % attrs(a) for a in ctl]
     out += [trigger('WHEN-BUTTON-PRESSED', 'ui.press(:SYSTEM.TRIGGER_ITEM);', '      '),
             '    </Block>',

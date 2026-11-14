@@ -16,6 +16,9 @@ import pytest
 
 oracledb = pytest.importorskip('oracledb')
 from test_db import DSN  # noqa: E402
+import test_core  # noqa: E402
+
+env = test_core.env      # its items, customer, supplier, register TST
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 NS = {'f': 'http://xmlns.oracle.com/Forms'}
@@ -68,13 +71,14 @@ begin
   if fstub.props.exists('BLOCK ' || fstub.block || '#4') then w := fstub.props('BLOCK ' || fstub.block || '#4'); end if;
   fstub.queries := fstub.queries || fstub.block || ':' || w || ';';
 end;""",
+    "create or replace procedure forms_ddl(p varchar2) is begin execute immediate p; end;",
     """create or replace function show_lov(l varchar2) return boolean is
 begin
   if fstub.lov_answer then fstub.items('CTL.FIND_ID') := fstub.lov_id; end if;
   return fstub.lov_answer;
 end;""",
 ]
-DROP = ['package ui', 'function show_lov', 'procedure execute_query', 'procedure go_block',
+DROP = ['package ui', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
         'procedure set_item_property', 'procedure set_window_property', 'function default_where',
         'function prompt_text', 'function label', 'function title', 'procedure message', 'procedure copy',
@@ -280,3 +284,77 @@ def test_error_messages(cur):
     assert msgs(cur) == 'Υπάρχει ήδη είδος με αυτό το barcode\n'
     run(cur, "ui.on_error(40100, 'FRM', 'At first record.', null);")
     assert msgs(cur) == 'FRM-40100: At first record.\n'
+
+
+# -- the forms of the cards and of the reservations: the buttons, against MM_CORE (they commit) --------
+
+def test_cards_and_reservations_forms_shape():
+    root = xml_of('MM_CARDS')
+    blocks = {b.get('Name'): b for b in root.iter('{%s}Block' % NS['f'])}
+    assert blocks['CARD'].get('WhereClause') == "serial_tracked = 'Y'"
+    assert blocks['SER'].get('WhereClause') == 'item_id = :CARD.ID'
+    assert blocks['SER'].get('UpdateAllowed') == 'false'
+    items = {i.get('Name'): i for i in blocks['CTL'].findall('f:Item', NS)}
+    assert items['NEW_PIN'].get('ConcealData') == 'true'                     # dots, not the PIN
+    trig = [t.get('Name') for t in blocks['CARD'].findall('f:Trigger', NS)]
+    assert 'WHEN-NEW-RECORD-INSTANCE' in trig
+    res = {b.get('Name'): b for b in xml_of('MM_RESERVATIONS').iter('{%s}Block' % NS['f'])}
+    assert res['RL'].get('WhereClause') == 'reservation_id = :RES.ID'
+
+
+@needs_db
+def test_cards_form(cur, env):
+    db, ids = env
+    cat = db.one('select min(id) from mm_category')[0]
+    db.cur.execute("insert into mm_item (code, name, category_id, vat_code, price, serial_tracked) "
+                   "values (:c, 'Test card form', :cat, 'A', 5, 'Y')", c=f"TST{ids['tag']}F", cat=cat)
+    db.cur.execute("insert into mm_pin_user (username) values ('TSTFORMS')")
+    db.commit()
+    card = db.one('select id from mm_item where code = :c', c=f"TST{ids['tag']}F")[0]
+    compile_ui(cur, 'MM_CARDS')
+    run(cur, 'ui.init;')
+    cur.execute('begin :v := fstub.queries; end;', v=(q := cur.var(str)))
+    assert q.getvalue() == "CARD:serial_tracked = 'Y';"
+    serial = f"FRM-{ids['tag']}-1"
+    run(cur, "ui.press('CTL.LOAD');", CARD__ID=str(card), CTL__NEW_SERIAL=serial, CTL__NEW_PIN='123456')
+    assert 'φορτώθηκε' in msgs(cur)
+    assert item(cur, 'CTL.NEW_SERIAL') is None and item(cur, 'CTL.NEW_PIN') is None
+    assert item(cur, 'CARD.STOCK') == '1'
+    sid = db.one('select id from mm_serial where serial = :s', s=serial)[0]   # committed: the other session sees it
+    run(cur, "ui.press('CTL.LOAD');", CARD__ID=str(card), CTL__NEW_SERIAL=serial, CTL__NEW_PIN='1')
+    assert 'MM-136' in msgs(cur) or 'MM-135' in msgs(cur)                   # twice: a message, no failure
+    run(cur, "ui.press('CTL.PIN');", SER__ID=str(sid), CTL__USERNAME='TSTFORMS')
+    assert item(cur, 'SER.PIN_SHOW') == '123456'
+    run(cur, "ui.press('CTL.PIN');", SER__ID=str(sid), CTL__USERNAME='NOBODY')
+    assert 'MM-143' in msgs(cur) and item(cur, 'SER.PIN_SHOW') is None
+    # the detail once for each master record
+    run(cur, "ui.master('CARD');", CARD__ID=str(card))
+    cur.execute('begin :v := fstub.queries; ui.master(\'CARD\'); :w := fstub.queries; end;',
+                v=(a := cur.var(str)), w=(b := cur.var(str)))
+    assert a.getvalue() == 'SER:;' and b.getvalue() == 'SER:;'
+
+
+@needs_db
+def test_reservations_form(cur, env):
+    db, ids = env
+    if not db.fn('open_z_of', int, ids['reg']):
+        db.fn('open_z', int, ids['reg'])
+        db.commit()
+    compile_ui(cur, 'MM_RESERVATIONS')
+    today = __import__('datetime').date.today().strftime('%d/%m/%Y')
+    run(cur, "ui.press('CTL.NEWRES');", CTL__R_NAME='Test Φόρμα', CTL__R_PHONE='6912345678', CTL__R_DATE=today)
+    r = db.one("select max(id) from mm_reservation where name = 'Test Φόρμα'")[0]
+    cur.execute('begin :v := fstub.queries; end;', v=(q := cur.var(str)))
+    assert r and f'RES:id = {r};' in q.getvalue()                            # the new one alone
+    run(cur, "ui.press('CTL.RESERVE');", RES__ID=str(r), CTL__ITEM_ID=str(ids['b']), CTL__QTY='2')
+    assert float(db.one('select qty from mm_reservation_line where reservation_id = :r', r=r)[0]) == 2
+    run(cur, "ui.press('CTL.DEPOSIT');", RES__ID=str(r), CTL__AMOUNT='1', CTL__PAY='CASH', CTL__REG_CODE='TST')
+    assert float(db.one('select deposit from mm_reservation where id = :r', r=r)[0]) == 1
+    assert 'NOWHERE' not in msgs(cur)
+    fails(cur, "ui.press('CTL.DEPOSIT');", RES__ID=str(r), CTL__AMOUNT='1', CTL__REG_CODE='NOWHERE')
+    run(cur, "ui.press('CTL.DELIVER');", RES__ID=str(r), CTL__PAY='CASH', CTL__REG_CODE='TST')
+    status, doc = db.one('select status, doc_id from mm_reservation where id = :r', r=r)
+    assert status == 'D' and db.one('select status from mm_doc where id = :d', d=doc)[0] == 'P'
+    assert 'απόδειξη' in msgs(cur)
+    run(cur, "ui.post_query('RL');", RL__ITEM_ID=str(ids['b']))
+    assert item(cur, 'RL.ITEM_TEXT').startswith(f"TST{ids['tag']}B ")

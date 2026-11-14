@@ -2,7 +2,7 @@
 # build_forms.sh -- on a Linux Forms server (forms1), as oracle: the forms of the mini market, XML ->
 # .fmb (XML2Forms) -> .fmx (frmcmp_batch) in the first folder of FORMS_PATH of default.env.
 #
-#   ./build_forms.sh [user@db or /@MM_DB] [FORM ...]      (by default /@MM_DB, all three)
+#   ./build_forms.sh [user@db or /@MM_DB] [FORM ...]      (by default /@MM_DB, all of them)
 #
 # /@MM_DB: the wallet of the domain (PROPOApplication retro/oracle/linux/forms_wallet.sh, with the
 # alias MM_DB of the user mm). MM_TEXT.sql first, with the sqlplus of the database and AL32UTF8.
@@ -11,7 +11,7 @@ cd "$(dirname "$0")" || exit 1
 HERE=$(pwd)
 USERID=${1:-/@MM_DB}
 shift || true
-FORMS=${*:-MM_ITEMS MM_CUSTOMERS MM_SUPPLIERS}
+FORMS=${*:-MM_ITEMS MM_CUSTOMERS MM_SUPPLIERS MM_CARDS MM_RESERVATIONS}
 MW=${MW_HOME:-/u01/app/oracle/middleware}
 DOMAIN=${DOMAIN_HOME:-/u01/app/oracle/config/domains/forms_domain}
 DB_HOME=${ORACLE_HOME:-/opt/oracle/product/26ai/dbhomeFree}
