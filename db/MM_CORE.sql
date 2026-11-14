@@ -22,7 +22,8 @@ create or replace package mm_core as
   procedure amounts(p_price number, p_qty number, p_discount number, p_rate number, p_incl varchar2,
                     o_net out number, o_vat out number, o_total out number);
 
-  -- the price a new line takes when none is given: retail with VAT, sale without VAT, or the cost
+  -- the price a new line takes when none is given: retail with VAT (receipt), the wholesale price
+  -- (invoice of sale; empty: the retail without its VAT), or the cost (purchase)
   function default_price(p_doc_type varchar2, p_item_id number) return number;
 
   -- the documents: a draft, its lines, then post (number, stock, cash) or cancel
@@ -237,6 +238,8 @@ create or replace package body mm_core as
       return i.cost;
     elsif t.prices_incl_vat = 'Y' then
       return i.price;
+    elsif i.wholesale_price is not null then
+      return i.wholesale_price;
     end if;
     select rate into r from mm_vat where code = i.vat_code;
     return round(i.price / (1 + r / 100), 4);
@@ -308,8 +311,10 @@ create or replace package body mm_core as
       l(n).rate := x.vat_rate; l(n).pdisc := 0; l(n).ddisc := 0; l(n).promo := null; l(n).used := false;
     end loop;
 
+    -- the promotions are of the till: a retail receipt only (an invoice of sale has its wholesale
+    -- price); the discount of the document (step 4) is for every sale
     -- 1. bundles: as many times as all their items are there
-    for p in (select * from mm_promo where kind = 'BUNDLE' and active = 'Y'
+    for p in (select * from mm_promo where kind = 'BUNDLE' and active = 'Y' and d.doc_type = 'ALP'
               and d.doc_date between date_from and date_to order by id) loop
       declare
         type t_num is table of number index by pls_integer;
@@ -364,7 +369,7 @@ create or replace package body mm_core as
     end loop;
 
     -- 2. buy N get M free: the cheapest pieces of the pool free
-    for p in (select * from mm_promo where kind = 'NM' and active = 'Y'
+    for p in (select * from mm_promo where kind = 'NM' and active = 'Y' and d.doc_type = 'ALP'
               and d.doc_date between date_from and date_to order by id) loop
       declare
         units number := 0;
@@ -412,7 +417,8 @@ create or replace package body mm_core as
     for i in 1 .. n loop
       if not l(i).used then
         for p in (select pr.id, pr.pct from mm_promo pr
-                  where pr.kind = 'PCT' and pr.active = 'Y' and d.doc_date between pr.date_from and pr.date_to
+                  where pr.kind = 'PCT' and pr.active = 'Y' and d.doc_type = 'ALP'
+                    and d.doc_date between pr.date_from and pr.date_to
                     and exists (select 1 from mm_promo_item x where x.promo_id = pr.id
                                 and (x.item_id in (l(i).item_id, l(i).parent_id) or x.category_id = l(i).cat_id))
                   order by pr.pct desc, pr.id fetch first 1 row only) loop
@@ -1055,12 +1061,12 @@ create or replace package body mm_core as
         when no_data_found then fail(64, 'Δεν υπάρχει μέγεθος ' || p_size_id);
       end;
     end if;
-    insert into mm_item (code, barcode, name, category_id, vat_code, unit, price, cost, min_stock,
+    insert into mm_item (code, barcode, name, category_id, vat_code, unit, price, wholesale_price, cost, min_stock,
                          max_per_sale, parent_id, color_id, size_id, active)
     values (substr(m.code || case when cc is not null then '-' || cc end || case when sc is not null then '-' || sc end, 1, 20),
             p_barcode,
             substr(m.name || case when cn is not null then ' ' || cn end || case when sc is not null then ' ' || sc end, 1, 100),
-            m.category_id, m.vat_code, m.unit, m.price, m.cost, 0, m.max_per_sale,
+            m.category_id, m.vat_code, m.unit, m.price, m.wholesale_price, m.cost, 0, m.max_per_sale,
             p_model_id, p_color_id, p_size_id, m.active)
     returning id into v;
     return v;
@@ -1079,6 +1085,7 @@ create or replace package body mm_core as
       fail(66, 'Το είδος ' || p_model_id || ' δεν είναι μοντέλο');
     end if;
     update mm_item set price = p_price where id = p_model_id or parent_id = p_model_id;
+    -- (the wholesale price of the variants: as each one has it)
   end;
 
   -- ---------------------------------------------------------------------------------------------

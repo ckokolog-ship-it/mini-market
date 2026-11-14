@@ -70,6 +70,12 @@ set define on
 prompt == &demo_file
 @&demo_file
 set define off
+-- a view made before a column was added to its table (an upgrade) waits invalid until it is used:
+-- compiled now, so that nothing is left invalid
+begin
+  dbms_utility.compile_schema(schema => user, compile_all => false);
+end;
+/
 prompt == what is in the database
 set feedback on
 select 'items' what, count(*) n from mm_item

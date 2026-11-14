@@ -557,6 +557,20 @@ left join mm_size z on z.id = v.size_id
 join mm_item_avail a on a.item_id = v.id
 where m.is_model = 'Y';
 
+
+-- the wholesale price (without VAT): the default of a line of an invoice of sale (TPY, PPY); empty:
+-- the retail price without its VAT
+declare
+  n number;
+begin
+  select count(*) into n from user_tab_cols where table_name = 'MM_ITEM' and column_name = 'WHOLESALE_PRICE';
+  if n = 0 then
+    execute immediate 'alter table mm_item add (wholesale_price number(12,4) ' ||
+                      'constraint mm_item_wholesale_ck check (wholesale_price >= 0))';
+  end if;
+end;
+/
+
 -- the serials of each line of a document (an invoice: under each line its cards), without PINs
 create or replace view mm_doc_serials as
 select d.id doc_id, d.doc_type, d.doc_no, l.id line_id, l.line_no, i.code, i.name, s.serial, s.status

@@ -1,5 +1,5 @@
 -- MM_UI.pls -- the package UI of the forms of the mini market (MM_ITEMS, MM_CUSTOMERS,
--- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, and the menu MM_MAIN):
+-- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, MM_INVOICES, the menu MM_MAIN):
 -- mkforms.py puts it in each form. The triggers only call it:
 --   WHEN-NEW-FORM-INSTANCE  ui.init
 --   WHEN-NEW-RECORD-INSTANCE ui.master(:SYSTEM.TRIGGER_BLOCK)   (a master: its detail again)
@@ -109,6 +109,8 @@ PACKAGE BODY ui IS
     n NUMBER;
     s NUMBER;
     pin VARCHAR2(40);
+    tr VARCHAR2(1);
+    sd VARCHAR2(1);
   BEGIN
     IF p_item LIKE 'CTL.GO\_%' ESCAPE '\' THEN           -- the menu: the form of the button
       call_form(substr(p_item, 8));
@@ -215,6 +217,60 @@ PACKAGE BODY ui IS
       mm_core.model_price(num('MODEL.ID'), num('CTL.M_PRICE'));
       forms_ddl('COMMIT');
       again(c_block);
+    -- invoicing: a new document (alone on the screen: its totals and lines as they change), a line
+    -- (a card of mobile phones in a sale: as many cards, with their serials), post, cancel, credit
+    ELSIF p_item = 'CTL.NEWDOC' THEN
+      v := mm_core.new_doc(upper(name_in('CTL.D_TYPE')), num('CTL.CUST_ID'), num('CTL.SUPP_ID'), NULL,
+                           upper(nvl(name_in('CTL.D_PAY'), 'CREDIT')), date_in('CTL.D_DATE'));
+      forms_ddl('COMMIT');
+      show_only(v);
+      message('Νέο πρόχειρο: βάλε τις γραμμές του και καταχώρισέ το');
+    ELSIF p_item = 'CTL.ADDLINE' THEN
+      v := num('DOC.ID');
+      s := num('CTL.L_ITEM_ID');
+      SELECT i.serial_tracked, t.side, t.stock_sign INTO tr, sd, n
+      FROM mm_doc d, mm_doc_type t, mm_item i
+      WHERE d.id = v AND t.code = d.doc_type AND i.id = s;
+      IF tr = 'Y' AND sd = 'S' AND n = -1 THEN
+        n := mm_core.sell_serials(v, s, nvl(num('CTL.L_QTY'), 1));
+      ELSE
+        n := mm_core.add_line(v, s, nvl(num('CTL.L_QTY'), 1), num('CTL.L_PRICE'), nvl(num('CTL.L_DISC'), 0));
+      END IF;
+      forms_ddl('COMMIT');
+      copy('', 'CTL.L_ITEM_ID');
+      copy('', 'CTL.L_ITEM_TEXT');
+      copy('', 'CTL.L_PRICE');
+      copy('', 'CTL.L_DISC');
+      show_only(v);
+    ELSIF p_item = 'CTL.DELLINE' THEN
+      v := num('DOC.ID');
+      mm_core.delete_line(num('DL.ID'));
+      forms_ddl('COMMIT');
+      show_only(v);
+    ELSIF p_item = 'CTL.POSTDOC' THEN
+      v := num('DOC.ID');
+      n := mm_core.post_doc(v);
+      forms_ddl('COMMIT');
+      show_only(v);
+      message('Καταχωρήθηκε με αριθμό ' || to_char(n));
+    ELSIF p_item = 'CTL.CANCELDOC' THEN
+      v := num('DOC.ID');
+      mm_core.cancel_doc(v);
+      forms_ddl('COMMIT');
+      show_only(v);
+      message('Ακυρώθηκε');
+    ELSIF p_item = 'CTL.CREDIT' THEN
+      v := mm_core.credit_note(num('DOC.ID'));
+      forms_ddl('COMMIT');
+      show_only(v);
+      message('Πρόχειρο πιστωτικό: έλεγξε τις γραμμές και καταχώρισέ το');
+    ELSIF p_item = 'CTL.DELDOC' THEN
+      mm_core.delete_doc(num('DOC.ID'));
+      forms_ddl('COMMIT');
+      go_block(c_block);
+      set_block_property(c_block, DEFAULT_WHERE, c_where);
+      again(c_block);
+      message('Το πρόχειρο σβήστηκε');
     END IF;
   EXCEPTION
     WHEN form_trigger_failure THEN
@@ -329,6 +385,20 @@ PACKAGE BODY ui IS
       id_ := num('CARD.ID');
       SELECT stock INTO s FROM mm_item WHERE id = id_;
       copy(to_char(s), 'CARD.STOCK');
+    ELSIF p_block = 'DOC' THEN
+      c_ := num('DOC.CUSTOMER_ID');
+      id_ := num('DOC.SUPPLIER_ID');
+      n := NULL;
+      IF c_ IS NOT NULL THEN
+        SELECT name INTO n FROM mm_customer WHERE id = c_;
+      ELSIF id_ IS NOT NULL THEN
+        SELECT name INTO n FROM mm_supplier WHERE id = id_;
+      END IF;
+      copy(n, 'DOC.PARTNER_TEXT');
+    ELSIF p_block = 'DL' THEN
+      id_ := num('DL.ITEM_ID');
+      SELECT code || ' ' || name INTO n FROM mm_item WHERE id = id_;
+      copy(n, 'DL.ITEM_TEXT');
     ELSIF p_block = 'RL' THEN
       id_ := num('RL.ITEM_ID');
       SELECT code || ' ' || name INTO n FROM mm_item WHERE id = id_;
