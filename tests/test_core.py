@@ -113,6 +113,7 @@ def cleanup(c):
     c.execute(f'delete from mm_item where id in ({TEST_ITEMS})')
     c.execute("delete from mm_customer where name like 'Test %'")
     c.execute("delete from mm_supplier where name like 'Test %'")
+    c.execute("delete from mm_promo where name like 'Test %'")
 
 
 def close_open_z(db, reg):
