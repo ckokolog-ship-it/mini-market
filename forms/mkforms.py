@@ -511,11 +511,23 @@ FORMS['MM_LEDGER'] = dict(
           ('LOV_SUPP', 'Προμηθευτές', "select id, name from mm_supplier order by name",
            [('ID', 0, 'Κωδ.', 'CTL.SUPP_ID'), ('NAME', 260, 'Προμηθευτής', 'CTL.SUPP_TEXT')])])
 
+# the reports (reports/mkreports.py) in the browser, through the Reports Server (MM_SETTING): the
+# period, a button for each
+FORMS['MM_REPORTS'] = dict(
+    title='Αναφορές',
+    blocks=[],
+    ctl=[('R_FROM', 'date', 20, 30, 90, 'Από', {'year_start': True}),
+         ('R_TO', 'date', 116, 30, 90, 'Έως', {}),
+         ('RPT_SALES', 'button', 20, 76, 300, 'Πωλήσεις ανά ημέρα (μήνες)', {}),
+         ('RPT_VAT', 'button', 20, 110, 300, 'ΦΠΑ πωλήσεων και αγορών', {}),
+         ('RPT_MIN', 'button', 20, 144, 300, 'Ελάχιστο απόθεμα (σήμερα)', {}),
+         ('GO_MM_LEDGER', 'button', 20, 192, 300, 'Καρτέλες (είδους, πελάτη, προμηθευτή)', {})])
+
 # the menu: a button for each form (CALL_FORM: closing it comes back here), and the exit
 MENU_FORMS = [('MM_ITEMS', 'Είδη'), ('MM_CUSTOMERS', 'Πελάτες'), ('MM_SUPPLIERS', 'Προμηθευτές'),
               ('MM_CARDS', 'Κάρτες κινητής'), ('MM_RESERVATIONS', 'Κρατήσεις'), ('MM_KITS', 'Καλάθια και σετ'),
               ('MM_PROMOS', 'Προσφορές'), ('MM_VARIANTS', 'Ρούχα και παπούτσια'), ('MM_INVOICES', 'Τιμολόγια'),
-              ('MM_PAYMENTS', 'Εισπράξεις και πληρωμές'), ('MM_LEDGER', 'Καρτέλες')]
+              ('MM_PAYMENTS', 'Εισπράξεις και πληρωμές'), ('MM_LEDGER', 'Καρτέλες'), ('MM_REPORTS', 'Αναφορές')]
 FORMS['MM_MAIN'] = dict(
     title='Mini market',
     blocks=[],
@@ -552,6 +564,8 @@ MENU_BAR = [
                        ('PAYMENTS', 'Πληρωμές', "new_form('MM_PAYMENTS');"),
                        ('SUPPLIERS', 'Προμηθευτές', "new_form('MM_SUPPLIERS');"),
                        ('SLEDGER', 'Καρτέλα προμηθευτή', "new_form('MM_LEDGER');")]),
+    ('REPORTS', 'Αναφορές', [('REPORTSF', 'Πωλήσεις, ΦΠΑ, ελάχιστο απόθεμα', "new_form('MM_REPORTS');"),
+                             ('LEDGERS', 'Καρτέλες', "new_form('MM_LEDGER');")]),
 ]
 
 

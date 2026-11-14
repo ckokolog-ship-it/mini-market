@@ -7,6 +7,7 @@
       <MenuItem Name="STOCK" Label="Apothiki" CommandType="Menu" SubMenuName="STOCK_MENU"/>
       <MenuItem Name="SALES" Label="Poliseis" CommandType="Menu" SubMenuName="SALES_MENU"/>
       <MenuItem Name="BUY" Label="Agores" CommandType="Menu" SubMenuName="BUY_MENU"/>
+      <MenuItem Name="REPORTS" Label="Anafores" CommandType="Menu" SubMenuName="REPORTS_MENU"/>
     </Menu>
     <Menu Name="FILE_MENU">
       <MenuItem Name="MAIN" Label="Archiko menoy" CommandType="PL/SQL" MenuItemCode="new_form('MM_MAIN');"/>
@@ -40,6 +41,10 @@
       <MenuItem Name="PAYMENTS" Label="Pliromes" CommandType="PL/SQL" MenuItemCode="new_form('MM_PAYMENTS');"/>
       <MenuItem Name="SUPPLIERS" Label="Promitheytes" CommandType="PL/SQL" MenuItemCode="new_form('MM_SUPPLIERS');"/>
       <MenuItem Name="SLEDGER" Label="Kartela promitheyti" CommandType="PL/SQL" MenuItemCode="new_form('MM_LEDGER');"/>
+    </Menu>
+    <Menu Name="REPORTS_MENU">
+      <MenuItem Name="REPORTSF" Label="Poliseis, FPA, elachisto apothema" CommandType="PL/SQL" MenuItemCode="new_form('MM_REPORTS');"/>
+      <MenuItem Name="LEDGERS" Label="Karteles" CommandType="PL/SQL" MenuItemCode="new_form('MM_LEDGER');"/>
     </Menu>
   </MenuModule>
 </Module>

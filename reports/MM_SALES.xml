@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<report name="mm_sales" DTDVersion="9.0.2.0.10" unitOfMeasurement="inch">
+  <data>
+    <userParameter name="P_FROM" datatype="character" width="10"/>
+    <userParameter name="P_TO" datatype="character" width="10"/>
+    <dataSource name="Q_ROWS">
+      <select>
+      <![CDATA[select to_char(day, 'YYYY-MM') month_key, to_char(day, 'MM/YYYY') month_text, day, alp_docs, alp_total, tpy_total, ppy_total, total
+from mm_sales_day
+where day between to_date(:P_FROM, 'DD/MM/YYYY') and to_date(:P_TO, 'DD/MM/YYYY')
+order by day]]>
+      </select>
+      <group name="G_BRK">
+        <dataItem name="MONTH_KEY" datatype="vchar2" columnOrder="11" width="7" defaultLabel="Month_Key">
+          <dataDescriptor expression="month_key" descriptiveExpression="MONTH_KEY" order="1" width="7"/>
+        </dataItem>
+        <dataItem name="MONTH_TEXT" datatype="vchar2" columnOrder="12" width="7" defaultLabel="Month_Text">
+          <dataDescriptor expression="month_text" descriptiveExpression="MONTH_TEXT" order="2" width="7"/>
+        </dataItem>
+        <summary name="CS_S_ALP_DOCS" source="ALP_DOCS" function="sum" width="22" precision="14" scale="2" reset="G_BRK" compute="report"/>
+        <summary name="CS_S_ALP_TOTAL" source="ALP_TOTAL" function="sum" width="22" precision="14" scale="2" reset="G_BRK" compute="report"/>
+        <summary name="CS_S_TPY_TOTAL" source="TPY_TOTAL" function="sum" width="22" precision="14" scale="2" reset="G_BRK" compute="report"/>
+        <summary name="CS_S_PPY_TOTAL" source="PPY_TOTAL" function="sum" width="22" precision="14" scale="2" reset="G_BRK" compute="report"/>
+        <summary name="CS_S_TOTAL" source="TOTAL" function="sum" width="22" precision="14" scale="2" reset="G_BRK" compute="report"/>
+      </group>
+      <group name="G_ROWS">
+        <dataItem name="DAY" datatype="date" columnOrder="13" width="9" defaultLabel="Day">
+          <dataDescriptor expression="day" descriptiveExpression="DAY" order="3" width="9"/>
+        </dataItem>
+        <dataItem name="ALP_DOCS" datatype="number" columnOrder="14" width="22" defaultLabel="Alp_Docs">
+          <dataDescriptor expression="alp_docs" descriptiveExpression="ALP_DOCS" order="4" width="22"/>
+        </dataItem>
+        <dataItem name="ALP_TOTAL" datatype="number" columnOrder="15" width="22" defaultLabel="Alp_Total">
+          <dataDescriptor expression="alp_total" descriptiveExpression="ALP_TOTAL" order="5" width="22"/>
+        </dataItem>
+        <dataItem name="TPY_TOTAL" datatype="number" columnOrder="16" width="22" defaultLabel="Tpy_Total">
+          <dataDescriptor expression="tpy_total" descriptiveExpression="TPY_TOTAL" order="6" width="22"/>
+        </dataItem>
+        <dataItem name="PPY_TOTAL" datatype="number" columnOrder="17" width="22" defaultLabel="Ppy_Total">
+          <dataDescriptor expression="ppy_total" descriptiveExpression="PPY_TOTAL" order="7" width="22"/>
+        </dataItem>
+        <dataItem name="TOTAL" datatype="number" columnOrder="18" width="22" defaultLabel="Total">
+          <dataDescriptor expression="total" descriptiveExpression="TOTAL" order="8" width="22"/>
+        </dataItem>
+      </group>
+    </dataSource>
+    <summary name="CS_G_ALP_DOCS" source="ALP_DOCS" function="sum" width="22" precision="14" scale="2" reset="report" compute="report"/>
+    <summary name="CS_G_ALP_TOTAL" source="ALP_TOTAL" function="sum" width="22" precision="14" scale="2" reset="report" compute="report"/>
+    <summary name="CS_G_TPY_TOTAL" source="TPY_TOTAL" function="sum" width="22" precision="14" scale="2" reset="report" compute="report"/>
+    <summary name="CS_G_PPY_TOTAL" source="PPY_TOTAL" function="sum" width="22" precision="14" scale="2" reset="report" compute="report"/>
+    <summary name="CS_G_TOTAL" source="TOTAL" function="sum" width="22" precision="14" scale="2" reset="report" compute="report"/>
+    <formula name="CF_TITLE" source="cf_titleformula" datatype="character" width="200"/>
+    <formula name="CF_PERIOD" source="cf_periodformula" datatype="character" width="200"/>
+    <formula name="CF_PAGE" source="cf_pageformula" datatype="character" width="200"/>
+    <formula name="CF_SUBTOTAL" source="cf_subtotalformula" datatype="character" width="200"/>
+    <formula name="CF_GRAND" source="cf_grandformula" datatype="character" width="200"/>
+    <formula name="CF_DAY" source="cf_dayformula" datatype="character" width="200"/>
+    <formula name="CF_ALP_DOCS" source="cf_alp_docsformula" datatype="character" width="200"/>
+    <formula name="CF_ALP_TOTAL" source="cf_alp_totalformula" datatype="character" width="200"/>
+    <formula name="CF_TPY_TOTAL" source="cf_tpy_totalformula" datatype="character" width="200"/>
+    <formula name="CF_PPY_TOTAL" source="cf_ppy_totalformula" datatype="character" width="200"/>
+    <formula name="CF_TOTAL" source="cf_totalformula" datatype="character" width="200"/>
+  </data>
+  <layout>
+  <section name="main" width="8.27000" height="11.69000">
+    <body width="7.47000" height="9.55000">
+      <location x="0.40000" y="1.15000"/>
+      <frame name="M_ALL">
+        <geometryInfo x="0.00000" y="0.00000" width="7.30000" height="1.53000"/>
+        <generalLayout verticalElasticity="variable"/>
+        <repeatingFrame name="R_BRK" source="G_BRK" printDirection="down" minWidowRecords="1" columnMode="no">
+          <geometryInfo x="0.00000" y="0.00000" width="7.30000" height="0.78200"/>
+          <generalLayout verticalElasticity="expand"/>
+          <field name="F_BRK" source="MONTH_TEXT" minWidowLines="1" spacing="0" alignment="start">
+            <font face="Arial" size="9" bold="yes"/>
+            <geometryInfo x="0.00000" y="0.00000" width="3.00000" height="0.17000"/>
+          </field>
+          <repeatingFrame name="R_ROWS" source="G_ROWS" printDirection="down" minWidowRecords="1" columnMode="no">
+            <geometryInfo x="0.00000" y="0.22100" width="7.30000" height="0.17000"/>
+            <generalLayout verticalElasticity="expand"/>
+              <field name="F_DAY" source="DAY" minWidowLines="1" spacing="0" alignment="start" formatMask="DD/MM/YYYY">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="0.00000" y="0.22100" width="0.90000" height="0.17000"/>
+              </field>
+              <field name="F_ALP_DOCS" source="ALP_DOCS" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="1.00000" y="0.22100" width="0.80000" height="0.17000"/>
+              </field>
+              <field name="F_ALP_TOTAL" source="ALP_TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="1.90000" y="0.22100" width="1.25000" height="0.17000"/>
+              </field>
+              <field name="F_TPY_TOTAL" source="TPY_TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="3.25000" y="0.22100" width="1.25000" height="0.17000"/>
+              </field>
+              <field name="F_PPY_TOTAL" source="PPY_TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="4.60000" y="0.22100" width="1.25000" height="0.17000"/>
+              </field>
+              <field name="F_TOTAL" source="TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="5.95000" y="0.22100" width="1.30000" height="0.17000"/>
+              </field>
+          </repeatingFrame>
+          <frame name="M_SUB">
+            <geometryInfo x="0.00000" y="0.44200" width="7.30000" height="0.27200"/>
+            <field name="F_S_L" source="CF_SUBTOTAL" minWidowLines="1" spacing="0" alignment="start">
+              <font face="Arial" size="8" bold="yes"/>
+              <geometryInfo x="0.00000" y="0.47600" width="0.95000" height="0.17000"/>
+            </field>
+            <field name="F_S_ALP_DOCS" source="CS_S_ALP_DOCS" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0">
+              <font face="Arial" size="8" bold="yes"/>
+              <geometryInfo x="1.00000" y="0.47600" width="0.80000" height="0.17000"/>
+            </field>
+            <field name="F_S_ALP_TOTAL" source="CS_S_ALP_TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+              <font face="Arial" size="8" bold="yes"/>
+              <geometryInfo x="1.90000" y="0.47600" width="1.25000" height="0.17000"/>
+            </field>
+            <field name="F_S_TPY_TOTAL" source="CS_S_TPY_TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+              <font face="Arial" size="8" bold="yes"/>
+              <geometryInfo x="3.25000" y="0.47600" width="1.25000" height="0.17000"/>
+            </field>
+            <field name="F_S_PPY_TOTAL" source="CS_S_PPY_TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+              <font face="Arial" size="8" bold="yes"/>
+              <geometryInfo x="4.60000" y="0.47600" width="1.25000" height="0.17000"/>
+            </field>
+            <field name="F_S_TOTAL" source="CS_S_TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+              <font face="Arial" size="8" bold="yes"/>
+              <geometryInfo x="5.95000" y="0.47600" width="1.30000" height="0.17000"/>
+            </field>
+          </frame>
+        </repeatingFrame>
+        <frame name="M_GRAND">
+          <geometryInfo x="0.00000" y="0.88400" width="7.30000" height="0.27200"/>
+          <field name="F_G_L" source="CF_GRAND" minWidowLines="1" spacing="0" alignment="start">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="0.00000" y="0.91800" width="0.95000" height="0.17000"/>
+          </field>
+          <field name="F_G_ALP_DOCS" source="CS_G_ALP_DOCS" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="1.00000" y="0.91800" width="0.80000" height="0.17000"/>
+          </field>
+          <field name="F_G_ALP_TOTAL" source="CS_G_ALP_TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="1.90000" y="0.91800" width="1.25000" height="0.17000"/>
+          </field>
+          <field name="F_G_TPY_TOTAL" source="CS_G_TPY_TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="3.25000" y="0.91800" width="1.25000" height="0.17000"/>
+          </field>
+          <field name="F_G_PPY_TOTAL" source="CS_G_PPY_TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="4.60000" y="0.91800" width="1.25000" height="0.17000"/>
+          </field>
+          <field name="F_G_TOTAL" source="CS_G_TOTAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="5.95000" y="0.91800" width="1.30000" height="0.17000"/>
+          </field>
+        </frame>
+      </frame>
+    </body>
+    <margin>
+        <field name="F_TITLE" source="CF_TITLE" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="12" bold="yes"/>
+          <geometryInfo x="0.40000" y="0.30000" width="5.60000" height="0.24000"/>
+        </field>
+        <field name="F_PERIOD" source="CF_PERIOD" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="0.40000" y="0.58000" width="5.00000" height="0.20000"/>
+        </field>
+        <field name="F_L_PAGE" source="CF_PAGE" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="6.30000" y="0.30000" width="0.60000" height="0.20000"/>
+        </field>
+        <field name="F_PAGE" source="PageNumber" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="6.95000" y="0.30000" width="0.60000" height="0.20000"/>
+        </field>
+        <field name="F_H_DAY" source="CF_DAY" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="0.40000" y="0.88000" width="0.90000" height="0.17000"/>
+        </field>
+        <field name="F_H_ALP_DOCS" source="CF_ALP_DOCS" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="1.40000" y="0.88000" width="0.80000" height="0.17000"/>
+        </field>
+        <field name="F_H_ALP_TOTAL" source="CF_ALP_TOTAL" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="2.30000" y="0.88000" width="1.25000" height="0.17000"/>
+        </field>
+        <field name="F_H_TPY_TOTAL" source="CF_TPY_TOTAL" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="3.65000" y="0.88000" width="1.25000" height="0.17000"/>
+        </field>
+        <field name="F_H_PPY_TOTAL" source="CF_PPY_TOTAL" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="5.00000" y="0.88000" width="1.25000" height="0.17000"/>
+        </field>
+        <field name="F_H_TOTAL" source="CF_TOTAL" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="6.35000" y="0.88000" width="1.30000" height="0.17000"/>
+        </field>
+    </margin>
+  </section>
+  </layout>
+  <programUnits>
+    <function name="cf_titleformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_titleformula return Char is
+begin
+  return mm_report.title('SALES');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_periodformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_periodformula return Char is
+begin
+  return mm_report.period(:P_FROM, :P_TO);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_pageformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_pageformula return Char is
+begin
+  return mm_report.label('PAGE');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_subtotalformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_subtotalformula return Char is
+begin
+  return mm_report.label('SUBTOTAL');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_grandformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_grandformula return Char is
+begin
+  return mm_report.label('GRAND');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_dayformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_dayformula return Char is
+begin
+  return mm_report.label('DAY');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_alp_docsformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_alp_docsformula return Char is
+begin
+  return mm_report.label('ALP_DOCS');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_alp_totalformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_alp_totalformula return Char is
+begin
+  return mm_report.label('ALP_TOTAL');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_tpy_totalformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_tpy_totalformula return Char is
+begin
+  return mm_report.label('TPY_TOTAL');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_ppy_totalformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_ppy_totalformula return Char is
+begin
+  return mm_report.label('PPY_TOTAL');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_totalformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_totalformula return Char is
+begin
+  return mm_report.label('TOTAL');
+end;]]>
+      </textSource>
+    </function>
+  </programUnits>
+  <reportPrivate defaultReportType="groupAbove" versionFlags2="0" templateName=""/>
+</report>

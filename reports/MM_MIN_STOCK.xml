@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<report name="mm_min_stock" DTDVersion="9.0.2.0.10" unitOfMeasurement="inch">
+  <data>
+    <dataSource name="Q_ROWS">
+      <select>
+      <![CDATA[select category, code, name, unit, mm_report.qty(stock) stock, mm_report.qty(min_stock) min_stock, mm_report.qty(missing) missing, supplier
+from mm_min_stock
+order by category, code]]>
+      </select>
+      <group name="G_BRK">
+        <dataItem name="CATEGORY" datatype="vchar2" columnOrder="11" width="60" defaultLabel="Category">
+          <dataDescriptor expression="category" descriptiveExpression="CATEGORY" order="1" width="60"/>
+        </dataItem>
+        <summary name="CS_S_CODE" source="CODE" function="count" width="22" precision="14" scale="2" reset="G_BRK" compute="report"/>
+      </group>
+      <group name="G_ROWS">
+        <dataItem name="CODE" datatype="vchar2" columnOrder="12" width="20" defaultLabel="Code">
+          <dataDescriptor expression="code" descriptiveExpression="CODE" order="2" width="20"/>
+        </dataItem>
+        <dataItem name="NAME" datatype="vchar2" columnOrder="13" width="100" defaultLabel="Name">
+          <dataDescriptor expression="name" descriptiveExpression="NAME" order="3" width="100"/>
+        </dataItem>
+        <dataItem name="UNIT" datatype="vchar2" columnOrder="14" width="3" defaultLabel="Unit">
+          <dataDescriptor expression="unit" descriptiveExpression="UNIT" order="4" width="3"/>
+        </dataItem>
+        <dataItem name="STOCK" datatype="vchar2" columnOrder="15" width="30" defaultLabel="Stock">
+          <dataDescriptor expression="stock" descriptiveExpression="STOCK" order="5" width="30"/>
+        </dataItem>
+        <dataItem name="MIN_STOCK" datatype="vchar2" columnOrder="16" width="30" defaultLabel="Min_Stock">
+          <dataDescriptor expression="min_stock" descriptiveExpression="MIN_STOCK" order="6" width="30"/>
+        </dataItem>
+        <dataItem name="MISSING" datatype="vchar2" columnOrder="17" width="30" defaultLabel="Missing">
+          <dataDescriptor expression="missing" descriptiveExpression="MISSING" order="7" width="30"/>
+        </dataItem>
+        <dataItem name="SUPPLIER" datatype="vchar2" columnOrder="18" width="100" defaultLabel="Supplier">
+          <dataDescriptor expression="supplier" descriptiveExpression="SUPPLIER" order="8" width="100"/>
+        </dataItem>
+      </group>
+    </dataSource>
+    <summary name="CS_G_CODE" source="CODE" function="count" width="22" precision="14" scale="2" reset="report" compute="report"/>
+    <formula name="CF_TITLE" source="cf_titleformula" datatype="character" width="200"/>
+    <formula name="CF_PERIOD" source="cf_periodformula" datatype="character" width="200"/>
+    <formula name="CF_PAGE" source="cf_pageformula" datatype="character" width="200"/>
+    <formula name="CF_SUBTOTAL_CAT" source="cf_subtotal_catformula" datatype="character" width="200"/>
+    <formula name="CF_GRAND_CAT" source="cf_grand_catformula" datatype="character" width="200"/>
+    <formula name="CF_CODE" source="cf_codeformula" datatype="character" width="200"/>
+    <formula name="CF_NAME" source="cf_nameformula" datatype="character" width="200"/>
+    <formula name="CF_UNIT" source="cf_unitformula" datatype="character" width="200"/>
+    <formula name="CF_STOCK" source="cf_stockformula" datatype="character" width="200"/>
+    <formula name="CF_MIN_STOCK" source="cf_min_stockformula" datatype="character" width="200"/>
+    <formula name="CF_MISSING" source="cf_missingformula" datatype="character" width="200"/>
+    <formula name="CF_SUPPLIER" source="cf_supplierformula" datatype="character" width="200"/>
+  </data>
+  <layout>
+  <section name="main" width="8.27000" height="11.69000">
+    <body width="7.47000" height="9.55000">
+      <location x="0.40000" y="1.15000"/>
+      <frame name="M_ALL">
+        <geometryInfo x="0.00000" y="0.00000" width="7.30000" height="1.53000"/>
+        <generalLayout verticalElasticity="variable"/>
+        <repeatingFrame name="R_BRK" source="G_BRK" printDirection="down" minWidowRecords="1" columnMode="no">
+          <geometryInfo x="0.00000" y="0.00000" width="7.30000" height="0.78200"/>
+          <generalLayout verticalElasticity="expand"/>
+          <field name="F_BRK" source="CATEGORY" minWidowLines="1" spacing="0" alignment="start">
+            <font face="Arial" size="9" bold="yes"/>
+            <geometryInfo x="0.00000" y="0.00000" width="3.00000" height="0.17000"/>
+          </field>
+          <repeatingFrame name="R_ROWS" source="G_ROWS" printDirection="down" minWidowRecords="1" columnMode="no">
+            <geometryInfo x="0.00000" y="0.22100" width="7.30000" height="0.17000"/>
+            <generalLayout verticalElasticity="expand"/>
+              <field name="F_CODE" source="CODE" minWidowLines="1" spacing="0" alignment="start">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="0.00000" y="0.22100" width="0.70000" height="0.17000"/>
+              </field>
+              <field name="F_NAME" source="NAME" minWidowLines="1" spacing="0" alignment="start">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="0.75000" y="0.22100" width="2.15000" height="0.17000"/>
+              </field>
+              <field name="F_UNIT" source="UNIT" minWidowLines="1" spacing="0" alignment="start">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="2.95000" y="0.22100" width="0.40000" height="0.17000"/>
+              </field>
+              <field name="F_STOCK" source="STOCK" minWidowLines="1" spacing="0" alignment="end">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="3.40000" y="0.22100" width="0.70000" height="0.17000"/>
+              </field>
+              <field name="F_MIN_STOCK" source="MIN_STOCK" minWidowLines="1" spacing="0" alignment="end">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="4.15000" y="0.22100" width="0.70000" height="0.17000"/>
+              </field>
+              <field name="F_MISSING" source="MISSING" minWidowLines="1" spacing="0" alignment="end">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="4.90000" y="0.22100" width="0.70000" height="0.17000"/>
+              </field>
+              <field name="F_SUPPLIER" source="SUPPLIER" minWidowLines="1" spacing="0" alignment="start">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="5.70000" y="0.22100" width="1.60000" height="0.17000"/>
+              </field>
+          </repeatingFrame>
+          <frame name="M_SUB">
+            <geometryInfo x="0.00000" y="0.44200" width="7.30000" height="0.27200"/>
+            <field name="F_S_L" source="CF_SUBTOTAL_CAT" minWidowLines="1" spacing="0" alignment="start">
+              <font face="Arial" size="8" bold="yes"/>
+              <geometryInfo x="0.75000" y="0.47600" width="2.20000" height="0.17000"/>
+            </field>
+            <field name="F_S_CODE" source="CS_S_CODE" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0">
+              <font face="Arial" size="8" bold="yes"/>
+              <geometryInfo x="0.00000" y="0.47600" width="0.70000" height="0.17000"/>
+            </field>
+          </frame>
+        </repeatingFrame>
+        <frame name="M_GRAND">
+          <geometryInfo x="0.00000" y="0.88400" width="7.30000" height="0.27200"/>
+          <field name="F_G_L" source="CF_GRAND_CAT" minWidowLines="1" spacing="0" alignment="start">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="0.75000" y="0.91800" width="2.20000" height="0.17000"/>
+          </field>
+          <field name="F_G_CODE" source="CS_G_CODE" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="0.00000" y="0.91800" width="0.70000" height="0.17000"/>
+          </field>
+        </frame>
+      </frame>
+    </body>
+    <margin>
+        <field name="F_TITLE" source="CF_TITLE" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="12" bold="yes"/>
+          <geometryInfo x="0.40000" y="0.30000" width="5.60000" height="0.24000"/>
+        </field>
+        <field name="F_PERIOD" source="CF_PERIOD" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="0.40000" y="0.58000" width="5.00000" height="0.20000"/>
+        </field>
+        <field name="F_L_PAGE" source="CF_PAGE" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="6.30000" y="0.30000" width="0.60000" height="0.20000"/>
+        </field>
+        <field name="F_PAGE" source="PageNumber" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="6.95000" y="0.30000" width="0.60000" height="0.20000"/>
+        </field>
+        <field name="F_H_CODE" source="CF_CODE" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="0.40000" y="0.88000" width="0.70000" height="0.17000"/>
+        </field>
+        <field name="F_H_NAME" source="CF_NAME" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="1.15000" y="0.88000" width="2.15000" height="0.17000"/>
+        </field>
+        <field name="F_H_UNIT" source="CF_UNIT" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="3.35000" y="0.88000" width="0.40000" height="0.17000"/>
+        </field>
+        <field name="F_H_STOCK" source="CF_STOCK" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="3.80000" y="0.88000" width="0.70000" height="0.17000"/>
+        </field>
+        <field name="F_H_MIN_STOCK" source="CF_MIN_STOCK" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="4.55000" y="0.88000" width="0.70000" height="0.17000"/>
+        </field>
+        <field name="F_H_MISSING" source="CF_MISSING" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="5.30000" y="0.88000" width="0.70000" height="0.17000"/>
+        </field>
+        <field name="F_H_SUPPLIER" source="CF_SUPPLIER" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="6.10000" y="0.88000" width="1.60000" height="0.17000"/>
+        </field>
+    </margin>
+  </section>
+  </layout>
+  <programUnits>
+    <function name="cf_titleformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_titleformula return Char is
+begin
+  return mm_report.title('MIN_STOCK');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_periodformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_periodformula return Char is
+begin
+  return mm_report.period();
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_pageformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_pageformula return Char is
+begin
+  return mm_report.label('PAGE');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_subtotal_catformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_subtotal_catformula return Char is
+begin
+  return mm_report.label('SUBTOTAL_CAT');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_grand_catformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_grand_catformula return Char is
+begin
+  return mm_report.label('GRAND_CAT');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_codeformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_codeformula return Char is
+begin
+  return mm_report.label('CODE');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_nameformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_nameformula return Char is
+begin
+  return mm_report.label('NAME');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_unitformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_unitformula return Char is
+begin
+  return mm_report.label('UNIT');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_stockformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_stockformula return Char is
+begin
+  return mm_report.label('STOCK');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_min_stockformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_min_stockformula return Char is
+begin
+  return mm_report.label('MIN_STOCK');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_missingformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_missingformula return Char is
+begin
+  return mm_report.label('MISSING');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_supplierformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_supplierformula return Char is
+begin
+  return mm_report.label('SUPPLIER');
+end;]]>
+      </textSource>
+    </function>
+  </programUnits>
+  <reportPrivate defaultReportType="groupAbove" versionFlags2="0" templateName=""/>
+</report>
