@@ -108,6 +108,41 @@ begin
 end;
 /
 
+-- two baskets: wine and sweets (2 made before), breakfast (made at the sale)
+insert into mm_category (name)
+select 'Καλάθια δώρου' from dual where not exists (select 1 from mm_category where name = 'Καλάθια δώρου');
+
+insert into mm_item (code, barcode, name, category_id, vat_code, unit, price, cost, min_stock)
+select v.code, v.barcode, v.name, c.id, 'A', 'PCS', v.price, 0, 0
+from (values
+  ('KAL01', '2000000000350', 'Καλάθι κρασί και γλυκά', 19.90),
+  ('KAL02', '2000000000367', 'Καλάθι πρωινού',         14.50)
+) v (code, barcode, name, price)
+join mm_category c on c.name = 'Καλάθια δώρου'
+where not exists (select 1 from mm_item i where i.code = v.code);
+
+declare
+  n number;
+  function id_of(c varchar2) return number is
+    v number;
+  begin
+    select id into v from mm_item where code = c;
+    return v;
+  end;
+begin
+  select count(*) into n from mm_kit_component k join mm_item i on i.id = k.kit_id where i.code = 'KAL01';
+  if n = 0 then
+    mm_core.set_component(id_of('KAL01'), id_of('POT06'), 1);
+    mm_core.set_component(id_of('KAL01'), id_of('SNK02'), 2);
+    mm_core.set_component(id_of('KAL01'), id_of('SNK03'), 1);
+    mm_core.assemble_kit(id_of('KAL01'), 2, 'Επίδειξη');
+    mm_core.set_component(id_of('KAL02'), id_of('KAF02'), 1);
+    mm_core.set_component(id_of('KAL02'), id_of('ART02'), 1);
+    mm_core.set_component(id_of('KAL02'), id_of('SNK04'), 3);
+  end if;
+end;
+/
+
 -- the cards of mobile phones: items with serials, 5 cards each (made-up serials and PINs), when
 -- MM_PIN works (DBMS_CRYPTO: GRANT_CRYPTO.sql)
 insert into mm_category (name)
