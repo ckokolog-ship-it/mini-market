@@ -59,6 +59,12 @@ create or replace package mm_core as
   function reveal_pin(p_serial_id number, p_user varchar2 default null) return varchar2;
   function receipt_pin(p_serial_id number) return varchar2;             -- a card sold today
 
+  -- baskets and sets (kits): what one has (p_qty 0: out), made before (assemble_kit; a negative
+  -- quantity takes them apart), or sold before they are made (post_doc: the ready ones first)
+  procedure set_component(p_kit_id number, p_component_id number, p_qty number);
+  procedure assemble_kit(p_kit_id number, p_qty number, p_note varchar2 default null);
+  function kit_cost(p_kit_id number) return number;
+
   -- reservations (e.g. New Year cakes): a name, a phone, the day of the pickup; their quantities are
   -- reserved (MM_ITEM_AVAIL) until the delivery, a receipt that counts the deposit
   function new_reservation(p_name varchar2, p_phone varchar2, p_pickup_date date,
@@ -362,8 +368,24 @@ create or replace package body mm_core as
     update mm_doc set doc_no = no_, status = 'P', z_id = z where id = p_doc_id
     returning total into d.total;
 
-    for l in (select * from mm_doc_line where doc_id = p_doc_id) loop
-      stock_move(l.item_id, 'DOC', t.stock_sign * l.qty, p_doc_id, l.id);
+    for l in (select l.*, i.kit from mm_doc_line l join mm_item i on i.id = l.item_id
+              where l.doc_id = p_doc_id) loop
+      if l.kit = 'Y' and t.stock_sign = -1 then
+        -- a kit out: the ready ones first, the rest from its components
+        declare
+          ready number;
+          take number;
+        begin
+          select greatest(stock, 0) into ready from mm_item where id = l.item_id;
+          take := least(ready, l.qty);
+          stock_move(l.item_id, 'DOC', -take, p_doc_id, l.id);
+          for c in (select component_id, qty from mm_kit_component where kit_id = l.item_id) loop
+            stock_move(c.component_id, 'DOC', -(l.qty - take) * c.qty, p_doc_id, l.id);
+          end loop;
+        end;
+      else
+        stock_move(l.item_id, 'DOC', t.stock_sign * l.qty, p_doc_id, l.id);
+      end if;
       if t.side = 'P' and t.stock_sign = 1 and l.qty > 0 then
         update mm_item set cost = round(l.net / l.qty, 4) where id = l.item_id;   -- the last cost
       end if;
@@ -406,8 +428,11 @@ create or replace package body mm_core as
     if lines > 0 then
       fail(30, 'Από τις κάρτες αυτής της αγοράς έχουν πουληθεί ή δεσμευτεί ' || lines);
     end if;
-    for l in (select * from mm_doc_line where doc_id = p_doc_id) loop
-      stock_move(l.item_id, 'DOC', -t.stock_sign * l.qty, p_doc_id, l.id, 'Ακύρωση');
+    -- back exactly what went (a kit: its ready ones and its components)
+    for m in (select item_id, doc_line_id, sum(qty) qty from mm_stock_move
+              where doc_id = p_doc_id and kind = 'DOC'
+              group by item_id, doc_line_id) loop
+      stock_move(m.item_id, 'DOC', -m.qty, p_doc_id, m.doc_line_id, 'Ακύρωση');
     end loop;
     update mm_serial set status = 'X' where in_doc_id = p_doc_id;
     update mm_serial set status = 'A', sold_at = null, out_line_id = null, out_doc_id = null
@@ -709,6 +734,80 @@ create or replace package body mm_core as
       fail(44, 'Το PIN τυπώνεται μόνο για κάρτα που πουλήθηκε σήμερα');
     end if;
     return pin_of(p_serial_id, nvl(upper(sys_context('USERENV', 'CLIENT_IDENTIFIER')), 'RECEIPT'), 'RECEIPT');
+  end;
+
+  -- ---------------------------------------------------------------------------------------------
+  function kit_cost(p_kit_id number) return number is
+    v number;
+  begin
+    select nvl(sum(kc.qty * c.cost), 0) into v
+    from mm_kit_component kc join mm_item c on c.id = kc.component_id
+    where kc.kit_id = p_kit_id;
+    return round(v, 4);
+  end;
+
+  procedure set_component(p_kit_id number, p_component_id number, p_qty number) is
+    k mm_item%rowtype;
+    c mm_item%rowtype;
+    n number;
+  begin
+    begin
+      select * into k from mm_item where id = p_kit_id;
+      select * into c from mm_item where id = p_component_id;
+    exception
+      when no_data_found then fail(6, 'Δεν υπάρχει είδος');
+    end;
+    if p_qty is null or p_qty < 0 then
+      fail(24, 'Λάθος ποσότητα');
+    end if;
+    if p_qty = 0 then
+      delete from mm_kit_component where kit_id = p_kit_id and component_id = p_component_id;
+      select count(*) into n from mm_kit_component where kit_id = p_kit_id;
+      if n = 0 then
+        update mm_item set kit = 'N' where id = p_kit_id;
+      end if;
+      return;
+    end if;
+    if k.serial_tracked = 'Y' or c.serial_tracked = 'Y' then
+      fail(53, 'Καλάθι και είδη με serials δεν συνδυάζονται');
+    end if;
+    if p_kit_id = p_component_id then
+      fail(55, 'Το καλάθι δεν μπαίνει στον εαυτό του');
+    end if;
+    if c.kit = 'Y' then
+      fail(54, 'Το ' || c.code || ' είναι καλάθι: ένα καλάθι δεν μπαίνει σε άλλο');
+    end if;
+    select count(*) into n from mm_kit_component where component_id = p_kit_id;
+    if n > 0 then
+      fail(54, 'Το ' || k.code || ' είναι μέρος άλλου καλαθιού: δεν γίνεται καλάθι');
+    end if;
+    merge into mm_kit_component x
+    using (select p_kit_id kit_id, p_component_id component_id from dual) s
+    on (x.kit_id = s.kit_id and x.component_id = s.component_id)
+    when matched then update set qty = p_qty
+    when not matched then insert (kit_id, component_id, qty) values (p_kit_id, p_component_id, p_qty);
+    update mm_item set kit = 'Y' where id = p_kit_id and kit = 'N';
+  end;
+
+  procedure assemble_kit(p_kit_id number, p_qty number, p_note varchar2 default null) is
+    n number;
+    note varchar2(200) := nvl(p_note, case when p_qty > 0 then 'Συναρμολόγηση' else 'Αποσυναρμολόγηση' end);
+  begin
+    select count(*) into n from mm_kit_component where kit_id = p_kit_id;
+    if n = 0 then
+      fail(56, 'Το είδος ' || p_kit_id || ' δεν είναι καλάθι (δεν έχει σύνθεση)');
+    end if;
+    if nvl(p_qty, 0) = 0 then
+      fail(24, 'Λάθος ποσότητα');
+    end if;
+    for c in (select component_id, qty from mm_kit_component where kit_id = p_kit_id) loop
+      stock_move(c.component_id, 'ASM', -p_qty * c.qty, p_note => note);
+    end loop;
+    stock_move(p_kit_id, 'ASM', p_qty, p_note => note);
+    if p_qty > 0 then
+      n := kit_cost(p_kit_id);     -- first: a function on MM_ITEM inside its own UPDATE is ORA-04091
+      update mm_item set cost = n where id = p_kit_id;
+    end if;
   end;
 
   -- ---------------------------------------------------------------------------------------------
