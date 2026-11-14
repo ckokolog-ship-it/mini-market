@@ -87,7 +87,7 @@ PACKAGE BODY ui IS
 
   -- the buttons of the cards and of the reservations: MM_CORE, then COMMIT (MM_CORE does not commit)
   -- a date typed in CTL (text DD/MM/YYYY: the same on every runtime)
-  FUNCTION day(p_item VARCHAR2) RETURN DATE IS
+  FUNCTION date_in(p_item VARCHAR2) RETURN DATE IS
   BEGIN
     RETURN to_date(name_in(p_item), 'DD/MM/YYYY');
   END;
@@ -121,7 +121,7 @@ PACKAGE BODY ui IS
       forms_ddl('COMMIT');                                     -- the log of who saw it
       copy(pin, 'SER.PIN_SHOW');
     ELSIF p_item = 'CTL.NEWRES' THEN
-      v := mm_core.new_reservation(name_in('CTL.R_NAME'), name_in('CTL.R_PHONE'), day('CTL.R_DATE'));
+      v := mm_core.new_reservation(name_in('CTL.R_NAME'), name_in('CTL.R_PHONE'), date_in('CTL.R_DATE'));
       forms_ddl('COMMIT');
       copy('', 'CTL.R_NAME');
       copy('', 'CTL.R_PHONE');
@@ -170,7 +170,7 @@ PACKAGE BODY ui IS
       message('Καλάθια: ' || to_char(n));
     -- the promotions: new, an item or a category in (0: out), active or not
     ELSIF p_item = 'CTL.NEWPROMO' THEN
-      v := mm_core.new_promo(name_in('CTL.P_NAME'), upper(name_in('CTL.P_KIND')), day('CTL.P_FROM'), day('CTL.P_TO'),
+      v := mm_core.new_promo(name_in('CTL.P_NAME'), upper(name_in('CTL.P_KIND')), date_in('CTL.P_FROM'), date_in('CTL.P_TO'),
                              num('CTL.P_PCT'), num('CTL.P_BUY'), num('CTL.P_FREE'), num('CTL.P_PRICE'));
       forms_ddl('COMMIT');
       copy('', 'CTL.P_NAME');
@@ -310,19 +310,20 @@ PACKAGE BODY ui IS
       copy(n, 'KC.COMP_TEXT');
       copy(to_char(s), 'KC.COMP_STOCK');
     ELSIF p_block = 'PI' THEN
+      -- (no SELECT inside a function: the PL/SQL of the Forms does not take it, PL/SQL 103)
       id_ := num('PI.ITEM_ID');
       c_ := num('PI.CATEGORY_ID');
-      SELECT nvl((SELECT code || ' ' || name FROM mm_item WHERE id = id_),
-                 (SELECT name FROM mm_category WHERE id = c_)) INTO n FROM dual;
+      IF id_ IS NOT NULL THEN
+        SELECT code || ' ' || name INTO n FROM mm_item WHERE id = id_;
+      ELSE
+        SELECT name INTO n FROM mm_category WHERE id = c_;
+      END IF;
       copy(n, 'PI.TEXT');
     ELSIF p_block = 'VG' THEN
       id_ := num('VG.ID');
-      SELECT c.name, z.code, av.stock, av.available INTO n, z, s, a
-      FROM mm_item v
-      LEFT JOIN mm_color c ON c.id = v.color_id
-      LEFT JOIN mm_size z ON z.id = v.size_id
-      JOIN mm_item_avail av ON av.item_id = v.id
-      WHERE v.id = id_;
+      SELECT c.name, sz.code, av.stock, av.available INTO n, z, s, a
+      FROM mm_item v, mm_color c, mm_size sz, mm_item_avail av
+      WHERE v.id = id_ AND c.id (+) = v.color_id AND sz.id (+) = v.size_id AND av.item_id = v.id;
       copy(n, 'VG.COLOR_TEXT');
       copy(z, 'VG.SIZE_TEXT');
       copy(to_char(s), 'VG.STOCK');
