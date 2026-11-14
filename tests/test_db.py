@@ -110,6 +110,12 @@ def test_stock_is_sum_of_moves(cur):
     assert n == 0
 
 
+def test_the_database_adds_up(cur):
+    """MM_CHECK (MM_CHECK.sql): stock, documents, Z, registers, serials, numbers: nothing left over"""
+    cur.execute('select what, id, detail from mm_check order by what, id fetch first 20 rows only')
+    assert cur.fetchall() == []
+
+
 def test_check_digit_helpers():
     assert ean_ok('4006381333931') and not ean_ok('4006381333932')
     assert ean_ok('96385074') and afm_ok('999000018') and not afm_ok('999000019')

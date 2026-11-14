@@ -611,3 +611,53 @@ from mm_serial s
 join mm_doc_line l on l.id = s.out_line_id
 join mm_doc d on d.id = l.doc_id
 join mm_item i on i.id = s.item_id;
+
+-- the check of the whole database (MM_CHECK.sql, and the tests): a row here is something that does
+-- not add up. Empty: the stock is the sum of its moves, every document the sum of its lines, every
+-- closed Z the sum of its documents and of its money, every receipt paid once in the register,
+-- the cards in stock are their serials, the next numbers are after the last ones.
+create or replace view mm_check as
+select 'STOCK' what, i.id, i.code || ': ' || (i.stock + 0) || ' <> ' || nvl(m.qty, 0) detail
+from mm_item i
+left join (select item_id, sum(qty) qty from mm_stock_move group by item_id) m on m.item_id = i.id
+where i.stock + 0 <> nvl(m.qty, 0)
+union all
+select 'DOC', d.id, d.doc_type || ' ' || d.doc_no || ': ' || d.total || ' <> ' || nvl(l.total, 0)
+from mm_doc d
+left join (select doc_id, sum(net) net, sum(vat) vat, sum(total) total from mm_doc_line group by doc_id) l
+  on l.doc_id = d.id
+where d.net <> nvl(l.net, 0) or d.vat <> nvl(l.vat, 0) or d.total <> nvl(l.total, 0)
+union all
+select 'Z', z.id, 'Z ' || z.z_no || ': ' || z.total || ' <> ' || nvl(s.total, 0)
+from mm_z z
+left join (select d.z_id, count(*) docs, sum(-t.stock_sign * d.total) total
+           from mm_doc d join mm_doc_type t on t.code = d.doc_type
+           where d.status = 'P' group by d.z_id) s on s.z_id = z.id
+where z.status = 'C' and (z.total <> nvl(s.total, 0) or z.docs <> nvl(s.docs, 0))
+union all
+select 'Z_VAT', z.id, 'Z ' || z.z_no || ': ' || z.total || ' <> ' || nvl(v.total, 0)
+from mm_z z
+left join (select z_id, sum(total) total from mm_z_vat group by z_id) v on v.z_id = z.id
+where z.status = 'C' and z.total <> nvl(v.total, 0)
+union all
+select 'Z_CASH', z.id, 'Z ' || z.z_no || ': ' || (z.cash + z.card) || ' <> ' || nvl(c.amount, 0)
+from mm_z z
+left join (select z_id, sum(amount) amount from mm_cash_move
+           where kind in ('SALE', 'REFUND', 'DEPOSIT') group by z_id) c on c.z_id = z.id
+where z.status = 'C' and z.cash + z.card <> nvl(c.amount, 0)
+union all
+select 'CASH', d.id, d.doc_type || ' ' || d.doc_no || ': ' || nvl(c.amount, 0)
+from mm_doc d
+join mm_doc_type t on t.code = d.doc_type
+left join (select doc_id, sum(amount) amount from mm_cash_move
+           where kind in ('SALE', 'REFUND') group by doc_id) c on c.doc_id = d.id
+where d.register_id is not null and d.payment in ('CASH', 'CARD') and d.status in ('P', 'C')
+  and nvl(c.amount, 0) <> case when d.status = 'C' then 0
+                               else -t.stock_sign * (d.total - d.deposit) end
+union all
+select 'SERIAL', item_id, code || ': ' || stock || ' <> ' || available from mm_serial_check
+union all
+select 'NEXT_NO', null, t.code || ': ' || t.next_no || ' <= ' || m.no
+from mm_doc_type t
+join (select doc_type, max(doc_no) no from mm_doc group by doc_type) m on m.doc_type = t.code
+where t.next_no <= m.no;

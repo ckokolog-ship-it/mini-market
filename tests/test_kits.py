@@ -105,3 +105,18 @@ def test_sale_with_none_ready(kit):
         k, a, b = stocks(db, ids)
     retail(db, ids, [('kit', 1)])
     assert stocks(db, ids) == (0, a - 2, b - 3)
+
+
+def test_two_lines_of_one_kit_take_the_ready_one_once(kit):
+    """the stock is reservable: post_doc does not see what its first line took"""
+    db, ids = kit
+    k, a, b = stocks(db, ids)
+    if k != 1:
+        db.proc('assemble_kit', ids['kit'], 1 - k)
+        db.commit()
+        k, a, b = stocks(db, ids)
+    d, _ = retail(db, ids, [('kit', 1), ('kit', 1)])
+    assert stocks(db, ids) == (0, a - 2, b - 3)
+    db.proc('cancel_doc', d)
+    db.commit()
+    assert stocks(db, ids) == (1, a, b)

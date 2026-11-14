@@ -9,6 +9,7 @@ prompt == drop the package and the tables of the mini market
 drop package if exists mm_core;
 drop package if exists mm_text;
 drop package if exists mm_pin;
+drop view if exists mm_check;
 drop view if exists mm_serial_check;
 drop view if exists mm_doc_serials;
 drop view if exists mm_item_avail;
