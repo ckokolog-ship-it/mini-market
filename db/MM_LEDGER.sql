@@ -305,7 +305,7 @@ create or replace package body mm_ledger as
     return case upper(p_key)
       when 'DATE' then 'Ημερομηνία'
       when 'DOC' then 'Παραστατικό'
-      when 'DESCR' then case when p_what = 'I' then 'Πελάτης / προμηθευτής / ταμείο - περιγραφή' else 'Περιγραφή' end
+      when 'DESCR' then 'Περιγραφή'
       when 'DEBIT' then case when p_what = 'I' then 'Εισαγωγή' else 'Χρέωση' end
       when 'CREDIT' then case when p_what = 'I' then 'Εξαγωγή' else 'Πίστωση' end
       when 'BALANCE' then case when p_what = 'I' then 'Απόθεμα' else 'Υπόλοιπο' end
