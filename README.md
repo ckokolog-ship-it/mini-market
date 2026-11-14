@@ -33,7 +33,7 @@ Oracle Forms ──────────────────────�
 | 3κ | Φόρμες: δική μας εργαλειοθήκη σε όλες | ✔ |
 | 4 | Τιμολόγηση χονδρικής: τιμή χονδρικής στο είδος, φόρμα τιμολογίων πώλησης/αγοράς και πιστωτικών (master-detail) | ✔ |
 | 4α | Εισπράξεις και πληρωμές (βάση, `MM_CORE`, φόρμα) | ✔ |
-| 5 | Καρτέλες είδους, πελάτη, προμηθευτή (από μεταφορά, προοδευτικό, σύνολα), στην οθόνη και σε Oracle Reports· πωλήσεις, ΦΠΑ, ελάχιστο απόθεμα | στην οθόνη (`MM_LEDGER`) |
+| 5 | Καρτέλες είδους, πελάτη, προμηθευτή (από μεταφορά, προοδευτικό, σύνολα), στην οθόνη και σε Oracle Reports· πωλήσεις, ΦΠΑ, ελάχιστο απόθεμα | οι καρτέλες στην οθόνη (`MM_LEDGER`) και σε report (`MM_LEDGER_I`, `MM_LEDGER_P`) |
 | 6 | Ταμείο λιανικής: απόδειξη, σάρωση, μετρητά/κάρτα, άνοιγμα και κλείσιμο Ζ | |
 | 7 | REST: το `MM_CORE` για web και κινητό | |
 | 7α | Login και ρόλοι, όπως στο PROPOApplication (π.χ. ποιος βλέπει τα PIN) | |
@@ -44,4 +44,5 @@ Oracle Forms ──────────────────────�
 
 - `db/`: η βάση (`CREATE_USER.sql`, `INSTALL.sql`, `UNINSTALL.sql`) και το `MM_CORE.sql`. Ένας χρόνος δεδομένων για τα reports: `MM_DEMO_BIG.sql`· ο έλεγχος ότι όλα συμφωνούν: `MM_CHECK.sql`. Οδηγίες στο [docs/ODIGIES_VASI.md](docs/ODIGIES_VASI.md).
 - `forms/`: οι φόρμες (`mkforms.py` → `MM_*.xml`, `build_forms.ps1`). Οδηγίες στο [docs/ODIGIES_FORMS.md](docs/ODIGIES_FORMS.md).
+- `reports/`: τα reports (`mkreports.py` → `MM_LEDGER_*.xml`, `build_reports.ps1` → `.rdf`). Οδηγίες στο [docs/ODIGIES_REPORTS.md](docs/ODIGIES_REPORTS.md).
 - `tests/`: tests σε Python (`pytest`, `oracledb`) πάνω σε ζωντανή βάση.

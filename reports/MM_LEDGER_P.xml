@@ -1,0 +1,334 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<report name="mm_ledger_p" DTDVersion="9.0.2.0.10" unitOfMeasurement="inch">
+  <data>
+    <userParameter name="P_KIND" datatype="character" width="1" initialValue="C"/>
+    <userParameter name="P_ID" datatype="number" width="10"/>
+    <userParameter name="P_FROM" datatype="character" width="10"/>
+    <userParameter name="P_TO" datatype="character" width="10"/>
+    <dataSource name="Q_ROWS">
+      <select>
+      <![CDATA[select seq, ldate, doc_text, descr, debit, credit, balance, prior_debit, prior_credit, prior_balance, cum_debit, cum_credit
+from table(mm_ledger.report_rows(:P_KIND, :P_ID, to_date(:P_FROM, 'DD/MM/YYYY'), to_date(:P_TO, 'DD/MM/YYYY')))
+order by seq]]>
+      </select>
+      <group name="G_ROWS">
+        <dataItem name="SEQ" datatype="number" columnOrder="11" width="22" defaultLabel="Seq">
+          <dataDescriptor expression="seq" descriptiveExpression="SEQ" order="1" width="22"/>
+        </dataItem>
+        <dataItem name="LDATE" datatype="date" columnOrder="12" width="9" defaultLabel="Ldate">
+          <dataDescriptor expression="ldate" descriptiveExpression="LDATE" order="2" width="9"/>
+        </dataItem>
+        <dataItem name="DOC_TEXT" datatype="vchar2" columnOrder="13" width="40" defaultLabel="Doc_Text">
+          <dataDescriptor expression="doc_text" descriptiveExpression="DOC_TEXT" order="3" width="40"/>
+        </dataItem>
+        <dataItem name="DESCR" datatype="vchar2" columnOrder="14" width="300" defaultLabel="Descr">
+          <dataDescriptor expression="descr" descriptiveExpression="DESCR" order="4" width="300"/>
+        </dataItem>
+        <dataItem name="DEBIT" datatype="number" columnOrder="15" width="22" defaultLabel="Debit">
+          <dataDescriptor expression="debit" descriptiveExpression="DEBIT" order="5" width="22"/>
+        </dataItem>
+        <dataItem name="CREDIT" datatype="number" columnOrder="16" width="22" defaultLabel="Credit">
+          <dataDescriptor expression="credit" descriptiveExpression="CREDIT" order="6" width="22"/>
+        </dataItem>
+        <dataItem name="BALANCE" datatype="number" columnOrder="17" width="22" defaultLabel="Balance">
+          <dataDescriptor expression="balance" descriptiveExpression="BALANCE" order="7" width="22"/>
+        </dataItem>
+        <dataItem name="PRIOR_DEBIT" datatype="number" columnOrder="18" width="22" defaultLabel="Prior_Debit">
+          <dataDescriptor expression="prior_debit" descriptiveExpression="PRIOR_DEBIT" order="8" width="22"/>
+        </dataItem>
+        <dataItem name="PRIOR_CREDIT" datatype="number" columnOrder="19" width="22" defaultLabel="Prior_Credit">
+          <dataDescriptor expression="prior_credit" descriptiveExpression="PRIOR_CREDIT" order="9" width="22"/>
+        </dataItem>
+        <dataItem name="PRIOR_BALANCE" datatype="number" columnOrder="20" width="22" defaultLabel="Prior_Balance">
+          <dataDescriptor expression="prior_balance" descriptiveExpression="PRIOR_BALANCE" order="10" width="22"/>
+        </dataItem>
+        <dataItem name="CUM_DEBIT" datatype="number" columnOrder="21" width="22" defaultLabel="Cum_Debit">
+          <dataDescriptor expression="cum_debit" descriptiveExpression="CUM_DEBIT" order="11" width="22"/>
+        </dataItem>
+        <dataItem name="CUM_CREDIT" datatype="number" columnOrder="22" width="22" defaultLabel="Cum_Credit">
+          <dataDescriptor expression="cum_credit" descriptiveExpression="CUM_CREDIT" order="12" width="22"/>
+        </dataItem>
+      </group>
+    </dataSource>
+    <summary name="CS_PF_DEBIT" source="PRIOR_DEBIT" function="first" width="22" precision="12" scale="3" reset="page" compute="report"/>
+    <summary name="CS_PF_CREDIT" source="PRIOR_CREDIT" function="first" width="22" precision="12" scale="3" reset="page" compute="report"/>
+    <summary name="CS_PF_BALANCE" source="PRIOR_BALANCE" function="first" width="22" precision="12" scale="3" reset="page" compute="report"/>
+    <summary name="CS_PL_DEBIT" source="CUM_DEBIT" function="last" width="22" precision="12" scale="3" reset="page" compute="report"/>
+    <summary name="CS_PL_CREDIT" source="CUM_CREDIT" function="last" width="22" precision="12" scale="3" reset="page" compute="report"/>
+    <summary name="CS_PL_BALANCE" source="BALANCE" function="last" width="22" precision="12" scale="3" reset="page" compute="report"/>
+    <summary name="CS_T_DEBIT" source="DEBIT" function="sum" width="22" precision="12" scale="3" reset="report" compute="report"/>
+    <summary name="CS_T_CREDIT" source="CREDIT" function="sum" width="22" precision="12" scale="3" reset="report" compute="report"/>
+    <summary name="CS_OPEN" source="PRIOR_BALANCE" function="first" width="22" precision="12" scale="3" reset="report" compute="report"/>
+    <summary name="CS_CLOSE" source="BALANCE" function="last" width="22" precision="12" scale="3" reset="report" compute="report"/>
+    <formula name="CF_TITLE" source="cf_titleformula" datatype="character" width="300"/>
+    <formula name="CF_PERIOD" source="cf_periodformula" datatype="character" width="100"/>
+    <formula name="CF_L_DATE" source="cf_l_dateformula" datatype="character" width="100"/>
+    <formula name="CF_L_DOC" source="cf_l_docformula" datatype="character" width="100"/>
+    <formula name="CF_L_DESCR" source="cf_l_descrformula" datatype="character" width="100"/>
+    <formula name="CF_L_DEBIT" source="cf_l_debitformula" datatype="character" width="100"/>
+    <formula name="CF_L_CREDIT" source="cf_l_creditformula" datatype="character" width="100"/>
+    <formula name="CF_L_BALANCE" source="cf_l_balanceformula" datatype="character" width="100"/>
+    <formula name="CF_L_FROM_CARRY" source="cf_l_from_carryformula" datatype="character" width="100"/>
+    <formula name="CF_L_TO_CARRY" source="cf_l_to_carryformula" datatype="character" width="100"/>
+    <formula name="CF_L_TOTALS" source="cf_l_totalsformula" datatype="character" width="100"/>
+    <formula name="CF_L_OPEN" source="cf_l_openformula" datatype="character" width="100"/>
+    <formula name="CF_L_CLOSE" source="cf_l_closeformula" datatype="character" width="100"/>
+    <formula name="CF_L_PAGE" source="cf_l_pageformula" datatype="character" width="100"/>
+  </data>
+  <layout>
+  <section name="main" width="8.27000" height="11.69000">
+    <body width="7.47000" height="9.55000">
+      <location x="0.40000" y="1.35000"/>
+      <frame name="M_ROWS">
+        <geometryInfo x="0.00000" y="0.00000" width="7.30000" height="0.85000"/>
+        <generalLayout verticalElasticity="variable"/>
+        <repeatingFrame name="R_ROWS" source="G_ROWS" printDirection="down" minWidowRecords="1" columnMode="no">
+          <geometryInfo x="0.00000" y="0.00000" width="7.30000" height="0.17000"/>
+          <generalLayout verticalElasticity="expand"/>
+          <field name="F_LDATE" source="LDATE" minWidowLines="1" spacing="0" alignment="start" formatMask="DD/MM/YYYY">
+            <font face="Arial" size="8"/>
+            <geometryInfo x="0.00000" y="0.00000" width="0.72000" height="0.17000"/>
+          </field>
+          <field name="F_DOC_TEXT" source="DOC_TEXT" minWidowLines="1" spacing="0" alignment="start">
+            <font face="Arial" size="8"/>
+            <geometryInfo x="0.75000" y="0.00000" width="0.82000" height="0.17000"/>
+          </field>
+          <field name="F_DESCR" source="DESCR" minWidowLines="1" spacing="0" alignment="start">
+            <font face="Arial" size="8"/>
+            <geometryInfo x="1.60000" y="0.00000" width="2.55000" height="0.17000"/>
+          </field>
+          <field name="F_DEBIT" source="DEBIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+            <font face="Arial" size="8"/>
+            <geometryInfo x="4.18000" y="0.00000" width="0.95000" height="0.17000"/>
+          </field>
+          <field name="F_CREDIT" source="CREDIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+            <font face="Arial" size="8"/>
+            <geometryInfo x="5.16000" y="0.00000" width="0.95000" height="0.17000"/>
+          </field>
+          <field name="F_BALANCE" source="BALANCE" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+            <font face="Arial" size="8"/>
+            <geometryInfo x="6.14000" y="0.00000" width="1.10000" height="0.17000"/>
+          </field>
+        </repeatingFrame>
+        <field name="F_TOTALS" source="CF_L_TOTALS" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="1.60000" y="0.27200" width="2.55000" height="0.17000"/>
+        </field>
+        <field name="F_T_DEBIT" source="CS_T_DEBIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="4.18000" y="0.27200" width="0.95000" height="0.17000"/>
+        </field>
+        <field name="F_T_CREDIT" source="CS_T_CREDIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="5.16000" y="0.27200" width="0.95000" height="0.17000"/>
+        </field>
+        <field name="F_OPEN" source="CF_L_OPEN" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="1.60000" y="0.47600" width="2.55000" height="0.17000"/>
+        </field>
+        <field name="F_OPEN_B" source="CS_OPEN" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="6.14000" y="0.47600" width="1.10000" height="0.17000"/>
+        </field>
+        <field name="F_CLOSE" source="CF_L_CLOSE" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="1.60000" y="0.68000" width="2.55000" height="0.17000"/>
+        </field>
+        <field name="F_CLOSE_B" source="CS_CLOSE" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="6.14000" y="0.68000" width="1.10000" height="0.17000"/>
+        </field>
+      </frame>
+    </body>
+    <margin>
+        <field name="F_TITLE" source="CF_TITLE" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="12" bold="yes"/>
+          <geometryInfo x="0.40000" y="0.30000" width="5.60000" height="0.24000"/>
+        </field>
+        <field name="F_PERIOD" source="CF_PERIOD" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="0.40000" y="0.58000" width="5.00000" height="0.20000"/>
+        </field>
+        <field name="F_L_PAGE" source="CF_L_PAGE" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="6.30000" y="0.30000" width="0.60000" height="0.20000"/>
+        </field>
+        <field name="F_PAGE" source="PageNumber" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="6.95000" y="0.30000" width="0.60000" height="0.20000"/>
+        </field>
+        <field name="F_H_LDATE" source="CF_L_DATE" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="0.40000" y="0.88000" width="0.72000" height="0.17000"/>
+        </field>
+        <field name="F_H_DOC_TEXT" source="CF_L_DOC" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="1.15000" y="0.88000" width="0.82000" height="0.17000"/>
+        </field>
+        <field name="F_H_DESCR" source="CF_L_DESCR" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="2.00000" y="0.88000" width="2.55000" height="0.17000"/>
+        </field>
+        <field name="F_H_DEBIT" source="CF_L_DEBIT" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="4.58000" y="0.88000" width="0.95000" height="0.17000"/>
+        </field>
+        <field name="F_H_CREDIT" source="CF_L_CREDIT" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="5.56000" y="0.88000" width="0.95000" height="0.17000"/>
+        </field>
+        <field name="F_H_BALANCE" source="CF_L_BALANCE" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="6.54000" y="0.88000" width="1.10000" height="0.17000"/>
+        </field>
+        <field name="F_FROM" source="CF_L_FROM_CARRY" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="2.00000" y="1.10000" width="2.55000" height="0.17000"/>
+        </field>
+        <field name="F_PF_DEBIT" source="CS_PF_DEBIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="4.58000" y="1.10000" width="0.95000" height="0.17000"/>
+        </field>
+        <field name="F_PF_CREDIT" source="CS_PF_CREDIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="5.56000" y="1.10000" width="0.95000" height="0.17000"/>
+        </field>
+        <field name="F_PF_BALANCE" source="CS_PF_BALANCE" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="6.54000" y="1.10000" width="1.10000" height="0.17000"/>
+        </field>
+        <field name="F_TO" source="CF_L_TO_CARRY" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="2.00000" y="11.00000" width="2.55000" height="0.17000"/>
+        </field>
+        <field name="F_PL_DEBIT" source="CS_PL_DEBIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="4.58000" y="11.00000" width="0.95000" height="0.17000"/>
+        </field>
+        <field name="F_PL_CREDIT" source="CS_PL_CREDIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="5.56000" y="11.00000" width="0.95000" height="0.17000"/>
+        </field>
+        <field name="F_PL_BALANCE" source="CS_PL_BALANCE" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="6.54000" y="11.00000" width="1.10000" height="0.17000"/>
+        </field>
+    </margin>
+  </section>
+  </layout>
+  <programUnits>
+    <function name="cf_titleformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_titleformula return Char is
+begin
+  return mm_ledger.title(:P_KIND, :P_ID);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_periodformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_periodformula return Char is
+begin
+  return mm_ledger.label('PERIOD') || ': ' || :P_FROM || ' - ' || :P_TO;
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_dateformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_dateformula return Char is
+begin
+  return mm_ledger.label('DATE', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_docformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_docformula return Char is
+begin
+  return mm_ledger.label('DOC', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_descrformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_descrformula return Char is
+begin
+  return mm_ledger.label('DESCR', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_debitformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_debitformula return Char is
+begin
+  return mm_ledger.label('DEBIT', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_creditformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_creditformula return Char is
+begin
+  return mm_ledger.label('CREDIT', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_balanceformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_balanceformula return Char is
+begin
+  return mm_ledger.label('BALANCE', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_from_carryformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_from_carryformula return Char is
+begin
+  return mm_ledger.label('FROM_CARRY', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_to_carryformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_to_carryformula return Char is
+begin
+  return mm_ledger.label('TO_CARRY', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_totalsformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_totalsformula return Char is
+begin
+  return mm_ledger.label('TOTALS', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_openformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_openformula return Char is
+begin
+  return mm_ledger.label('OPEN', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_closeformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_closeformula return Char is
+begin
+  return mm_ledger.label('CLOSE', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_l_pageformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_l_pageformula return Char is
+begin
+  return mm_ledger.label('PAGE', :P_KIND);
+end;]]>
+      </textSource>
+    </function>
+  </programUnits>
+  <reportPrivate defaultReportType="tabular" versionFlags2="0" templateName=""/>
+</report>

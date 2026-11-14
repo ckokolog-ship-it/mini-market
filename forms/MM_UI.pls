@@ -29,6 +29,10 @@ PACKAGE BODY ui IS
   c_detail2 CONSTANT VARCHAR2(30) := ''; -- DETAIL2
   g_master NUMBER;                  -- the master whose detail is on the screen
   g_detail NUMBER;                  -- the record of the detail whose own detail is on the screen
+  g_lwhat VARCHAR2(1);              -- the ledger on the screen (MM_LEDGER): I, C or S, its id, period
+  g_lid NUMBER;
+  g_lfrom VARCHAR2(10);
+  g_lto VARCHAR2(10);
 
   FUNCTION num(p_item VARCHAR2) RETURN NUMBER IS
   BEGIN
@@ -369,6 +373,10 @@ PACKAGE BODY ui IS
         END IF;
         mm_ledger.fill(w, v, date_in('CTL.L_FROM'), date_in('CTL.L_TO'), o1, o2, o3, o4);
         forms_ddl('COMMIT');
+        g_lwhat := w;
+        g_lid := v;
+        g_lfrom := name_in('CTL.L_FROM');
+        g_lto := name_in('CTL.L_TO');
         copy(t || ': ' || name_in('CTL.L_FROM') || ' - ' || name_in('CTL.L_TO'), 'CTL.L_TITLE');
         copy(to_char(o1), 'CTL.O_OPEN');
         copy(to_char(o2), 'CTL.O_DEBIT');
@@ -377,6 +385,33 @@ PACKAGE BODY ui IS
         go_block('LED');
         execute_query;
         message('Η καρτέλα είναι έτοιμη');
+      END;
+    -- the ledger on the screen as a report (MM_LEDGER_I / MM_LEDGER_P of the Reports Server), in the
+    -- browser: where and in which format from MM_SETTING (SET_REPORTS_URL.sql); the address carries
+    -- the key of cgicmd.dat, not the password
+    ELSIF p_item = 'CTL.PRINTLED' THEN
+      DECLARE
+        u VARCHAR2(400);
+        f VARCHAR2(400);
+        r VARCHAR2(30);
+      BEGIN
+        IF g_lwhat IS NULL THEN
+          fail('Δείξε πρώτα μια καρτέλα, και μετά «Εκτύπωση»');
+        END IF;
+        SELECT MAX(CASE name WHEN 'REPORTS_URL' THEN value END), MAX(CASE name WHEN 'REPORTS_FORMAT' THEN value END)
+          INTO u, f FROM mm_setting WHERE name IN ('REPORTS_URL', 'REPORTS_FORMAT');
+        IF u IS NULL THEN
+          message('Δεν ξέρω πού είναι τα reports: SET_REPORTS_URL.sql στη βάση');
+        ELSE
+          IF g_lwhat = 'I' THEN
+            r := 'MM_LEDGER_I.rdf';
+          ELSE
+            r := 'MM_LEDGER_P.rdf';
+          END IF;
+          web.show_document(u || '&report=' || r || '&destype=cache&desformat=' || nvl(f, 'PDF')
+                            || '&P_KIND=' || g_lwhat || '&P_ID=' || to_char(g_lid)
+                            || '&P_FROM=' || g_lfrom || '&P_TO=' || g_lto, '_blank');
+        END IF;
       END;
     ELSIF p_item = 'CTL.DELDOC' THEN
       mm_core.delete_doc(num('DOC.ID'));

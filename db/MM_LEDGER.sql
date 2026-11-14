@@ -12,6 +12,11 @@
 --   A supplier:  CREDIT the invoices, DEBIT the credit notes and the payments; BALANCE what we owe.
 -- A document paid at once (cash or card) has a second row, its money: it leaves the balance as it was.
 -- Only what is posted: cancelled documents and payments are not in a ledger.
+--
+-- The reports (reports/MM_LEDGER_I, MM_LEDGER_P): report_rows, the moves with what was before each
+-- one (PRIOR_*) and up to it (CUM_*): the first PRIOR_ of a page is its "from the carry-over" (από
+-- μεταφορά), the last CUM_ and BALANCE its "to the carry-over" (σε μεταφορά); title and label: the
+-- Greek of the report (its XML is ASCII).
 create or replace package mm_ledger as
   type t_row is record (
     seq       number,
@@ -25,6 +30,21 @@ create or replace package mm_ledger as
     credit    number,
     balance   number);
   type t_rows is table of t_row;
+  type t_rrow is record (
+    seq            number,
+    kind           varchar2(1),
+    ldate          date,
+    doc_text       varchar2(40),
+    descr          varchar2(300),    -- the partner (or register) and the description
+    debit          number,
+    credit         number,
+    balance        number,
+    prior_debit    number,           -- the totals of the period before this row
+    prior_credit   number,
+    prior_balance  number,
+    cum_debit      number,           -- ... with it
+    cum_credit     number);
+  type t_rrows is table of t_rrow;
 
   function item_rows(p_item_id number, p_from date, p_to date) return t_rows pipelined;
   -- p_kind: C a customer, S a supplier
@@ -32,6 +52,13 @@ create or replace package mm_ledger as
   -- p_what: I an item, C a customer, S a supplier
   procedure fill(p_what varchar2, p_id number, p_from date, p_to date,
                  p_open out number, p_debit out number, p_credit out number, p_close out number);
+  -- the rows of a report: the moves (only the carry-over when there are none)
+  function report_rows(p_what varchar2, p_id number, p_from date, p_to date) return t_rrows pipelined;
+  -- 'Καρτέλα πελάτη: <name>' ...
+  function title(p_what varchar2, p_id number) return varchar2;
+  -- the words of the reports: DATE, DOC, DESCR, DEBIT, CREDIT, BALANCE (by p_what), FROM_CARRY,
+  -- TO_CARRY, TOTALS, OPEN, CLOSE, PAGE, PERIOD, NONE
+  function label(p_key varchar2, p_what varchar2 default null) return varchar2;
 end mm_ledger;
 /
 
@@ -193,6 +220,103 @@ create or replace package body mm_ledger as
     into p_open, p_debit, p_credit
     from mm_ledger_row;
     p_close := p_open + case when p_what = 'S' then p_credit - p_debit else p_debit - p_credit end;
+  end;
+
+  function report_rows(p_what varchar2, p_id number, p_from date, p_to date) return t_rrows pipelined is
+    r t_rrow;
+    prev number;
+    dsum number := 0;
+    csum number := 0;
+    open_ t_row;
+    moves pls_integer := 0;
+
+    procedure out_(x t_row) is
+    begin
+      r.seq := x.seq;
+      r.kind := x.kind;
+      r.ldate := x.ldate;
+      r.doc_text := x.doc_text;
+      r.descr := case when x.partner is not null and p_what = 'I' then x.partner || ' - ' end || x.descr;
+      r.debit := x.debit;
+      r.credit := x.credit;
+      r.balance := x.balance;
+      r.prior_debit := dsum;
+      r.prior_credit := csum;
+      r.prior_balance := prev;
+      dsum := dsum + nvl(x.debit, 0);
+      csum := csum + nvl(x.credit, 0);
+      r.cum_debit := dsum;
+      r.cum_credit := csum;
+      prev := x.balance;
+    end;
+  begin
+    if p_what = 'I' then
+      for x in (select * from table(item_rows(p_id, p_from, p_to))) loop
+        if x.kind = 'O' then
+          open_.seq := x.seq; open_.kind := x.kind; open_.ldate := x.ldate; open_.descr := x.descr;
+          open_.balance := x.balance;
+          prev := x.balance;
+        else
+          moves := moves + 1;
+          out_(x);
+          pipe row (r);
+        end if;
+      end loop;
+    elsif p_what in ('C', 'S') then
+      for x in (select * from table(partner_rows(p_what, p_id, p_from, p_to))) loop
+        if x.kind = 'O' then
+          open_.seq := x.seq; open_.kind := x.kind; open_.ldate := x.ldate; open_.descr := x.descr;
+          open_.balance := x.balance;
+          prev := x.balance;
+        else
+          moves := moves + 1;
+          out_(x);
+          pipe row (r);
+        end if;
+      end loop;
+    else
+      fail(73, 'Καρτέλα είδους (I), πελάτη (C) ή προμηθευτή (S)');
+    end if;
+    if moves = 0 then
+      out_(open_);
+      pipe row (r);
+    end if;
+    return;
+  end;
+
+  function title(p_what varchar2, p_id number) return varchar2 is
+    v varchar2(300);
+  begin
+    if p_what = 'I' then
+      select max(code || ' ' || name) into v from mm_item where id = p_id;
+      return 'Καρτέλα είδους: ' || v;
+    elsif p_what = 'C' then
+      select max(name || case when afm is not null then ' (ΑΦΜ ' || afm || ')' end) into v from mm_customer where id = p_id;
+      return 'Καρτέλα πελάτη: ' || v;
+    elsif p_what = 'S' then
+      select max(name || case when afm is not null then ' (ΑΦΜ ' || afm || ')' end) into v from mm_supplier where id = p_id;
+      return 'Καρτέλα προμηθευτή: ' || v;
+    end if;
+    return null;
+  end;
+
+  function label(p_key varchar2, p_what varchar2 default null) return varchar2 is
+  begin
+    return case upper(p_key)
+      when 'DATE' then 'Ημερομηνία'
+      when 'DOC' then 'Παραστατικό'
+      when 'DESCR' then case when p_what = 'I' then 'Πελάτης / προμηθευτής / ταμείο - περιγραφή' else 'Περιγραφή' end
+      when 'DEBIT' then case when p_what = 'I' then 'Εισαγωγή' else 'Χρέωση' end
+      when 'CREDIT' then case when p_what = 'I' then 'Εξαγωγή' else 'Πίστωση' end
+      when 'BALANCE' then case when p_what = 'I' then 'Απόθεμα' else 'Υπόλοιπο' end
+      when 'FROM_CARRY' then 'Από μεταφορά'
+      when 'TO_CARRY' then 'Σε μεταφορά'
+      when 'TOTALS' then 'Σύνολα περιόδου'
+      when 'OPEN' then 'Από προηγούμενη περίοδο'
+      when 'CLOSE' then case when p_what = 'I' then 'Τελικό απόθεμα' else 'Γενικό υπόλοιπο' end
+      when 'PAGE' then 'Σελίδα'
+      when 'PERIOD' then 'Διάστημα'
+      else p_key end;
   end;
 end mm_ledger;
 /
