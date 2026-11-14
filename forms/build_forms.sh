@@ -11,7 +11,7 @@ cd "$(dirname "$0")" || exit 1
 HERE=$(pwd)
 USERID=${1:-/@MM_DB}
 shift || true
-FORMS=${*:-MM_ITEMS MM_CUSTOMERS MM_SUPPLIERS MM_CARDS MM_RESERVATIONS}
+FORMS=${*:-MM_ITEMS MM_CUSTOMERS MM_SUPPLIERS MM_CARDS MM_RESERVATIONS MM_KITS MM_PROMOS MM_VARIANTS}
 MW=${MW_HOME:-/u01/app/oracle/middleware}
 DOMAIN=${DOMAIN_HOME:-/u01/app/oracle/config/domains/forms_domain}
 DB_HOME=${ORACLE_HOME:-/opt/oracle/product/26ai/dbhomeFree}

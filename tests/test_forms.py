@@ -358,3 +358,83 @@ def test_reservations_form(cur, env):
     assert 'απόδειξη' in msgs(cur)
     run(cur, "ui.post_query('RL');", RL__ITEM_ID=str(ids['b']))
     assert item(cur, 'RL.ITEM_TEXT').startswith(f"TST{ids['tag']}B ")
+
+
+@needs_db
+def test_kits_form(cur, env):
+    db, ids = env
+    cat = db.one('select min(id) from mm_category')[0]
+    db.cur.execute("insert into mm_item (code, name, category_id, vat_code, price) "
+                   "values (:c, 'Test basket form', :cat, 'A', 9)", c=f"TST{ids['tag']}W", cat=cat)
+    db.commit()
+    kit = db.one('select id from mm_item where code = :c', c=f"TST{ids['tag']}W")[0]
+    compile_ui(cur, 'MM_KITS')
+    run(cur, 'ui.init;')
+    run(cur, "ui.press('CTL.ADDCOMP');", CTL__NEWKIT_ID=str(kit), CTL__COMP_ID=str(ids['a']), CTL__COMP_QTY='1')
+    cur.execute('begin :v := fstub.queries; end;', v=(q := cur.var(str)))
+    assert f'KIT:id = {kit};' in q.getvalue() and item(cur, 'CTL.NEWKIT_ID') is None
+    run(cur, "ui.press('CTL.ADDCOMP');", KIT__ID=str(kit), CTL__COMP_ID=str(ids['b']), CTL__COMP_QTY='2')
+    assert db.one('select kit from mm_item where id = :k', k=kit)[0] == 'Y'
+    assert db.one('select count(*) from mm_kit_component where kit_id = :k', k=kit)[0] == 2
+    s = db.stock(kit)
+    run(cur, "ui.press('CTL.ASSEMBLE');", KIT__ID=str(kit), CTL__ASM_QTY='1')
+    assert db.stock(kit) == s + 1
+    run(cur, "ui.post_query('KIT');", KIT__ID=str(kit))
+    assert float(item(cur, 'KIT.STOCK')) == s + 1 and item(cur, 'KIT.CAN_MAKE') is not None
+    run(cur, "ui.post_query('KC');", KC__COMPONENT_ID=str(ids['b']))
+    assert item(cur, 'KC.COMP_TEXT').startswith(f"TST{ids['tag']}B ")
+    run(cur, "ui.press('CTL.ADDCOMP');", KIT__ID=str(kit), CTL__COMP_ID=str(kit), CTL__COMP_QTY='1')
+    assert 'MM-155' in msgs(cur)                                              # itself: a message
+
+
+@needs_db
+def test_promos_form(cur, env):
+    db, ids = env
+    compile_ui(cur, 'MM_PROMOS')
+    run(cur, 'ui.init;')
+    today = __import__('datetime').date.today().strftime('%d/%m/%Y')
+    assert item(cur, 'CTL.P_FROM') == today and item(cur, 'CTL.P_TO') == today   # ui.init: today
+    run(cur, "ui.press('CTL.NEWPROMO');", CTL__P_NAME='Test form promo', CTL__P_KIND='PCT',
+        CTL__P_FROM=today, CTL__P_TO=today, CTL__P_PCT='10')
+    p = db.one("select id from mm_promo where name = 'Test form promo'")[0]
+    run(cur, "ui.press('CTL.ADDPI');", PROMO__ID=str(p), CTL__PI_ITEM_ID=str(ids['a']), CTL__PI_QTY='1')
+    assert db.one('select item_id from mm_promo_item where promo_id = :p', p=p)[0] == ids['a']
+    assert item(cur, 'CTL.PI_ITEM_ID') is None
+    run(cur, "ui.press('CTL.TOGGLE');", PROMO__ID=str(p), PROMO__ACTIVE='Y')
+    assert db.one('select active from mm_promo where id = :p', p=p)[0] == 'N'
+    run(cur, "ui.post_query('PI');", PI__ITEM_ID=str(ids['a']))
+    assert item(cur, 'PI.TEXT').startswith(f"TST{ids['tag']}A ")
+    cat = db.one('select min(id) from mm_category')[0]
+    run(cur, "ui.post_query('PI');", PI__CATEGORY_ID=str(cat))
+    assert item(cur, 'PI.TEXT') == db.one('select name from mm_category where id = :c', c=cat)[0]
+    run(cur, "ui.press('CTL.NEWPROMO');", CTL__P_NAME='Test form promo 2', CTL__P_KIND='PCT',
+        CTL__P_FROM=today, CTL__P_TO=today)
+    assert 'MM-158' in msgs(cur)                                              # no %
+
+
+@needs_db
+def test_variants_form(cur, env):
+    db, ids = env
+    cat = db.one('select min(id) from mm_category')[0]
+    db.cur.execute("insert into mm_item (code, name, category_id, vat_code, price) "
+                   "values (:c, 'Test jacket', :cat, 'A', 40)", c=f"TST{ids['tag']}V", cat=cat)
+    db.commit()
+    model = db.one('select id from mm_item where code = :c', c=f"TST{ids['tag']}V")[0]
+    black = db.one("select id from mm_color where code = 'BLK'")[0]
+    m, l_ = (db.one("select id from mm_size where size_group = 'CLOTHES' and code = :z", z=z)[0] for z in ('M', 'L'))
+    compile_ui(cur, 'MM_VARIANTS')
+    run(cur, 'ui.init;')
+    run(cur, "ui.press('CTL.NEWVAR');", CTL__NEWMODEL_ID=str(model), CTL__V_COLOR_ID=str(black),
+        CTL__V_SIZE_ID=str(m))
+    assert db.one('select is_model from mm_item where id = :m', m=model)[0] == 'Y'
+    run(cur, "ui.press('CTL.NEWVAR');", MODEL__ID=str(model), CTL__V_COLOR_ID=str(black), CTL__V_SIZE_ID=str(l_),
+        CTL__V_BARCODE='')
+    assert db.one('select count(*) from mm_item where parent_id = :m', m=model)[0] == 2
+    run(cur, "ui.press('CTL.MPRICE');", MODEL__ID=str(model), CTL__M_PRICE='30')
+    assert db.one('select count(*) from mm_item where parent_id = :m and price = 30', m=model)[0] == 2
+    v = db.one('select min(id) from mm_item where parent_id = :m', m=model)[0]
+    run(cur, "ui.post_query('VG');", VG__ID=str(v))
+    assert item(cur, 'VG.COLOR_TEXT') == 'Μαύρο' and item(cur, 'VG.SIZE_TEXT') in ('M', 'L')
+    assert item(cur, 'VG.STOCK') == '0'
+    run(cur, "ui.press('CTL.NEWVAR');", MODEL__ID=str(model), CTL__V_COLOR_ID=str(black), CTL__V_SIZE_ID=str(m))
+    assert 'MM-165' in msgs(cur)                                              # twice: a message

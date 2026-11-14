@@ -207,6 +207,139 @@ FORMS['MM_RESERVATIONS'] = dict(
            [('CODE', 60, 'Πληρωμή', 'CTL.PAY'), ('DESCR', 120, 'Περιγραφή', None)])])
 
 
+ITEMS_PLAIN = ("select id, code || ' ' || name text from mm_item where active = 'Y' and kit = 'N' "
+               "and is_model = 'N' and serial_tracked = 'N' order by code")
+
+# baskets and sets: the baskets (ready, can make, cost) and what one has; a component in (0: out),
+# a new basket from an item, assemble N (negative: take apart)
+FORMS['MM_KITS'] = dict(
+    title='Καλάθια και σετ',
+    blocks=[
+        dict(name='KIT', table='MM_ITEM', order='code', top=80, rows=5, read_only=True, where="kit = 'Y'",
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('CODE', 'Κωδικός', 90, len=20),
+                   C('NAME', 'Περιγραφή', 260, len=100),
+                   C('PRICE', 'Τιμή', 70, num=True, mask='99G990D00'),
+                   C('COST', 'Κόστος', 70, num=True, mask='99G990D00'),
+                   C('STOCK', 'Έτοιμα', 70, num=True, db=False, display=True),
+                   C('CAN_MAKE', 'Φτιάχνονται', 80, num=True, db=False, display=True)]),
+        dict(name='KC', table='MM_KIT_COMPONENT', order='component_id', top=320, rows=8, read_only=True,
+             where='kit_id = :KIT.ID',
+             cols=[C('KIT_ID', '', 0, num=True, hidden=True),
+                   C('COMPONENT_ID', '', 0, num=True, hidden=True),
+                   C('COMP_TEXT', 'Είδος', 300, len=200, db=False, display=True),
+                   C('QTY', 'Ποσότητα', 80, num=True),
+                   C('COMP_STOCK', 'Απόθεμα', 80, num=True, db=False, display=True)])],
+    ctl=[('NEWKIT_TEXT', 'text', 10, 250, 300, 'Νέο καλάθι από είδος (F9)', {'len': 200, 'lov': 'LOV_NEWKIT'}),
+         ('NEWKIT_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('COMP_TEXT', 'text', 520, 320, 260, 'Είδος του καλαθιού (F9)', {'len': 200, 'lov': 'LOV_COMP'}),
+         ('COMP_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('COMP_QTY', 'text', 786, 320, 60, 'Ποσότητα', {'num': True, 'init': '1'}),
+         ('ADDCOMP', 'button', 852, 318, 120, 'Βάλε / άλλαξε', {}),
+         ('ASM_QTY', 'text', 520, 400, 60, 'Πόσα', {'num': True, 'init': '1'}),
+         ('ASSEMBLE', 'button', 586, 398, 200, 'Συναρμολόγησε (-: λύσε)', {})],
+    find_title='Καλάθια και σετ',
+    find=("select id, code, name from mm_item where kit = 'Y' order by code",
+          [('ID', 0, 'Κωδ.', 'FIND_ID'), ('CODE', 90, 'Κωδικός', None), ('NAME', 260, 'Περιγραφή', 'FIND_TEXT')]),
+    lovs=[('LOV_NEWKIT', 'Είδη', ITEMS_PLAIN,
+           [('ID', 0, 'Κωδ.', 'CTL.NEWKIT_ID'), ('TEXT', 320, 'Είδος', 'CTL.NEWKIT_TEXT')]),
+          ('LOV_COMP', 'Είδη', ITEMS_PLAIN,
+           [('ID', 0, 'Κωδ.', 'CTL.COMP_ID'), ('TEXT', 320, 'Είδος', 'CTL.COMP_TEXT')])])
+
+# promotions: the promotions and their items or categories; new, an item/category in (0: out), on/off
+FORMS['MM_PROMOS'] = dict(
+    title='Προσφορές',
+    blocks=[
+        dict(name='PROMO', table='MM_PROMO', order='date_from desc, id desc', top=80, rows=6, read_only=True,
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('NAME', 'Όνομα', 230, len=100),
+                   C('KIND', 'Είδος', 60, len=6),
+                   C('DATE_FROM', 'Από', 90, date=True),
+                   C('DATE_TO', 'Έως', 90, date=True),
+                   C('ACTIVE', 'Ενεργή', 50, len=1),
+                   C('PCT', '%', 50, num=True),
+                   C('BUY_QTY', 'N', 40, num=True),
+                   C('FREE_QTY', 'M', 40, num=True),
+                   C('BUNDLE_PRICE', 'Τιμή πακέτου', 90, num=True, mask='99G990D00')]),
+        dict(name='PI', table='MM_PROMO_ITEM', order='id', top=400, rows=6, read_only=True,
+             where='promo_id = :PROMO.ID',
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('ITEM_ID', '', 0, num=True, hidden=True),
+                   C('CATEGORY_ID', '', 0, num=True, hidden=True),
+                   C('TEXT', 'Είδος ή κατηγορία', 320, len=200, db=False, display=True),
+                   C('QTY', 'Ποσότητα', 80, num=True)])],
+    ctl=[('P_NAME', 'text', 10, 260, 220, 'Όνομα', {'len': 100}),
+         ('P_KIND', 'text', 236, 260, 70, 'Είδος (F9)', {'len': 6, 'upper': True, 'lov': 'LOV_PKIND'}),
+         ('P_FROM', 'date', 312, 260, 90, 'Από', {}),
+         ('P_TO', 'date', 408, 260, 90, 'Έως', {}),
+         ('P_PCT', 'text', 504, 260, 50, '%', {'num': True}),
+         ('P_BUY', 'text', 560, 260, 40, 'N', {'num': True}),
+         ('P_FREE', 'text', 606, 260, 40, 'M', {'num': True}),
+         ('P_PRICE', 'text', 652, 260, 80, 'Τιμή πακέτου', {'num': True}),
+         ('NEWPROMO', 'button', 738, 258, 140, 'Νέα προσφορά', {}),
+         ('TOGGLE', 'button', 884, 258, 160, 'Ενεργή / ανενεργή', {}),
+         ('PI_ITEM_TEXT', 'text', 520, 400, 260, 'Είδος (F9)', {'len': 200, 'lov': 'LOV_PITEM'}),
+         ('PI_ITEM_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('PI_CAT_TEXT', 'text', 520, 446, 260, 'ή κατηγορία (F9)', {'len': 100, 'lov': 'LOV_PCAT'}),
+         ('PI_CAT_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('PI_QTY', 'text', 786, 400, 60, 'Ποσότητα', {'num': True, 'init': '1'}),
+         ('ADDPI', 'button', 852, 398, 120, 'Βάλε / βγάλε', {})],
+    find_title='Προσφορές',
+    find=("select id, name, kind from mm_promo order by date_from desc, id desc",
+          [('ID', 0, 'Κωδ.', 'FIND_ID'), ('NAME', 260, 'Όνομα', 'FIND_TEXT'), ('KIND', 60, 'Είδος', None)]),
+    lovs=[('LOV_PKIND', 'Είδος προσφοράς', ' union all '.join(
+              "select '%s' code, mm_text.t('%s') descr from dual" % (c, WORDS.key(d))
+              for c, d in (('PCT', 'Έκπτωση %'), ('NM', 'Αγοράζεις N, παίρνεις M δώρο'),
+                           ('BUNDLE', 'Πακέτο σε τιμή'))),
+           [('CODE', 70, 'Είδος', 'CTL.P_KIND'), ('DESCR', 240, 'Περιγραφή', None)]),
+          ('LOV_PITEM', 'Είδη', "select id, code || ' ' || name text from mm_item where active = 'Y' "
+                                "and serial_tracked = 'N' and parent_id is null order by code",
+           [('ID', 0, 'Κωδ.', 'CTL.PI_ITEM_ID'), ('TEXT', 320, 'Είδος', 'CTL.PI_ITEM_TEXT')]),
+          ('LOV_PCAT', 'Κατηγορίες', 'select id, name from mm_category order by name',
+           [('ID', 0, 'Κωδ.', 'CTL.PI_CAT_ID'), ('NAME', 220, 'Κατηγορία', 'CTL.PI_CAT_TEXT')])])
+
+# clothes and shoes: the models and their variants (colour, size, stock, available); a new variant (of
+# the model, or of an item that becomes a model), one price for the model and its variants
+FORMS['MM_VARIANTS'] = dict(
+    title='Ρούχα και παπούτσια',
+    blocks=[
+        dict(name='MODEL', table='MM_ITEM', order='code', top=80, rows=5, read_only=True, where="is_model = 'Y'",
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('CODE', 'Κωδικός', 90, len=20),
+                   C('NAME', 'Μοντέλο', 260, len=100),
+                   C('PRICE', 'Τιμή', 70, num=True, mask='99G990D00')]),
+        dict(name='VG', table='MM_ITEM', order='color_id, (select z.sort_no from mm_size z where z.id = size_id)',
+             top=330, rows=10, read_only=True, where='parent_id = :MODEL.ID',
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('CODE', 'Κωδικός', 130, len=20),
+                   C('BARCODE', 'Barcode', 110, len=14),
+                   C('COLOR_TEXT', 'Χρώμα', 90, len=40, db=False, display=True),
+                   C('SIZE_TEXT', 'Μέγεθος', 60, len=10, db=False, display=True),
+                   C('PRICE', 'Τιμή', 70, num=True, mask='99G990D00'),
+                   C('STOCK', 'Απόθεμα', 70, num=True, db=False, display=True),
+                   C('AVAIL', 'Διαθέσιμα', 70, num=True, db=False, display=True)])],
+    ctl=[('NEWMODEL_TEXT', 'text', 10, 250, 300, 'Νέο μοντέλο από είδος (F9)', {'len': 200, 'lov': 'LOV_NEWMODEL'}),
+         ('NEWMODEL_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('M_PRICE', 'text', 400, 250, 70, 'Τιμή', {'num': True}),
+         ('MPRICE', 'button', 476, 248, 160, 'Τιμή σε όλες', {}),
+         ('V_COLOR_TEXT', 'text', 660, 330, 120, 'Χρώμα (F9)', {'len': 40, 'lov': 'LOV_COLOR'}),
+         ('V_COLOR_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('V_SIZE_TEXT', 'text', 786, 330, 110, 'Μέγεθος (F9)', {'len': 40, 'lov': 'LOV_SIZE'}),
+         ('V_SIZE_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('V_BARCODE', 'text', 660, 376, 140, 'Barcode', {'len': 14}),
+         ('NEWVAR', 'button', 806, 374, 160, 'Νέα παραλλαγή', {})],
+    find_title='Μοντέλα',
+    find=("select id, code, name from mm_item where is_model = 'Y' order by code",
+          [('ID', 0, 'Κωδ.', 'FIND_ID'), ('CODE', 90, 'Κωδικός', None), ('NAME', 260, 'Μοντέλο', 'FIND_TEXT')]),
+    lovs=[('LOV_NEWMODEL', 'Είδη', "select id, code || ' ' || name text from mm_item where is_model = 'N' "
+                                   "and parent_id is null and kit = 'N' and serial_tracked = 'N' order by code",
+           [('ID', 0, 'Κωδ.', 'CTL.NEWMODEL_ID'), ('TEXT', 320, 'Είδος', 'CTL.NEWMODEL_TEXT')]),
+          ('LOV_COLOR', 'Χρώματα', 'select id, name from mm_color order by name',
+           [('ID', 0, 'Κωδ.', 'CTL.V_COLOR_ID'), ('NAME', 160, 'Χρώμα', 'CTL.V_COLOR_TEXT')]),
+          ('LOV_SIZE', 'Μεγέθη', "select id, size_group || ' ' || code text from mm_size order by size_group, sort_no",
+           [('ID', 0, 'Κωδ.', 'CTL.V_SIZE_ID'), ('TEXT', 160, 'Μέγεθος', 'CTL.V_SIZE_TEXT')])])
+
+
 def attrs(a):
     return ' '.join('%s=%s' % (k, quoteattr(str(v))) for k, v in a.items())
 
@@ -332,15 +465,14 @@ def ctl_item(c, say):
         a.update(ItemType='Text Item', Visible='false', DatabaseItem='false',
                  DataType='Number' if o.get('num') else 'Char', MaximumLength=o.get('len', 40))
         return a
+    # a date: text DD/MM/YYYY (ui.day reads it so on every runtime; ui.init puts today in it)
     a.update(ItemType='Display Item' if kind == 'display' else 'Text Item', CanvasName=CANVAS,
              XPosition=x, YPosition=y, Width=w, Height=ROW_H, DatabaseItem='false',
-             DataType='Number' if o.get('num') else 'Date' if kind == 'date' else 'Char',
+             DataType='Number' if o.get('num') else 'Char',
              MaximumLength=o.get('len', 14 if o.get('num') else 10 if kind == 'date' else 100))
     if text:
         a.update(Prompt=ascii_text(text), PromptAttachmentEdge='Top', PromptAttachmentOffset=2)
         say('CTL.' + name, 'PROMPT_TEXT', text)
-    if kind == 'date':
-        a.update(FormatMask='DD/MM/YYYY', InitializeValue='$$DATE$$')
     if kind == 'secret':
         a['ConcealData'] = 'true'          # a PIN typed: dots on the screen
     if o.get('num'):
@@ -379,6 +511,9 @@ def build(name, f):
         height = max(height, b['top'] + b['rows'] * ROW_H + 40)
         out_blocks.append((b, items))
     ctl = [ctl_item(c, say) for c in FIND_CTL + f.get('ctl', [])]
+    for c in f.get('ctl', []):
+        if c[1] == 'date':
+            texts.append("COPY(to_char(sysdate, 'DD/MM/YYYY'), 'CTL.%s');" % c[0])
     for c in f.get('ctl', []):
         if c[1] != 'hidden':
             width = max(width, c[2] + c[4] + 10)
