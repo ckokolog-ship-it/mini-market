@@ -128,7 +128,7 @@ def build(name, r):
             '    <body width="%.5f" height="%.5f">' % (PAGE_W - 2 * LEFT, BODY_H),
             '      <location x="%.5f" y="%.5f"/>' % (LEFT, BODY_Y),
             '      <frame name="M_ROWS">',
-            '        ' + geo(0, 0, 7.30, ROW_H * 5),
+            '        ' + geo(0, 0, 7.30, ROW_H * 6),
             '        <generalLayout verticalElasticity="variable"/>',
             '        <repeatingFrame name="R_ROWS" source="G_ROWS" printDirection="down" minWidowRecords="1" '
             'columnMode="no">',
@@ -138,19 +138,22 @@ def build(name, r):
         m = 'DD/MM/YYYY' if c == 'LDATE' else mask if a == 'end' else None
         out.append(field('F_' + c, c, x, 0, w, align=a, mask=m, pad='          '))
     out.append('        </repeatingFrame>')
-    # the totals after the last row
-    y = ROW_H * 1.6
+    # the totals after the last row: a frame of their own under the rows, pushed down with them as
+    # one (fields alone at the bottom edge of M_ROWS stayed where they were drawn, on the 5th row)
+    y = ROW_H * 1.5
+    out += ['        <frame name="M_TOTALS">',
+            '          ' + geo(0, y, 7.30, ROW_H * 3.8)]
     x, w, _ = X['DESCR']
-    rows = [('F_TOTALS', formula_name('TOTALS'), [('F_T_DEBIT', 'CS_T_DEBIT', 'DEBIT'), ('F_T_CREDIT', 'CS_T_CREDIT', 'CREDIT')]),
-            ('F_OPEN', formula_name('OPEN'), [('F_OPEN_B', 'CS_OPEN', 'BALANCE')]),
+    rows = [('F_OPEN', formula_name('OPEN'), [('F_OPEN_B', 'CS_OPEN', 'BALANCE')]),
+            ('F_TOTALS', formula_name('TOTALS'), [('F_T_DEBIT', 'CS_T_DEBIT', 'DEBIT'), ('F_T_CREDIT', 'CS_T_CREDIT', 'CREDIT')]),
             ('F_CLOSE', formula_name('CLOSE'), [('F_CLOSE_B', 'CS_CLOSE', 'BALANCE')])]
     for k, (fname, label, vals) in enumerate(rows):
-        yy = y + k * ROW_H * 1.2
-        out.append(field(fname, label, x, yy, w, align='end', bold=True))
+        yy = y + ROW_H * 0.2 + k * ROW_H * 1.2
+        out.append(field(fname, label, x, yy, w, align='end', bold=True, pad='          '))
         for vn, src, col in vals:
             cx, cw, _ = X[col]
-            out.append(field(vn, src, cx, yy, cw, align='end', mask=mask, bold=True))
-    out += ['      </frame>', '    </body>', '    <margin>']
+            out.append(field(vn, src, cx, yy, cw, align='end', mask=mask, bold=True, pad='          '))
+    out += ['        </frame>', '      </frame>', '    </body>', '    <margin>']
     # the heading: the title, the period, the page; the headings of the columns; from the carry-over
     out.append(field('F_TITLE', 'CF_TITLE', LEFT, 0.30, 5.6, h=0.24, bold=True, size=12))
     out.append(field('F_PERIOD', 'CF_PERIOD', LEFT, 0.58, 5.0, h=0.2, size=9))

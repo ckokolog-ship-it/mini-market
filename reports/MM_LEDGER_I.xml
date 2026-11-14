@@ -80,7 +80,7 @@ order by seq]]>
     <body width="7.47000" height="9.55000">
       <location x="0.40000" y="1.35000"/>
       <frame name="M_ROWS">
-        <geometryInfo x="0.00000" y="0.00000" width="7.30000" height="0.85000"/>
+        <geometryInfo x="0.00000" y="0.00000" width="7.30000" height="1.02000"/>
         <generalLayout verticalElasticity="variable"/>
         <repeatingFrame name="R_ROWS" source="G_ROWS" printDirection="down" minWidowRecords="1" columnMode="no">
           <geometryInfo x="0.00000" y="0.00000" width="7.30000" height="0.17000"/>
@@ -110,34 +110,37 @@ order by seq]]>
             <geometryInfo x="6.14000" y="0.00000" width="1.10000" height="0.17000"/>
           </field>
         </repeatingFrame>
-        <field name="F_TOTALS" source="CF_L_TOTALS" minWidowLines="1" spacing="0" alignment="end">
-          <font face="Arial" size="8" bold="yes"/>
-          <geometryInfo x="1.60000" y="0.27200" width="2.55000" height="0.17000"/>
-        </field>
-        <field name="F_T_DEBIT" source="CS_T_DEBIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D000">
-          <font face="Arial" size="8" bold="yes"/>
-          <geometryInfo x="4.18000" y="0.27200" width="0.95000" height="0.17000"/>
-        </field>
-        <field name="F_T_CREDIT" source="CS_T_CREDIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D000">
-          <font face="Arial" size="8" bold="yes"/>
-          <geometryInfo x="5.16000" y="0.27200" width="0.95000" height="0.17000"/>
-        </field>
-        <field name="F_OPEN" source="CF_L_OPEN" minWidowLines="1" spacing="0" alignment="end">
-          <font face="Arial" size="8" bold="yes"/>
-          <geometryInfo x="1.60000" y="0.47600" width="2.55000" height="0.17000"/>
-        </field>
-        <field name="F_OPEN_B" source="CS_OPEN" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D000">
-          <font face="Arial" size="8" bold="yes"/>
-          <geometryInfo x="6.14000" y="0.47600" width="1.10000" height="0.17000"/>
-        </field>
-        <field name="F_CLOSE" source="CF_L_CLOSE" minWidowLines="1" spacing="0" alignment="end">
-          <font face="Arial" size="8" bold="yes"/>
-          <geometryInfo x="1.60000" y="0.68000" width="2.55000" height="0.17000"/>
-        </field>
-        <field name="F_CLOSE_B" source="CS_CLOSE" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D000">
-          <font face="Arial" size="8" bold="yes"/>
-          <geometryInfo x="6.14000" y="0.68000" width="1.10000" height="0.17000"/>
-        </field>
+        <frame name="M_TOTALS">
+          <geometryInfo x="0.00000" y="0.25500" width="7.30000" height="0.64600"/>
+          <field name="F_OPEN" source="CF_L_OPEN" minWidowLines="1" spacing="0" alignment="end">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="1.60000" y="0.28900" width="2.55000" height="0.17000"/>
+          </field>
+          <field name="F_OPEN_B" source="CS_OPEN" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D000">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="6.14000" y="0.28900" width="1.10000" height="0.17000"/>
+          </field>
+          <field name="F_TOTALS" source="CF_L_TOTALS" minWidowLines="1" spacing="0" alignment="end">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="1.60000" y="0.49300" width="2.55000" height="0.17000"/>
+          </field>
+          <field name="F_T_DEBIT" source="CS_T_DEBIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D000">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="4.18000" y="0.49300" width="0.95000" height="0.17000"/>
+          </field>
+          <field name="F_T_CREDIT" source="CS_T_CREDIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D000">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="5.16000" y="0.49300" width="0.95000" height="0.17000"/>
+          </field>
+          <field name="F_CLOSE" source="CF_L_CLOSE" minWidowLines="1" spacing="0" alignment="end">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="1.60000" y="0.69700" width="2.55000" height="0.17000"/>
+          </field>
+          <field name="F_CLOSE_B" source="CS_CLOSE" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D000">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="6.14000" y="0.69700" width="1.10000" height="0.17000"/>
+          </field>
+        </frame>
       </frame>
     </body>
     <margin>
