@@ -55,6 +55,10 @@ end;""",
     "create or replace function prompt_text return number is begin return 3; end;",
     "create or replace function default_where return number is begin return 4; end;",
     "create or replace function format_mask return number is begin return 5; end;",
+    "create or replace package web as procedure show_document(u varchar2, t varchar2); end;",
+    """create or replace package body web as
+  procedure show_document(u varchar2, t varchar2) is begin fstub.props('SHOW_DOCUMENT') := u || ' ' || t; end;
+end;""",
     """create or replace procedure set_window_property(w varchar2, p number, v varchar2) is
 begin fstub.props('WINDOW ' || upper(w) || '#' || p) := v; end;""",
     """create or replace procedure set_item_property(i varchar2, p number, v varchar2) is
@@ -92,7 +96,7 @@ begin
   return fstub.lov_answer;
 end;""",
 ]
-DROP = ['package ui', 'function lov_name', 'function get_item_property', 'function status', 'function query_status', 'procedure set_record_property',
+DROP = ['package ui', 'package web', 'function lov_name', 'function get_item_property', 'function status', 'function query_status', 'procedure set_record_property',
         'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
         'procedure set_item_property', 'procedure set_window_property', 'function default_where', 'function format_mask',
@@ -720,6 +724,17 @@ def test_ledger_form(cur, env):
         CTL__L_FROM='01/01/2000', CTL__L_TO=today.strftime('%d/%m/%Y'))
     assert float(item(cur, 'CTL.O_CLOSE').replace(',', '.')) == db.stock(ids['a'])
     assert prop(cur, 'LED.DEBIT#3') == 'Εισαγωγή'
+    # the report of the item on the screen, in the browser: where from MM_SETTING
+    cur.execute("delete from mm_setting where name in ('REPORTS_URL', 'REPORTS_FORMAT')")
+    run(cur, "ui.press('CTL.PRINTLED');")
+    assert 'SET_REPORTS_URL.sql' in msgs(cur)
+    cur.execute("insert into mm_setting values ('REPORTS_URL', 'http://h:9012/reports/rwservlet?mm')")
+    cur.execute("insert into mm_setting values ('REPORTS_FORMAT', 'HTML')")
+    run(cur, "ui.press('CTL.PRINTLED');")
+    assert prop(cur, 'SHOW_DOCUMENT') == (
+        'http://h:9012/reports/rwservlet?mm&report=MM_LEDGER_I.rdf&destype=cache&desformat=HTML'
+        '&P_KIND=I&P_ID=%d&P_FROM=01/01/2000&P_TO=%s _blank' % (ids['a'], today.strftime('%d/%m/%Y')))
+    cur.connection.rollback()
     # no supplier chosen: a message
     run(cur, "ui.press('CTL.SHOWSUPP');", CTL__L_FROM='01/01/2000', CTL__L_TO='01/01/2001')
     assert 'MM-171' in msgs(cur)

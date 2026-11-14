@@ -676,3 +676,10 @@ create global temporary table if not exists mm_ledger_row (
   credit      number,                  -- an item: out; a customer or supplier: credit
   balance     number
 ) on commit preserve rows;
+
+-- the settings that differ from server to server, e.g. where the reports are (the button "Print" of
+-- the form MM_LEDGER): SET_REPORTS_URL.sql
+create table if not exists mm_setting (
+  name   varchar2(30)  constraint mm_setting_pk primary key,
+  value  varchar2(400)
+);

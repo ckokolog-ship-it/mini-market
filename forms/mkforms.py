@@ -499,6 +499,7 @@ FORMS['MM_LEDGER'] = dict(
          ('SUPP_ID', 'hidden', 0, 0, 0, '', {'num': True}),
          ('SHOWSUPP', 'button', 472, 114, 170, 'Καρτέλα προμηθευτή', {}),
          ('L_TITLE', 'display', 660, 24, 314, 'Καρτέλα', {'len': 200}),
+         ('PRINTLED', 'button', 660, 68, 170, 'Εκτύπωση', {}),
          ('O_OPEN', 'display', 548, 520, 130, 'Από μεταφορά', {'num': True}),
          ('O_DEBIT', 'display', 686, 520, 90, 'Σύνολο', {'num': True}),
          ('O_CREDIT', 'display', 780, 520, 90, 'Σύνολο', {'num': True}),
