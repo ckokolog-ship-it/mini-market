@@ -113,6 +113,7 @@ def cleanup(c):
     c.execute(f'delete from mm_item where id in ({TEST_ITEMS})')
     c.execute("delete from mm_customer where name like 'Test %'")
     c.execute("delete from mm_supplier where name like 'Test %'")
+    c.execute("delete from mm_promo where name like 'Test %'")
 
 
 def close_open_z(db, reg):
@@ -388,18 +389,22 @@ def test_two_phones_scan_without_waiting(env):
 
 
 def test_max_per_sale(env):
-    """at most MAX_PER_SALE of an item in one sale; purchases and credit notes have no limit"""
+    """at most MAX_PER_SALE of an item in a retail receipt; invoices and purchases have no limit"""
     db, ids = env
     db.cur.execute('update mm_item set max_per_sale = 2 where id = :i', i=ids['b'])
     db.commit()
     try:
-        d = db.fn('new_doc', int, 'TPY', p_customer_id=ids['customer'], p_payment='CREDIT')
+        if not db.fn('open_z_of', int, ids['reg']):
+            db.fn('open_z', int, ids['reg'])
+        d = db.fn('new_doc', int, 'ALP', p_register_id=ids['reg'])
         line = db.fn('add_line', int, d, ids['b'], 2)
         db.commit()
         db.fails(157, 'add_line', d, ids['b'], 1, rtype=int)
-        db.fails(157, 'update_line', line, 3, 2)
+        db.fails(157, 'update_line', line, 3, 2.26)
         db.fn('post_doc', int, d)
         db.commit()
+        i = db.fn('new_doc', int, 'TPY', p_customer_id=ids['customer'], p_payment='CREDIT')
+        db.fn('add_line', int, i, ids['b'], 10)                      # an invoice: no limit
         p = db.fn('new_doc', int, 'TAG', p_supplier_id=ids['supplier'], p_payment='CREDIT')
         db.fn('add_line', int, p, ids['b'], 10)                      # a purchase: no limit
         db.conn.rollback()

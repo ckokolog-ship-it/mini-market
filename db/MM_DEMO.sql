@@ -143,6 +143,33 @@ begin
 end;
 /
 
+-- three promotions until the end of this year: beers 2+1, coffees -20%, filter coffee + biscuits 5 euro
+declare
+  p number;
+  last_ date := add_months(trunc(sysdate, 'YYYY'), 12) - 1;
+  n number;
+  function id_of(c varchar2) return number is
+    v number;
+  begin
+    select id into v from mm_item where code = c;
+    return v;
+  end;
+begin
+  select count(*) into n from mm_promo where name in ('Μπίρες 2+1', 'Καφέδες -20%', 'Καφές φίλτρου + μπισκότα 5 €');
+  if n = 0 then
+    p := mm_core.new_promo('Μπίρες 2+1', 'NM', trunc(sysdate), last_, p_buy => 2, p_free => 1);
+    mm_core.promo_item(p, id_of('POT05'));
+    p := mm_core.new_promo('Καφέδες -20%', 'PCT', trunc(sysdate), last_, p_pct => 20);
+    for c in (select id from mm_category where name = 'Καφές και ροφήματα') loop
+      mm_core.promo_item(p, p_category_id => c.id);
+    end loop;
+    p := mm_core.new_promo('Καφές φίλτρου + μπισκότα 5 €', 'BUNDLE', trunc(sysdate), last_, p_price => 5);
+    mm_core.promo_item(p, id_of('KAF02'), p_qty => 1);
+    mm_core.promo_item(p, id_of('SNK03'), p_qty => 1);
+  end if;
+end;
+/
+
 -- the cards of mobile phones: items with serials, 5 cards each (made-up serials and PINs), when
 -- MM_PIN works (DBMS_CRYPTO: GRANT_CRYPTO.sql)
 insert into mm_category (name)

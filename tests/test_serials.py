@@ -203,3 +203,29 @@ def test_one_card_of_each_in_a_sale(card):
     finally:
         db.cur.execute('update mm_item set max_per_sale = null where id = :i', i=ids['card'])
         db.commit()
+
+
+def test_invoice_with_many_cards_and_their_serials(card):
+    """an invoice of sale to a reseller: no limit, many cards on one line (sell_serials), and the
+    serials under the line (MM_DOC_SERIALS); not enough cards: none taken"""
+    db, ids = card
+    serials = load(db, ids, 4, 'IV')
+    db.cur.execute('update mm_item set max_per_sale = 1 where id = :i', i=ids['card'])
+    db.commit()
+    try:
+        d = db.fn('new_doc', int, 'TPY', p_customer_id=ids['customer'], p_payment='CREDIT')
+        avail = db.one("select count(*) from mm_serial where item_id = :i and status = 'A'", i=ids['card'])[0]
+        db.fails(140, 'sell_serials', d, ids['card'], avail + 1, rtype=int)      # all or none
+        d = db.fn('new_doc', int, 'TPY', p_customer_id=ids['customer'], p_payment='CREDIT')
+        assert db.fn('sell_serials', int, d, ids['card'], 3) == 3
+        db.fn('post_doc', int, d)
+        db.commit()
+        db.cur.execute('select line_no, serial from mm_doc_serials where doc_id = :d order by serial', d=d)
+        rows = db.cur.fetchall()
+        assert len(rows) == 3 and {r[0] for r in rows} == {1}                  # 3 serials, one line
+        assert float(db.one('select qty from mm_doc_line where doc_id = :d', d=d)[0]) == 3
+        assert all(s in serials or s.startswith(('LD-', 'PIN-', 'SL-', 'DR-', 'TW-', 'MX-'))
+                   for _, s in rows)
+    finally:
+        db.cur.execute('update mm_item set max_per_sale = null where id = :i', i=ids['card'])
+        db.commit()

@@ -33,7 +33,10 @@ create or replace package mm_core as
                     p_price number default null, p_discount number default 0) return number;
   procedure update_line(p_line_id number, p_qty number, p_price number, p_discount number default 0);
   procedure delete_line(p_line_id number);
-  procedure recalc(p_doc_id number);
+  procedure recalc(p_doc_id number);                     -- a draft sale: reprice first
+  procedure reprice(p_doc_id number);                    -- the promotions and the discount of the document
+  procedure set_doc_discount(p_doc_id number, p_pct number default 0, p_amount number default 0,
+                             p_reason varchar2 default null);   -- on the whole document, with a reason
   procedure delete_doc(p_doc_id number);                 -- a draft only
   function post_doc(p_doc_id number) return number;     -- returns the number of the document
   procedure cancel_doc(p_doc_id number);                 -- a posted one, while its Z is open
@@ -55,6 +58,8 @@ create or replace package mm_core as
                                                                          -- to a line of a draft purchase
   function sell_serial(p_doc_id number, p_item_id number default null,
                        p_serial varchar2 default null) return number;   -- the oldest available, or this one
+  function sell_serials(p_doc_id number, p_item_id number, p_qty number) return number;
+                                                                         -- p_qty of the oldest: how many
   procedure release_serial(p_serial_id number);                         -- back from a draft sale
   function reveal_pin(p_serial_id number, p_user varchar2 default null) return varchar2;
   function receipt_pin(p_serial_id number) return varchar2;             -- a card sold today
@@ -64,6 +69,14 @@ create or replace package mm_core as
   procedure set_component(p_kit_id number, p_component_id number, p_qty number);
   procedure assemble_kit(p_kit_id number, p_qty number, p_note varchar2 default null);
   function kit_cost(p_kit_id number) return number;
+
+  -- promotions: PCT (% off), NM (buy N get M free), BUNDLE (items together for a price); their items
+  -- or categories (promo_item: p_qty 0 out; a bundle: items only, with the quantity each)
+  function new_promo(p_name varchar2, p_kind varchar2, p_from date, p_to date, p_pct number default null,
+                     p_buy number default null, p_free number default null,
+                     p_price number default null) return number;
+  procedure promo_item(p_promo_id number, p_item_id number default null, p_category_id number default null,
+                       p_qty number default 1);
 
   -- reservations (e.g. New Year cakes): a name, a phone, the day of the pickup; their quantities are
   -- reserved (MM_ITEM_AVAIL) until the delivery, a receipt that counts the deposit
@@ -110,15 +123,15 @@ create or replace package body mm_core as
     delete from mm_serial where in_line_id = p_line_id and status = 'N';
   end;
 
-  -- a sale: at most MAX_PER_SALE of an item (p_extra: what is about to be added)
+  -- a retail receipt: at most MAX_PER_SALE of an item (p_extra: what is about to be added); an
+  -- invoice of sale has no limit (a reseller takes 50 cards: 50 serials on one line)
   procedure check_max(p_doc_id number, p_item_id number, p_extra number) is
     m number;
     c varchar2(20);
     q number;
     n number;
   begin
-    select count(*) into n from mm_doc d join mm_doc_type t on t.code = d.doc_type
-    where d.id = p_doc_id and t.side = 'S' and t.stock_sign = -1;
+    select count(*) into n from mm_doc d where d.id = p_doc_id and d.doc_type = 'ALP';
     if n = 0 then
       return;
     end if;
@@ -128,7 +141,7 @@ create or replace package body mm_core as
     end if;
     select nvl(sum(qty), 0) into q from mm_doc_line where doc_id = p_doc_id and item_id = p_item_id;
     if q + p_extra > m then
-      fail(57, 'Το ' || c || ' πουλιέται το πολύ ' || m || ' ανά απόδειξη');
+      fail(57, 'Το ' || c || ' πουλιέται το πολύ ' || m || ' ανά απόδειξη λιανικής');
     end if;
   end;
 
@@ -241,8 +254,198 @@ create or replace package body mm_core as
     return v;
   end;
 
+  -- the promotions of the day of a draft sale on its lines, then the discount of the document spread
+  -- over them (by value: the VAT of each rate stays right); every line once more: net, VAT, total
+  procedure reprice(p_doc_id number) is
+    type t_line is record (id number, item_id number, cat_id number, qty number, base number,
+                           rate number, pdisc number, ddisc number, promo number, used boolean);
+    type t_lines is table of t_line index by pls_integer;
+    l t_lines;
+    n pls_integer := 0;
+    d mm_doc%rowtype;
+    t mm_doc_type%rowtype;
+
+    function in_promo(i pls_integer, p_promo number) return boolean is
+      c number;
+    begin
+      select count(*) into c from mm_promo_item
+      where promo_id = p_promo and (item_id = l(i).item_id or category_id = l(i).cat_id);
+      return c > 0;
+    end;
+  begin
+    select * into d from mm_doc where id = p_doc_id;
+    t := doc_type_row(d.doc_type);
+    if not (d.status = 'D' and t.side = 'S' and t.stock_sign = -1) then
+      return;
+    end if;
+    for x in (select dl.id, dl.item_id, i.category_id, dl.qty, dl.price, dl.discount, dl.vat_rate
+              from mm_doc_line dl join mm_item i on i.id = dl.item_id
+              where dl.doc_id = p_doc_id order by dl.line_no) loop
+      n := n + 1;
+      l(n).id := x.id; l(n).item_id := x.item_id; l(n).cat_id := x.category_id; l(n).qty := x.qty;
+      l(n).base := round(x.price * x.qty * (1 - x.discount / 100), 2);
+      l(n).rate := x.vat_rate; l(n).pdisc := 0; l(n).ddisc := 0; l(n).promo := null; l(n).used := false;
+    end loop;
+
+    -- 1. bundles: as many times as all their items are there
+    for p in (select * from mm_promo where kind = 'BUNDLE' and active = 'Y'
+              and d.doc_date between date_from and date_to order by id) loop
+      declare
+        type t_num is table of number index by pls_integer;
+        first_line t_num;     -- by component: the line that takes its part
+        part t_num;           -- by component: its value in one bundle
+        times number;
+        value_ number := 0;
+        k pls_integer := 0;
+        ok boolean := true;
+        q number;
+        f pls_integer;
+        disc number;
+        given number := 0;
+      begin
+        for c in (select item_id, qty from mm_promo_item where promo_id = p.id and item_id is not null order by id) loop
+          k := k + 1;
+          q := 0; f := null;
+          for i in 1 .. n loop
+            if not l(i).used and l(i).item_id = c.item_id and l(i).qty > 0 then
+              q := q + l(i).qty;
+              f := nvl(f, i);
+            end if;
+          end loop;
+          if f is null then
+            ok := false;
+            exit;
+          end if;
+          times := least(nvl(times, q), floor(q / c.qty));
+          first_line(k) := f;
+          part(k) := c.qty * l(f).base / l(f).qty;
+          value_ := value_ + part(k);
+        end loop;
+        if ok and k > 0 and times >= 1 and value_ > p.bundle_price then
+          disc := round(times * (value_ - p.bundle_price), 2);
+          for j in 1 .. k loop
+            declare
+              x number := case when j = k then disc - given else round(disc * part(j) / value_, 2) end;
+            begin
+              l(first_line(j)).pdisc := l(first_line(j)).pdisc + x;
+              l(first_line(j)).promo := p.id;
+              given := given + x;
+            end;
+          end loop;
+          for i in 1 .. n loop          -- the lines of its items: no other promotion
+            for c in (select 1 from mm_promo_item where promo_id = p.id and item_id = l(i).item_id) loop
+              l(i).used := true;
+              l(i).promo := p.id;
+            end loop;
+          end loop;
+        end if;
+      end;
+    end loop;
+
+    -- 2. buy N get M free: the cheapest pieces of the pool free
+    for p in (select * from mm_promo where kind = 'NM' and active = 'Y'
+              and d.doc_date between date_from and date_to order by id) loop
+      declare
+        units number := 0;
+        free_ number;
+        best pls_integer;
+        taken boolean;
+        type t_flag is table of boolean index by pls_integer;
+        done t_flag;
+        take number;
+      begin
+        for i in 1 .. n loop
+          if not l(i).used and in_promo(i, p.id) then
+            units := units + floor(l(i).qty);
+          end if;
+        end loop;
+        free_ := floor(units / (p.buy_qty + p.free_qty)) * p.free_qty;
+        if free_ > 0 then
+          loop
+            exit when free_ = 0;
+            best := null;
+            for i in 1 .. n loop
+              if not l(i).used and not done.exists(i) and floor(l(i).qty) > 0 and in_promo(i, p.id) then
+                if best is null or l(i).base / l(i).qty < l(best).base / l(best).qty then
+                  best := i;
+                end if;
+              end if;
+            end loop;
+            exit when best is null;
+            take := least(free_, floor(l(best).qty));
+            l(best).pdisc := l(best).pdisc + round(take * l(best).base / l(best).qty, 2);
+            l(best).promo := p.id;
+            free_ := free_ - take;
+            done(best) := true;
+          end loop;
+          for i in 1 .. n loop
+            if not l(i).used and in_promo(i, p.id) then
+              l(i).used := true;
+            end if;
+          end loop;
+        end if;
+      end;
+    end loop;
+
+    -- 3. % off: the best one for each line still free
+    for i in 1 .. n loop
+      if not l(i).used then
+        for p in (select pr.id, pr.pct from mm_promo pr
+                  where pr.kind = 'PCT' and pr.active = 'Y' and d.doc_date between pr.date_from and pr.date_to
+                    and exists (select 1 from mm_promo_item x where x.promo_id = pr.id
+                                and (x.item_id = l(i).item_id or x.category_id = l(i).cat_id))
+                  order by pr.pct desc, pr.id fetch first 1 row only) loop
+          l(i).pdisc := round(l(i).base * p.pct / 100, 2);
+          l(i).promo := p.id;
+        end loop;
+      end if;
+    end loop;
+
+    -- 4. the discount of the document, spread by the value of each line after its promotion
+    declare
+      tot number := 0;
+      dd number;
+      given number := 0;
+      big pls_integer;
+    begin
+      for i in 1 .. n loop
+        tot := tot + (l(i).base - l(i).pdisc);
+        if big is null or l(i).base - l(i).pdisc > l(big).base - l(big).pdisc then
+          big := i;
+        end if;
+      end loop;
+      dd := least(tot, d.disc_amount + round(tot * d.disc_pct / 100, 2));
+      if dd > 0 and tot > 0 then
+        for i in 1 .. n loop
+          l(i).ddisc := round(dd * (l(i).base - l(i).pdisc) / tot, 2);
+          given := given + l(i).ddisc;
+        end loop;
+        l(big).ddisc := l(big).ddisc + (dd - given);
+      end if;
+    end;
+
+    -- 5. the lines again
+    for i in 1 .. n loop
+      declare
+        g number := greatest(l(i).base - l(i).pdisc - l(i).ddisc, 0);
+        ne number; va number; tt number;
+      begin
+        if t.prices_incl_vat = 'Y' then
+          tt := g; ne := round(g / (1 + l(i).rate / 100), 2); va := tt - ne;
+        else
+          ne := g; va := round(g * l(i).rate / 100, 2); tt := ne + va;
+        end if;
+        update mm_doc_line
+        set promo_id = case when l(i).pdisc > 0 then l(i).promo end,
+            promo_disc = l(i).pdisc, doc_disc = l(i).ddisc, net = ne, vat = va, total = tt
+        where id = l(i).id;
+      end;
+    end loop;
+  end;
+
   procedure recalc(p_doc_id number) is
   begin
+    reprice(p_doc_id);
     update mm_doc d
     set (net, vat, total) = (select nvl(sum(l.net), 0), nvl(sum(l.vat), 0), nvl(sum(l.total), 0)
                              from mm_doc_line l where l.doc_id = d.id)
@@ -703,6 +906,24 @@ create or replace package body mm_core as
     return sid;
   end;
 
+  -- many cards at once (an invoice to a reseller): the p_qty oldest available, all or none
+  function sell_serials(p_doc_id number, p_item_id number, p_qty number) return number is
+    sid number;
+  begin
+    if nvl(p_qty, 0) < 1 or p_qty <> trunc(p_qty) then
+      fail(24, 'Λάθος ποσότητα');
+    end if;
+    savepoint mm_sell_serials;
+    for k in 1 .. p_qty loop
+      sid := sell_serial(p_doc_id, p_item_id);
+    end loop;
+    return p_qty;
+  exception
+    when others then
+      rollback to mm_sell_serials;
+      raise;
+  end;
+
   procedure release_serial(p_serial_id number) is
     s mm_serial%rowtype;
     l mm_doc_line%rowtype;
@@ -762,6 +983,74 @@ create or replace package body mm_core as
       fail(44, 'Το PIN τυπώνεται μόνο για κάρτα που πουλήθηκε σήμερα');
     end if;
     return pin_of(p_serial_id, nvl(upper(sys_context('USERENV', 'CLIENT_IDENTIFIER')), 'RECEIPT'), 'RECEIPT');
+  end;
+
+  -- ---------------------------------------------------------------------------------------------
+  procedure set_doc_discount(p_doc_id number, p_pct number default 0, p_amount number default 0,
+                             p_reason varchar2 default null) is
+    d mm_doc%rowtype := draft(p_doc_id);
+    t mm_doc_type%rowtype := doc_type_row(d.doc_type);
+  begin
+    if not (t.side = 'S' and t.stock_sign = -1) then
+      fail(59, 'Έκπτωση στο σύνολο γίνεται μόνο σε πώληση');
+    end if;
+    if nvl(p_pct, 0) < 0 or nvl(p_pct, 0) > 100 or nvl(p_amount, 0) < 0 then
+      fail(59, 'Λάθος έκπτωση: 0 έως 100% ή θετικό ποσό');
+    end if;
+    if (nvl(p_pct, 0) > 0 or nvl(p_amount, 0) > 0) and trim(p_reason) is null then
+      fail(59, 'Η έκπτωση στο σύνολο θέλει αιτιολογία');
+    end if;
+    update mm_doc set disc_pct = nvl(p_pct, 0), disc_amount = nvl(p_amount, 0), disc_reason = trim(p_reason)
+    where id = p_doc_id;
+    recalc(p_doc_id);
+  end;
+
+  function new_promo(p_name varchar2, p_kind varchar2, p_from date, p_to date, p_pct number default null,
+                     p_buy number default null, p_free number default null,
+                     p_price number default null) return number is
+    v number;
+  begin
+    if trim(p_name) is null or p_from is null or p_to is null or p_to < p_from then
+      fail(58, 'Η προσφορά θέλει όνομα και διάστημα ημερομηνιών');
+    end if;
+    -- (nvl: a NULL would make the test unknown, and the IF would let it pass)
+    if not ((p_kind = 'PCT' and nvl(p_pct, 0) > 0 and nvl(p_pct, 0) <= 100) or
+            (p_kind = 'NM' and nvl(p_buy, 0) >= 1 and nvl(p_free, 0) >= 1) or
+            (p_kind = 'BUNDLE' and nvl(p_price, -1) >= 0)) then
+      fail(58, 'Λάθος προσφορά: PCT με 0-100%, NM με N και M, BUNDLE με τιμή');
+    end if;
+    insert into mm_promo (name, kind, date_from, date_to, pct, buy_qty, free_qty, bundle_price)
+    values (trim(p_name), p_kind, trunc(p_from), trunc(p_to),
+            case when p_kind = 'PCT' then p_pct end,
+            case when p_kind = 'NM' then p_buy end, case when p_kind = 'NM' then p_free end,
+            case when p_kind = 'BUNDLE' then p_price end)
+    returning id into v;
+    return v;
+  exception
+    when dup_val_on_index then fail(58, 'Υπάρχει ήδη προσφορά με όνομα ' || p_name);
+  end;
+
+  procedure promo_item(p_promo_id number, p_item_id number default null, p_category_id number default null,
+                       p_qty number default 1) is
+    k varchar2(6);
+  begin
+    begin
+      select kind into k from mm_promo where id = p_promo_id;
+    exception
+      when no_data_found then fail(58, 'Δεν υπάρχει προσφορά ' || p_promo_id);
+    end;
+    if (p_item_id is null) = (p_category_id is null) then
+      fail(60, 'Η προσφορά αφορά είδος ή κατηγορία (ένα από τα δύο)');
+    end if;
+    if k = 'BUNDLE' and p_item_id is null then
+      fail(60, 'Ένα πακέτο σε τιμή έχει είδη, όχι κατηγορίες');
+    end if;
+    delete from mm_promo_item
+    where promo_id = p_promo_id and (item_id = p_item_id or category_id = p_category_id);
+    if nvl(p_qty, 0) > 0 then
+      insert into mm_promo_item (promo_id, item_id, category_id, qty)
+      values (p_promo_id, p_item_id, p_category_id, p_qty);
+    end if;
   end;
 
   -- ---------------------------------------------------------------------------------------------
