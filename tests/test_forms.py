@@ -128,6 +128,17 @@ def test_no_forms_builtins_in_sql(name):
             assert not re.search(r'\b%s\s*\(' % b, stmt), '%s in SQL: %s' % (b, stmt[:120])
 
 
+@pytest.mark.parametrize('name', list(BUILT))
+def test_plsql_of_the_forms(name):
+    """what the database takes and the PL/SQL of the Forms does not (frmcmp on Windows): a SELECT
+    inside an expression (PL/SQL 103 at "(SELECT ... ),"), ANSI joins, a unit named like a keyword"""
+    import re
+    body = re.sub(r'--[^\n]*', '', BUILT[name][2]).upper()
+    assert not re.search(r'\(\s*SELECT\b', body), 'a SELECT inside an expression'
+    assert not re.search(r'\b(LEFT|RIGHT|FULL|INNER|CROSS)\s+(OUTER\s+)?JOIN\b|\bJOIN\b', body), 'an ANSI join'
+    assert not re.search(r'\b(FUNCTION|PROCEDURE)\s+(DAY|MONTH|YEAR|DATE|LEVEL|SIZE|MODE)\b', body)
+
+
 def test_items_form_stock_is_not_a_column():
     items = {i.get('Name'): i for i in xml_of('MM_ITEMS').iter('{%s}Item' % NS['f'])}
     assert items['STOCK'].get('DatabaseItem') == 'false'           # reservable: never written
