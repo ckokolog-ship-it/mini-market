@@ -54,6 +54,7 @@ end;""",
     "create or replace function label return number is begin return 2; end;",
     "create or replace function prompt_text return number is begin return 3; end;",
     "create or replace function default_where return number is begin return 4; end;",
+    "create or replace function format_mask return number is begin return 5; end;",
     """create or replace procedure set_window_property(w varchar2, p number, v varchar2) is
 begin fstub.props('WINDOW ' || upper(w) || '#' || p) := v; end;""",
     """create or replace procedure set_item_property(i varchar2, p number, v varchar2) is
@@ -94,7 +95,7 @@ end;""",
 DROP = ['package ui', 'function lov_name', 'function get_item_property', 'function status', 'function query_status', 'procedure set_record_property',
         'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
-        'procedure set_item_property', 'procedure set_window_property', 'function default_where',
+        'procedure set_item_property', 'procedure set_window_property', 'function default_where', 'function format_mask',
         'function prompt_text', 'function label', 'function title', 'procedure message', 'procedure copy',
         'function name_in', 'package fstub']
 
@@ -125,7 +126,7 @@ def test_xml_ascii_and_references(name):
         for m in lv.findall('f:LOVColumnMapping', NS):
             if m.get('ReturnItem'):
                 assert m.get('ReturnItem') in items, m.get('ReturnItem')
-    assert 'LOV_FIND' in lovs or name == 'MM_MAIN'                           # the menu finds nothing
+    assert 'LOV_FIND' in lovs or name in ('MM_MAIN', 'MM_LEDGER')   # the menu, the ledgers (lists) find nothing
 
 
 BUILTINS = ('NAME_IN', 'COPY', 'SHOW_LOV', 'GO_BLOCK', 'EXECUTE_QUERY', 'MESSAGE', 'TX')
@@ -688,3 +689,39 @@ def test_payments_form(cur, env):
     assert db.one('select status from mm_payment where id = :r', r=r)[0] == 'C'
     run(cur, "ui.press('CTL.NEWPAY');", CTL__P_KIND='R', CTL__P_AMOUNT='5', CTL__P_DATE=today)
     assert 'MM-169' in msgs(cur)                                              # no customer: a message
+
+
+@needs_db
+def test_ledger_form(cur, env):
+    db, ids = env
+    compile_ui(cur, 'MM_LEDGER')
+    run(cur, 'ui.init;')
+    import datetime
+    today = datetime.date.today()
+    assert item(cur, 'CTL.L_FROM') == '01/01/%d' % today.year and item(cur, 'CTL.L_TO') == today.strftime('%d/%m/%Y')
+    # a receipt of 7 from the customer today: its ledger has it, after the carry-over
+    db.fn('receive', int, ids['customer'], 7, 'BANK')
+    db.commit()
+    run(cur, "ui.press('CTL.SHOWCUST');", CTL__CUST_ID=str(ids['customer']), CTL__CUST_TEXT='Test',
+        CTL__L_FROM='01/01/2000', CTL__L_TO=today.strftime('%d/%m/%Y'))
+    assert 'MM-' not in msgs(cur), msgs(cur)
+    assert item(cur, 'CTL.O_OPEN') == '0' and float(item(cur, 'CTL.O_CREDIT').replace(',', '.')) >= 7
+    assert item(cur, 'CTL.L_TITLE').startswith('Test: 01/01/2000')
+    q = cur.var(str)
+    cur.execute('begin :q := fstub.queries; end;', q=q)
+    assert q.getvalue() == 'LED:;'
+    db.cur.execute("select count(*) from mm_ledger_row")       # (another session: its own rows, none)
+    assert db.cur.fetchone()[0] == 0
+    cur.execute("select credit from mm_ledger_row where kind = 'M' and credit is not null")
+    assert 7 in [float(c) for (c,) in cur.fetchall()]
+    assert prop(cur, 'LED.DEBIT#3') == 'Χρέωση'
+    # an item: in and out, its stock
+    run(cur, "ui.press('CTL.SHOWITEM');", CTL__ITEM_ID=str(ids['a']), CTL__ITEM_TEXT='a',
+        CTL__L_FROM='01/01/2000', CTL__L_TO=today.strftime('%d/%m/%Y'))
+    assert float(item(cur, 'CTL.O_CLOSE').replace(',', '.')) == db.stock(ids['a'])
+    assert prop(cur, 'LED.DEBIT#3') == 'Εισαγωγή'
+    # no supplier chosen: a message
+    run(cur, "ui.press('CTL.SHOWSUPP');", CTL__L_FROM='01/01/2000', CTL__L_TO='01/01/2001')
+    assert 'MM-171' in msgs(cur)
+    run(cur, "ui.press('CTL.SHOWSUPP');", CTL__SUPP_ID=str(ids['supplier']), CTL__L_FROM='02/01/2001', CTL__L_TO='01/01/2001')
+    assert 'MM-172' in msgs(cur)
