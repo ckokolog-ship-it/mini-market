@@ -363,6 +363,10 @@ PACKAGE BODY ui IS
       copy(to_char(s), 'VG.STOCK');
       copy(to_char(a), 'VG.AVAIL');
     END IF;
+    -- what this procedure put in the items of the record is not a change of the user: the record
+    -- as it came from the database (else a LOV that validates from its list writes its db item
+    -- again when the cursor passes, and the form asks to save what nobody changed)
+    set_record_property(to_number(name_in('SYSTEM.TRIGGER_RECORD')), p_block, STATUS, QUERY_STATUS);
   END;
 
   -- the messages of the database in words: the constraint by its name, MM_CORE as it is
