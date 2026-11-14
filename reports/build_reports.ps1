@@ -5,6 +5,11 @@
 #
 #   powershell -ExecutionPolicy Bypass -File build_reports.ps1                    (all of them)
 #   powershell -ExecutionPolicy Bypass -File build_reports.ps1 -Reports MM_LEDGER_P
+#   powershell -ExecutionPolicy Bypass -File build_reports.ps1 -Reports MM_SALES -Interactive
+#
+# -Interactive: rwconverter with batch=no, so its messages come in windows. With batch=yes a warning
+# that wants an answer cancels the conversion ("Conversion of ... canceled", no REP- in the log):
+# so its reason shows. (The Reports Builder too: File, Open the .xml, File, Save As the .rdf.)
 #
 # The connection: /@MM_DB, the wallet (forms_wallet.cmd -DbUser mm -Alias MM_DB -Section mm), no
 # password. The log of each one: <Out>\<name>.log.
@@ -16,7 +21,8 @@ param(
   [string]$Domain = 'C:\Oracle\Middleware\Oracle_Home\user_projects\domains\forms_domain',
   [string]$Jdk = 'C:\Program Files\Java\jdk-17.0.21.0.3',
   [string]$Instance = 'reptools1',
-  [string]$Out = 'C:\reports_dev'
+  [string]$Out = 'C:\reports_dev',
+  [switch]$Interactive
 )
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -61,11 +67,21 @@ foreach ($r in $Reports) {
   Remove-Item $rdf, $log -ErrorAction SilentlyContinue
   Write-Host "== ${name}: $xml -> $rdf"
   $p = Start-Process $conv -Wait -PassThru -NoNewWindow -WorkingDirectory $Out -ArgumentList @(
-    'batch=yes', "source=$xml", 'stype=xmlfile', "dest=$rdf", 'dtype=rdffile', 'overwrite=yes',
+    "batch=$(if ($Interactive) { 'no' } else { 'yes' })", "source=$xml", 'stype=xmlfile', "dest=$rdf", 'dtype=rdffile', 'overwrite=yes',
     'compile_all=yes', "userid=$UserId", "logfile=$log")
   if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host "   $_" } }
+  if (-not $Interactive -and -not (Test-Path $rdf)) {
+    # "Conversion ... canceled" with batch=yes, and the same XML fine with batch=no (MM_SALES, the
+    # first time): once more so
+    Write-Host "== ${name}: once more with batch=no"
+    Remove-Item $log -ErrorAction SilentlyContinue
+    $p = Start-Process $conv -Wait -PassThru -NoNewWindow -WorkingDirectory $Out -ArgumentList @(
+      'batch=no', "source=$xml", 'stype=xmlfile', "dest=$rdf", 'dtype=rdffile', 'overwrite=yes',
+      'compile_all=yes', "userid=$UserId", "logfile=$log")
+    if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host "   $_" } }
+  }
   if ($p.ExitCode -ne 0 -or -not (Test-Path $rdf)) {
-    throw "${name}: rwconverter $($p.ExitCode), no .rdf (the messages above, $log)"
+    throw "${name}: rwconverter $($p.ExitCode), no .rdf (the messages above, $log; the reason: -Interactive)"
   }
   $done += $name
 }

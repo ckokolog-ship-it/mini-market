@@ -29,6 +29,7 @@
       <MenuItem Name="ILEDGER" Label="Kartela eidoys" CommandType="PL/SQL" MenuItemCode="new_form('MM_LEDGER');"/>
     </Menu>
     <Menu Name="SALES_MENU">
+      <MenuItem Name="POS" Label="Tameio lianikis" CommandType="PL/SQL" MenuItemCode="new_form('MM_POS');"/>
       <MenuItem Name="INVOICES" Label="Timologia polisis" CommandType="PL/SQL" MenuItemCode="new_form('MM_INVOICES');"/>
       <MenuItem Name="RECEIPTS" Label="Eispraxeis" CommandType="PL/SQL" MenuItemCode="new_form('MM_PAYMENTS');"/>
       <MenuItem Name="CUSTOMERS" Label="Pelates" CommandType="PL/SQL" MenuItemCode="new_form('MM_CUSTOMERS');"/>

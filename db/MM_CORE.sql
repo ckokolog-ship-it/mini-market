@@ -39,6 +39,7 @@ create or replace package mm_core as
   procedure set_doc_discount(p_doc_id number, p_pct number default 0, p_amount number default 0,
                              p_reason varchar2 default null);   -- on the whole document, with a reason
   procedure delete_doc(p_doc_id number);                 -- a draft only
+  procedure set_payment(p_doc_id number, p_payment varchar2);  -- a draft: CASH, CARD (CREDIT not retail)
   function post_doc(p_doc_id number) return number;     -- returns the number of the document
   procedure cancel_doc(p_doc_id number);                 -- a posted one, while its Z is open
   function credit_note(p_doc_id number) return number;  -- a draft PPY/PAG with the lines of an invoice
@@ -555,6 +556,17 @@ create or replace package body mm_core as
     recalc(l.doc_id);
   exception
     when no_data_found then fail(8, 'Δεν υπάρχει γραμμή ' || p_line_id);
+  end;
+
+  -- the till: the receipt is scanned first, its payment chosen at the end
+  procedure set_payment(p_doc_id number, p_payment varchar2) is
+    d mm_doc%rowtype := draft(p_doc_id);
+  begin
+    if p_payment is null or p_payment not in ('CASH', 'CARD', 'CREDIT')
+       or d.doc_type = 'ALP' and p_payment = 'CREDIT' then
+      fail(11, 'Η απόδειξη λιανικής πληρώνεται με μετρητά ή κάρτα');
+    end if;
+    update mm_doc set payment = p_payment where id = p_doc_id;
   end;
 
   procedure delete_doc(p_doc_id number) is

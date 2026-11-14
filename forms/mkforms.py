@@ -511,6 +511,40 @@ FORMS['MM_LEDGER'] = dict(
           ('LOV_SUPP', 'Προμηθευτές', "select id, name from mm_supplier order by name",
            [('ID', 0, 'Κωδ.', 'CTL.SUPP_ID'), ('NAME', 260, 'Προμηθευτής', 'CTL.SUPP_TEXT')])])
 
+# the till: the receipt of the register (scan a barcode or a code, Enter), its lines, cash or card;
+# the Z of the register. The receipt is a draft in the database from the first scan: a form closed
+# halfway finds it again.
+FORMS['MM_POS'] = dict(
+    title='Ταμείο λιανικής',
+    blocks=[
+        dict(name='PL', table='MM_DOC_LINE', order='line_no', top=150, rows=12, read_only=True,
+             where='doc_id = -1',
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('DOC_ID', '', 0, num=True, hidden=True),
+                   C('ITEM_ID', '', 0, num=True, hidden=True),
+                   C('LINE_NO', 'Α/Α', 40, num=True),
+                   C('ITEM_TEXT', 'Είδος', 300, len=200, db=False, display=True),
+                   C('QTY', 'Ποσότητα', 80, num=True),
+                   C('PRICE', 'Τιμή', 80, num=True, mask='99G990D00'),
+                   C('DISCOUNT', 'Έκπτ. %', 50, num=True),
+                   C('TOTAL', 'Ποσό', 90, num=True, mask='99G990D00')])],
+    ctl=[('REG_CODE', 'text', 10, 24, 60, 'Ταμείο', {'len': 10, 'upper': True, 'init': 'T1'}),
+         ('Z_TEXT', 'display', 76, 24, 300, 'Ζ', {'len': 100}),
+         ('Z_CASH', 'text', 382, 24, 90, 'Αρχικό ταμείο', {'num': True}),
+         ('OPENZ', 'button', 478, 22, 130, 'Άνοιγμα Ζ', {}),
+         ('CLOSEZ', 'button', 614, 22, 130, 'Κλείσιμο Ζ', {}),
+         ('SCAN', 'text', 10, 84, 260, 'Barcode ή κωδικός (Enter)', {'len': 40, 'enter': True}),
+         ('QTY', 'text', 276, 84, 70, 'Ποσότητα', {'num': True, 'init': '1'}),
+         ('ADDSCAN', 'button', 352, 82, 100, 'Βάλε', {}),
+         ('T_TOTAL', 'display', 560, 84, 140, 'Σύνολο', {'num': True}),
+         ('POSDEL', 'button', 760, 150, 180, 'Σβήσε τη γραμμή', {}),
+         ('VOIDREC', 'button', 760, 184, 180, 'Ακύρωση απόδειξης', {}),
+         ('GIVEN', 'text', 10, 450, 100, 'Δόθηκαν', {'num': True}),
+         ('PAYCASH', 'button', 116, 448, 150, 'Μετρητά', {}),
+         ('PAYCARD', 'button', 272, 448, 150, 'Κάρτα', {}),
+         ('CHANGE', 'display', 430, 450, 100, 'Ρέστα', {'num': True}),
+         ('LAST_TEXT', 'display', 536, 450, 400, 'Τελευταία απόδειξη', {'len': 200})])
+
 # the reports (reports/mkreports.py) in the browser, through the Reports Server (MM_SETTING): the
 # period, a button for each
 FORMS['MM_REPORTS'] = dict(
@@ -527,7 +561,8 @@ FORMS['MM_REPORTS'] = dict(
 MENU_FORMS = [('MM_ITEMS', 'Είδη'), ('MM_CUSTOMERS', 'Πελάτες'), ('MM_SUPPLIERS', 'Προμηθευτές'),
               ('MM_CARDS', 'Κάρτες κινητής'), ('MM_RESERVATIONS', 'Κρατήσεις'), ('MM_KITS', 'Καλάθια και σετ'),
               ('MM_PROMOS', 'Προσφορές'), ('MM_VARIANTS', 'Ρούχα και παπούτσια'), ('MM_INVOICES', 'Τιμολόγια'),
-              ('MM_PAYMENTS', 'Εισπράξεις και πληρωμές'), ('MM_LEDGER', 'Καρτέλες'), ('MM_REPORTS', 'Αναφορές')]
+              ('MM_PAYMENTS', 'Εισπράξεις και πληρωμές'), ('MM_LEDGER', 'Καρτέλες'), ('MM_REPORTS', 'Αναφορές'),
+              ('MM_POS', 'Ταμείο λιανικής')]
 FORMS['MM_MAIN'] = dict(
     title='Mini market',
     blocks=[],
@@ -554,7 +589,8 @@ MENU_BAR = [
                           ('KITS', 'Καλάθια και σετ', "new_form('MM_KITS');"),
                           ('CARDS', 'Κάρτες κινητής', "new_form('MM_CARDS');"),
                           ('ILEDGER', 'Καρτέλα είδους', "new_form('MM_LEDGER');")]),
-    ('SALES', 'Πωλήσεις', [('INVOICES', 'Τιμολόγια πώλησης', "new_form('MM_INVOICES');"),
+    ('SALES', 'Πωλήσεις', [('POS', 'Ταμείο λιανικής', "new_form('MM_POS');"),
+                           ('INVOICES', 'Τιμολόγια πώλησης', "new_form('MM_INVOICES');"),
                            ('RECEIPTS', 'Εισπράξεις', "new_form('MM_PAYMENTS');"),
                            ('CUSTOMERS', 'Πελάτες', "new_form('MM_CUSTOMERS');"),
                            ('RESERV', 'Κρατήσεις', "new_form('MM_RESERVATIONS');"),
@@ -766,6 +802,8 @@ def ctl_item(c, say):
     if o.get('lov'):
         a['LovName'] = o['lov']
         a['ValidateFromList'] = 'false'
+    if o.get('enter'):
+        a['_enter'] = True             # Enter here: ui.press of this item (KEY-NEXT-ITEM; the cursor stays)
     return a
 
 
@@ -840,7 +878,13 @@ def build(name, f):
             out.append(trigger('WHEN-NEW-RECORD-INSTANCE', 'ui.master(:SYSTEM.TRIGGER_BLOCK);', '      '))
         out.append('    </Block>')
     out.append('    <Block Name="CTL" DatabaseBlock="false" RecordsDisplayCount="1">')
-    out += ['      <Item %s/>' % attrs(a) for a in ctl]
+    for a in ctl:
+        if a.pop('_enter', False):
+            out += ['      <Item %s>' % attrs(a),
+                    trigger('KEY-NEXT-ITEM', 'ui.press(:SYSTEM.TRIGGER_ITEM);', '        '),
+                    '      </Item>']
+        else:
+            out.append('      <Item %s/>' % attrs(a))
     out += [trigger('WHEN-BUTTON-PRESSED', 'ui.press(:SYSTEM.TRIGGER_ITEM);', '      '),
             '    </Block>']
     out.append('    <Block Name="TB" DatabaseBlock="false" RecordsDisplayCount="1">')
