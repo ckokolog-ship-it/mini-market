@@ -258,6 +258,21 @@ begin
 end;
 /
 
+-- the taverna paid part of its invoice (bank), and we paid the supplier of the beers
+declare
+  n number;
+  c number;
+begin
+  select count(*) into n from mm_payment;
+  if n = 0 then
+    select id into c from mm_customer where afm = '999000020';
+    n := mm_core.receive(c, 30, 'BANK', p_notes => 'Έναντι τιμολογίου');
+    select id into c from mm_supplier where afm = '999000079';
+    n := mm_core.pay(c, 72.03, 'BANK', p_notes => 'Εξόφληση τιμολογίου');
+  end if;
+end;
+/
+
 -- the cards of mobile phones: items with serials, 5 cards each (made-up serials and PINs), when
 -- MM_PIN works (DBMS_CRYPTO: GRANT_CRYPTO.sql)
 insert into mm_category (name)

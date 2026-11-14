@@ -86,6 +86,16 @@ create or replace package mm_core as
                         p_barcode varchar2 default null) return number;
   procedure model_price(p_model_id number, p_price number);
 
+  -- receipts from customers and payments to suppliers (what settles the invoices on credit): CASH,
+  -- CARD or BANK; with a register (CASH, CARD): a move of its open Z too
+  function receive(p_customer_id number, p_amount number, p_method varchar2 default 'CASH',
+                   p_date date default trunc(sysdate), p_register_id number default null,
+                   p_notes varchar2 default null) return number;
+  function pay(p_supplier_id number, p_amount number, p_method varchar2 default 'BANK',
+               p_date date default trunc(sysdate), p_register_id number default null,
+               p_notes varchar2 default null) return number;
+  procedure cancel_payment(p_payment_id number);
+
   -- reservations (e.g. New Year cakes): a name, a phone, the day of the pickup; their quantities are
   -- reserved (MM_ITEM_AVAIL) until the delivery, a receipt that counts the deposit
   function new_reservation(p_name varchar2, p_phone varchar2, p_pickup_date date,
@@ -1241,6 +1251,79 @@ create or replace package body mm_core as
       n := kit_cost(p_kit_id);     -- first: a function on MM_ITEM inside its own UPDATE is ORA-04091
       update mm_item set cost = n where id = p_kit_id;
     end if;
+  end;
+
+  -- ---------------------------------------------------------------------------------------------
+  function new_payment(p_kind varchar2, p_customer_id number, p_supplier_id number, p_amount number,
+                       p_method varchar2, p_date date, p_register_id number, p_notes varchar2) return number is
+    v number;
+    z number;
+  begin
+    if nvl(p_amount, 0) <= 0 then
+      fail(67, 'Το ποσό πρέπει να είναι θετικό');
+    end if;
+    if p_method not in ('CASH', 'CARD', 'BANK') then
+      fail(68, 'Τρόπος: μετρητά, κάρτα ή έμβασμα');
+    end if;
+    if p_kind = 'R' and p_customer_id is null or p_kind = 'P' and p_supplier_id is null then
+      fail(69, case p_kind when 'R' then 'Η είσπραξη θέλει πελάτη' else 'Η πληρωμή θέλει προμηθευτή' end);
+    end if;
+    if p_register_id is not null and p_method <> 'BANK' then
+      z := open_z_of(p_register_id);
+      if z is null then
+        fail(12, 'Το ταμείο δεν έχει ανοιχτό Ζ');
+      end if;
+    end if;
+    insert into mm_payment (kind, customer_id, supplier_id, pay_date, amount, method, register_id, notes)
+    values (p_kind, p_customer_id, p_supplier_id, nvl(trunc(p_date), trunc(sysdate)), p_amount, p_method,
+            case when z is not null then p_register_id end, p_notes)
+    returning id into v;
+    if z is not null then
+      insert into mm_cash_move (register_id, z_id, kind, payment, amount, payment_id, note)
+      values (p_register_id, z, case p_kind when 'R' then 'IN' else 'OUT' end, p_method,
+              case p_kind when 'R' then p_amount else -p_amount end, v,
+              case p_kind when 'R' then 'Είσπραξη ' else 'Πληρωμή ' end || v);
+    end if;
+    return v;
+  end;
+
+  function receive(p_customer_id number, p_amount number, p_method varchar2 default 'CASH',
+                   p_date date default trunc(sysdate), p_register_id number default null,
+                   p_notes varchar2 default null) return number is
+  begin
+    return new_payment('R', p_customer_id, null, p_amount, p_method, p_date, p_register_id, p_notes);
+  end;
+
+  function pay(p_supplier_id number, p_amount number, p_method varchar2 default 'BANK',
+               p_date date default trunc(sysdate), p_register_id number default null,
+               p_notes varchar2 default null) return number is
+  begin
+    return new_payment('P', null, p_supplier_id, p_amount, p_method, p_date, p_register_id, p_notes);
+  end;
+
+  -- cancelled: its move of the register back, while that Z is open
+  procedure cancel_payment(p_payment_id number) is
+    p mm_payment%rowtype;
+    zs varchar2(1);
+  begin
+    begin
+      select * into p from mm_payment where id = p_payment_id for update;
+    exception
+      when no_data_found then fail(70, 'Δεν υπάρχει είσπραξη/πληρωμή ' || p_payment_id);
+    end;
+    if p.status <> 'P' then
+      fail(70, 'Η είσπραξη/πληρωμή έχει ήδη ακυρωθεί');
+    end if;
+    for m in (select * from mm_cash_move where payment_id = p_payment_id) loop
+      select status into zs from mm_z where id = m.z_id;
+      if zs = 'C' then
+        fail(14, 'Το Ζ της έχει κλείσει: κάνε αντίστροφη κίνηση');
+      end if;
+      insert into mm_cash_move (register_id, z_id, kind, payment, amount, payment_id, note)
+      values (m.register_id, m.z_id, case m.kind when 'IN' then 'OUT' else 'IN' end, m.payment, -m.amount,
+              p_payment_id, 'Ακύρωση');
+    end loop;
+    update mm_payment set status = 'C' where id = p_payment_id;
   end;
 
   -- ---------------------------------------------------------------------------------------------

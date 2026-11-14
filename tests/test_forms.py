@@ -665,3 +665,26 @@ def test_invoice_serials(cur, env):
     assert [r[0] for r in db.cur] == ['A', 'A']
     run(cur, "ui.press('CTL.ADDSER');", DOC__ID=str(p), DL__ID=str(pl), CTL__S_SERIAL=f"BUY-{ids['tag']}-9")
     assert 'MM-102' in msgs(cur)                                              # posted: no more
+
+
+@needs_db
+def test_payments_form(cur, env):
+    db, ids = env
+    compile_ui(cur, 'MM_PAYMENTS')
+    run(cur, 'ui.init;')
+    assert item(cur, 'CTL.P_KIND') == 'R' and item(cur, 'CTL.P_METHOD') == 'CASH'
+    today = __import__('datetime').date.today().strftime('%d/%m/%Y')
+    run(cur, "ui.press('CTL.NEWPAY');", CTL__P_KIND='R', CTL__CUST_ID=str(ids['customer']), CTL__P_AMOUNT='12',
+        CTL__P_METHOD='BANK', CTL__P_DATE=today, CTL__P_NOTES='Test form')
+    r = db.one("select max(id) from mm_payment where customer_id = :c", c=ids['customer'])[0]
+    assert db.one('select amount, method, register_id from mm_payment where id = :r', r=r) == (12, 'BANK', None)
+    assert item(cur, 'CTL.P_AMOUNT') is None
+    run(cur, "ui.press('CTL.NEWPAY');", CTL__P_KIND='P', CTL__SUPP_ID=str(ids['supplier']), CTL__P_AMOUNT='3',
+        CTL__P_METHOD='BANK', CTL__P_DATE=today)
+    assert db.one("select count(*) from mm_payment where supplier_id = :s", s=ids['supplier'])[0] >= 1
+    run(cur, "ui.post_query('PAY');", PAY__CUSTOMER_ID=str(ids['customer']))
+    assert item(cur, 'PAY.PARTNER_TEXT') == db.one('select name from mm_customer where id = :c', c=ids['customer'])[0]
+    run(cur, "ui.press('CTL.CANCELPAY');", PAY__ID=str(r))
+    assert db.one('select status from mm_payment where id = :r', r=r)[0] == 'C'
+    run(cur, "ui.press('CTL.NEWPAY');", CTL__P_KIND='R', CTL__P_AMOUNT='5', CTL__P_DATE=today)
+    assert 'MM-169' in msgs(cur)                                              # no customer: a message

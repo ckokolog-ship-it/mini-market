@@ -96,6 +96,12 @@ TEST_DOCS = (f"select doc_id from mm_doc_line where item_id in ({TEST_ITEMS}) un
 
 
 def cleanup(c):
+    c.execute("delete from mm_cash_move where payment_id in (select id from mm_payment where customer_id in "
+              "(select id from mm_customer where name like 'Test %') or supplier_id in "
+              "(select id from mm_supplier where name like 'Test %'))")
+    c.execute("delete from mm_payment where customer_id in (select id from mm_customer where name like 'Test %') "
+              "or register_id in (select id from mm_register where code = 'TST') "
+              "or supplier_id in (select id from mm_supplier where name like 'Test %')")
     c.execute("update mm_doc_line set promo_id = null where promo_id in (select id from mm_promo where name like 'Test %')")
     c.execute("delete from mm_promo where name like 'Test %'")
     c.execute(f'delete from mm_promo_item where item_id in ({TEST_ITEMS})')
