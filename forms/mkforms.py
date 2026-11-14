@@ -373,7 +373,12 @@ FORMS['MM_INVOICES'] = dict(
                    C('PROMO_DISC', 'Προσφορά', 70, num=True, mask='99G990D00'),
                    C('NET', 'Καθαρό', 80, num=True, mask='99G990D00'),
                    C('VAT', 'ΦΠΑ', 70, num=True, mask='99G990D00'),
-                   C('TOTAL', 'Σύνολο', 80, num=True, mask='99G990D00')])],
+                   C('TOTAL', 'Σύνολο', 80, num=True, mask='99G990D00')]),
+        dict(name='DS', table='MM_SERIAL', order='id', top=540, rows=5, read_only=True,
+             where='(out_line_id = :DL.ID or in_line_id = :DL.ID)',
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('SERIAL', 'Serial της γραμμής', 220, len=40),
+                   C('STATUS', 'Κατ.', 40, len=1)])],
     ctl=[('D_TYPE', 'text', 10, 260, 60, 'Είδος (λίστα)', {'len': 3, 'upper': True, 'init': 'TPY', 'lov': 'LOV_DTYPE'}),
          ('CUST_TEXT', 'text', 76, 260, 200, 'Πελάτης (λίστα)', {'len': 100, 'lov': 'LOV_CUST'}),
          ('CUST_ID', 'hidden', 0, 0, 0, '', {'num': True}),
@@ -392,7 +397,11 @@ FORMS['MM_INVOICES'] = dict(
          ('L_PRICE', 'text', 976, 376, 80, 'Τιμή', {'num': True}),
          ('L_DISC', 'text', 1062, 376, 50, 'Έκπτ. %', {'num': True}),
          ('ADDLINE', 'button', 910, 410, 220, 'Βάλε γραμμή', {}),
-         ('DELLINE', 'button', 910, 444, 220, 'Σβήσε τη γραμμή', {})],
+         ('DELLINE', 'button', 910, 444, 220, 'Σβήσε τη γραμμή', {}),
+         ('S_SERIAL', 'text', 300, 540, 200, 'Serial (σάρωση)', {'len': 40}),
+         ('S_PIN', 'secret', 506, 540, 120, 'PIN (αγορά)', {'len': 20}),
+         ('ADDSER', 'button', 632, 538, 140, 'Βάλε serial', {}),
+         ('DELSER', 'button', 632, 572, 140, 'Βγάλε serial', {})],
     find_title='Τιμολόγια',
     find=("select d.id, d.doc_type || ' ' || d.doc_no || ' ' || to_char(d.doc_date, 'dd/mm/yyyy') text, "
           "nvl(c.name, s.name) partner from mm_doc d left join mm_customer c on c.id = d.customer_id "
@@ -534,6 +543,8 @@ def program(name, f, texts):
                         "c_where CONSTANT VARCHAR2(400) := '%s';" % f.get('where', '').replace("'", "''"))
     body = body.replace("c_detail CONSTANT VARCHAR2(30) := ''; -- DETAIL",
                         "c_detail CONSTANT VARCHAR2(30) := '%s';" % f.get('detail', ''))
+    body = body.replace("c_detail2 CONSTANT VARCHAR2(30) := ''; -- DETAIL2",
+                        "c_detail2 CONSTANT VARCHAR2(30) := '%s';" % f.get('detail2', ''))
     body = body.replace('NULL; -- TEXTS', ('\n' + ' ' * 4).join(texts))
     return spec, body
 
@@ -695,7 +706,9 @@ def build(name, f):
 
     master = blocks[0] if blocks else dict(name='')
     detail = blocks[1]['name'] if len(blocks) > 1 else ''
-    spec, body = program(name, dict(block=master['name'], where=master.get('where', ''), detail=detail), texts)
+    detail2 = blocks[2]['name'] if len(blocks) > 2 else ''
+    spec, body = program(name, dict(block=master['name'], where=master.get('where', ''), detail=detail,
+                                    detail2=detail2), texts)
     out = ['<?xml version="1.0" encoding="UTF-8"?>',
            '<Module version="141200000" xmlns="http://xmlns.oracle.com/Forms">',
            '  <FormModule Name="%s" Title=%s ConsoleWindow="%s" MenuModule="%s">'
@@ -713,7 +726,7 @@ def build(name, f):
         out += ['      <Item %s/>' % attrs(a) for a in items]
         out += [trigger('POST-QUERY', 'ui.post_query(:SYSTEM.TRIGGER_BLOCK);', '      '),
                 trigger('WHEN-VALIDATE-ITEM', 'ui.validate(:SYSTEM.TRIGGER_ITEM);', '      ')]
-        if b is master and detail:
+        if (b is master and detail) or (detail2 and b['name'] == detail):
             out.append(trigger('WHEN-NEW-RECORD-INSTANCE', 'ui.master(:SYSTEM.TRIGGER_BLOCK);', '      '))
         out.append('    </Block>')
     out.append('    <Block Name="CTL" DatabaseBlock="false" RecordsDisplayCount="1">')
