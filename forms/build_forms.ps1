@@ -43,6 +43,9 @@ $env:PATH = "$Jdk\bin;$Jdk\bin\server;$OracleHome\bin;$env:PATH"
 # the Greek of the forms
 $env:NLS_LANG = 'GREEK_GREECE.AL32UTF8'
 Write-Host "== ..\db\MM_TEXT.sql"
+# what PowerShell pipes into sqlplus: ASCII. With chcp 65001 it sends UTF-8 with a BOM, and sqlplus
+# reads "<BOM>exit": SP2-0042 unknown command
+$OutputEncoding = New-Object System.Text.ASCIIEncoding
 $o = 'exit' | & $sqlplus -s $UserId "@$here\..\db\MM_TEXT.sql" | Out-String
 Write-Host $o
 if ($o -match 'ORA-|SP2-') {
