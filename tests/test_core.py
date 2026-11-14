@@ -385,3 +385,24 @@ def test_two_phones_scan_without_waiting(env):
         db.proc('cancel_count', cnt)
         db.commit()
         other.close()
+
+
+def test_max_per_sale(env):
+    """at most MAX_PER_SALE of an item in one sale; purchases and credit notes have no limit"""
+    db, ids = env
+    db.cur.execute('update mm_item set max_per_sale = 2 where id = :i', i=ids['b'])
+    db.commit()
+    try:
+        d = db.fn('new_doc', int, 'TPY', p_customer_id=ids['customer'], p_payment='CREDIT')
+        line = db.fn('add_line', int, d, ids['b'], 2)
+        db.commit()
+        db.fails(157, 'add_line', d, ids['b'], 1, rtype=int)
+        db.fails(157, 'update_line', line, 3, 2)
+        db.fn('post_doc', int, d)
+        db.commit()
+        p = db.fn('new_doc', int, 'TAG', p_supplier_id=ids['supplier'], p_payment='CREDIT')
+        db.fn('add_line', int, p, ids['b'], 10)                      # a purchase: no limit
+        db.conn.rollback()
+    finally:
+        db.cur.execute('update mm_item set max_per_sale = null where id = :i', i=ids['b'])
+        db.commit()

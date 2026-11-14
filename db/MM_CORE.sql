@@ -110,6 +110,28 @@ create or replace package body mm_core as
     delete from mm_serial where in_line_id = p_line_id and status = 'N';
   end;
 
+  -- a sale: at most MAX_PER_SALE of an item (p_extra: what is about to be added)
+  procedure check_max(p_doc_id number, p_item_id number, p_extra number) is
+    m number;
+    c varchar2(20);
+    q number;
+    n number;
+  begin
+    select count(*) into n from mm_doc d join mm_doc_type t on t.code = d.doc_type
+    where d.id = p_doc_id and t.side = 'S' and t.stock_sign = -1;
+    if n = 0 then
+      return;
+    end if;
+    select max_per_sale, code into m, c from mm_item where id = p_item_id;
+    if m is null then
+      return;
+    end if;
+    select nvl(sum(qty), 0) into q from mm_doc_line where doc_id = p_doc_id and item_id = p_item_id;
+    if q + p_extra > m then
+      fail(57, 'Το ' || c || ' πουλιέται το πολύ ' || m || ' ανά απόδειξη');
+    end if;
+  end;
+
   -- ---------------------------------------------------------------------------------------------
   function afm_ok(p_afm varchar2) return varchar2 is
     s pls_integer := 0;
@@ -249,6 +271,7 @@ create or replace package body mm_core as
     if i.serial_tracked = 'Y' and not (t.side = 'P' and t.stock_sign = 1) then
       fail(27, 'Το ' || i.code || ' έχει serials: πώληση με sell_serial, φόρτωση με τιμολόγιο αγοράς');
     end if;
+    check_max(p_doc_id, p_item_id, p_qty);
     select rate into r from mm_vat where code = i.vat_code;
     p := nvl(p_price, default_price(d.doc_type, p_item_id));
     amounts(p, p_qty, p_discount, r, t.prices_incl_vat, n, v, tot);
@@ -270,6 +293,7 @@ create or replace package body mm_core as
     if tracked(l.item_id) and p_qty <> l.qty then
       fail(26, 'Η ποσότητα ενός είδους με serials αλλάζει με τα serials');
     end if;
+    check_max(l.doc_id, l.item_id, p_qty - l.qty);
     amounts(p_price, p_qty, p_discount, l.vat_rate, doc_type_row(d.doc_type).prices_incl_vat, n, v, tot);
     update mm_doc_line
     set qty = p_qty, price = p_price, discount = nvl(p_discount, 0), net = n, vat = v, total = tot
@@ -350,6 +374,9 @@ create or replace package body mm_core as
         fail(12, 'Το ταμείο δεν έχει ανοιχτό Ζ');
       end if;
     end if;
+    for x in (select distinct item_id from mm_doc_line where doc_id = p_doc_id) loop
+      check_max(p_doc_id, x.item_id, 0);
+    end loop;
     -- a line of cards: as many serials as its quantity
     for l in (select l.id, l.qty, i.code from mm_doc_line l join mm_item i on i.id = l.item_id
               where l.doc_id = p_doc_id and i.serial_tracked = 'Y') loop
@@ -639,6 +666,7 @@ create or replace package body mm_core as
     if sid is null then
       fail(40, 'Δεν υπάρχει διαθέσιμη κάρτα' || case when p_serial is not null then ' με serial ' || p_serial end);
     end if;
+    check_max(p_doc_id, it, 1);
     -- the line of this item in the document: one more, or a new one
     for r in (select * from mm_doc_line where doc_id = p_doc_id and item_id = it order by line_no) loop
       ln := r;

@@ -427,3 +427,15 @@ select k.id kit_id, k.code, k.name, k.stock + 0 ready,
             where kc.kit_id = k.id), 0) can_make
 from mm_item k
 where k.kit = 'Y';
+
+-- at most so many of an item in one sale (e.g. the cards of mobile phones: one of each); null: no limit
+declare
+  n number;
+begin
+  select count(*) into n from user_tab_cols where table_name = 'MM_ITEM' and column_name = 'MAX_PER_SALE';
+  if n = 0 then
+    execute immediate 'alter table mm_item add (max_per_sale number(12,3) ' ||
+                      'constraint mm_item_max_ck check (max_per_sale > 0))';
+  end if;
+end;
+/

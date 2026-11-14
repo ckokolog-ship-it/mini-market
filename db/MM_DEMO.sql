@@ -158,6 +158,9 @@ from (values
 join mm_category c on c.name = 'Κάρτες κινητής'
 where not exists (select 1 from mm_item i where i.code = v.code);
 
+-- one card of each value in a sale
+update mm_item set max_per_sale = 1 where code like 'CRD%' and max_per_sale is null;
+
 declare
   n number;
   s number;
