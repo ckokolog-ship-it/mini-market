@@ -74,6 +74,9 @@ end;""",
     "create or replace procedure forms_ddl(p varchar2) is begin execute immediate p; end;",
     "create or replace procedure call_form(f varchar2) is begin fstub.props('CALL_FORM') := f; end;",
     "create or replace procedure do_key(k varchar2) is begin fstub.props('DO_KEY') := k; end;",
+    "create or replace function lov_name return number is begin return 9; end;",
+    """create or replace function get_item_property(i varchar2, p number) return varchar2 is
+begin if fstub.props.exists(upper(i) || '#' || p) then return fstub.props(upper(i) || '#' || p); end if; return null; end;""",
     "create or replace function status return number is begin return 7; end;",
     "create or replace function query_status return number is begin return 8; end;",
     """create or replace procedure set_record_property(r number, b varchar2, p number, v number) is
@@ -88,7 +91,7 @@ begin
   return fstub.lov_answer;
 end;""",
 ]
-DROP = ['package ui', 'function status', 'function query_status', 'procedure set_record_property',
+DROP = ['package ui', 'function lov_name', 'function get_item_property', 'function status', 'function query_status', 'procedure set_record_property',
         'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
         'procedure set_item_property', 'procedure set_window_property', 'function default_where',
@@ -542,7 +545,8 @@ def test_toolbar(cur):
     run(cur, 'ui.init;')
     assert prop(cur, 'TB.T_SAVE#2') == 'Αποθήκευση'
     for button, key in (('T_SAVE', 'COMMIT_FORM'), ('T_ENTERQ', 'ENTER_QUERY'), ('T_EXECQ', 'EXECUTE_QUERY'),
-                        ('T_NEW', 'CREATE_RECORD'), ('T_DEL', 'DELETE_RECORD'), ('T_PREV', 'PREVIOUS_RECORD'),
+                        ('T_NEW', 'CREATE_RECORD'), ('T_DEL', 'DELETE_RECORD'), ('T_LOV', 'LIST_VALUES'),
+                        ('T_PREV', 'PREVIOUS_RECORD'),
                         ('T_NEXT', 'NEXT_RECORD'), ('T_EXIT', 'EXIT_FORM')):
         run(cur, f"ui.tool('TB.{button}');")
         assert prop(cur, 'DO_KEY') == key, button
@@ -601,3 +605,63 @@ def test_invoices_form(cur, env):
     assert db.one('select count(*) from mm_doc where id = :c', c=c)[0] == 0
     db.cur.execute("update mm_item set wholesale_price = null where id = :i", i=ids['b'])
     db.commit()
+
+
+@needs_db
+def test_lists_and_defaults(cur):
+    """a double click opens the list of an item that has one; the defaults of CTL from ui.init"""
+    compile_ui(cur, 'MM_INVOICES')
+    run(cur, 'ui.init;')
+    assert item(cur, 'CTL.D_TYPE') == 'TPY' and item(cur, 'CTL.D_PAY') == 'CREDIT' and item(cur, 'CTL.L_QTY') == '1'
+    run(cur, "fstub.props('CTL.CUST_TEXT#9') := 'LOV_CUST'; ui.dblclick('CTL.CUST_TEXT');")
+    assert prop(cur, 'DO_KEY') == 'LIST_VALUES'
+    run(cur, "ui.dblclick('CTL.NEWDOC');")                                   # no list: nothing
+    assert prop(cur, 'DO_KEY') is None
+    assert 'WHEN-MOUSE-DOUBLECLICK' in [t.get('Name') for t in xml_of('MM_INVOICES').findall('f:FormModule/f:Trigger', NS)]
+
+
+@needs_db
+def test_invoice_serials(cur, env):
+    """the serials of a line of cards: a sale takes a card scanned and gives one back; a purchase
+    loads its cards with their PINs and is posted; the third level of the form (DL -> DS)"""
+    db, ids = env
+    cat = db.one('select min(id) from mm_category')[0]
+    db.cur.execute("insert into mm_item (code, name, category_id, vat_code, price, serial_tracked) "
+                   "values (:c, 'Test card ser', :cat, 'A', 10, 'Y')", c=f"TST{ids['tag']}S", cat=cat)
+    card = db.one('select id from mm_item where code = :c', c=f"TST{ids['tag']}S")[0]
+    for k in range(3):
+        db.fn('load_serial', int, card, f"SER-{ids['tag']}-{k}", '4321')
+    db.commit()
+    compile_ui(cur, 'MM_INVOICES')
+    today = __import__('datetime').date.today().strftime('%d/%m/%Y')
+    # a sale: one card automatically, then a scanned one into the same line, then one back
+    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='TPY', CTL__CUST_ID=str(ids['customer']), CTL__D_DATE=today)
+    d = db.one('select max(id) from mm_doc where customer_id = :c', c=ids['customer'])[0]
+    run(cur, "ui.press('CTL.ADDLINE');", DOC__ID=str(d), CTL__L_ITEM_ID=str(card), CTL__L_QTY='1')
+    line = db.one('select id from mm_doc_line where doc_id = :d', d=d)[0]
+    run(cur, "ui.press('CTL.ADDSER');", DOC__ID=str(d), CTL__S_SERIAL=f"SER-{ids['tag']}-2")
+    assert 'serial' in msgs(cur)
+    assert float(db.one('select qty from mm_doc_line where id = :l', l=line)[0]) == 2
+    assert db.one('select out_line_id from mm_serial where serial = :s', s=f"SER-{ids['tag']}-2")[0] == line
+    sid = db.one('select id from mm_serial where serial = :s', s=f"SER-{ids['tag']}-2")[0]
+    run(cur, "ui.press('CTL.DELSER');", DOC__ID=str(d), DS__ID=str(sid))
+    assert db.one('select status from mm_serial where id = :s', s=sid)[0] == 'A'
+    assert float(db.one('select qty from mm_doc_line where id = :l', l=line)[0]) == 1
+    # the third level: the serials of the line on the screen, once for each line
+    cur.execute("begin fstub.clear; fstub.items('DL.ID') := :l; ui.master('DL'); ui.master('DL'); "
+                ":q := fstub.queries; end;", l=str(line), q=(q := cur.var(str)))
+    assert q.getvalue() == 'DS:;'
+    # a purchase: two cards with their PINs, posted
+    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='TAG', CTL__SUPP_ID=str(ids['supplier']), CTL__D_DATE=today)
+    p = db.one('select max(id) from mm_doc where supplier_id = :s', s=ids['supplier'])[0]
+    run(cur, "ui.press('CTL.ADDLINE');", DOC__ID=str(p), CTL__L_ITEM_ID=str(card), CTL__L_QTY='2', CTL__L_PRICE='9')
+    pl = db.one('select id from mm_doc_line where doc_id = :d', d=p)[0]
+    for k in (1, 2):
+        run(cur, "ui.press('CTL.ADDSER');", DOC__ID=str(p), DL__ID=str(pl), CTL__S_SERIAL=f"BUY-{ids['tag']}-{k}",
+            CTL__S_PIN='55556666')
+    assert item(cur, 'CTL.S_PIN') is None                                    # the PIN is not left on the screen
+    run(cur, "ui.press('CTL.POSTDOC');", DOC__ID=str(p))
+    db.cur.execute("select status from mm_serial where serial like :s", s=f"BUY-{ids['tag']}-%")
+    assert [r[0] for r in db.cur] == ['A', 'A']
+    run(cur, "ui.press('CTL.ADDSER');", DOC__ID=str(p), DL__ID=str(pl), CTL__S_SERIAL=f"BUY-{ids['tag']}-9")
+    assert 'MM-102' in msgs(cur)                                              # posted: no more

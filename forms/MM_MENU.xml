@@ -18,6 +18,7 @@
       <MenuItem Name="EXECQ" Label="Ektelesi anazitisis (F8)" CommandType="PL/SQL" MenuItemCode="do_key('EXECUTE_QUERY');"/>
       <MenuItem Name="NEWREC" Label="Nea eggrafi" CommandType="PL/SQL" MenuItemCode="do_key('CREATE_RECORD');"/>
       <MenuItem Name="DELREC" Label="Diagrafi eggrafis" CommandType="PL/SQL" MenuItemCode="do_key('DELETE_RECORD');"/>
+      <MenuItem Name="LOV" Label="Lista timon (Ctrl+L)" CommandType="PL/SQL" MenuItemCode="do_key('LIST_VALUES');"/>
     </Menu>
     <Menu Name="STOCK_MENU">
       <MenuItem Name="ITEMS" Label="Eidi" CommandType="PL/SQL" MenuItemCode="new_form('MM_ITEMS');"/>

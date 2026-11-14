@@ -13,6 +13,7 @@ PACKAGE ui IS
   PROCEDURE init;
   PROCEDURE press(p_item VARCHAR2);
   PROCEDURE tool(p_item VARCHAR2);
+  PROCEDURE dblclick(p_item VARCHAR2);
   PROCEDURE validate(p_item VARCHAR2);
   PROCEDURE post_query(p_block VARCHAR2);
   PROCEDURE master(p_block VARCHAR2);
@@ -24,7 +25,9 @@ PACKAGE BODY ui IS
   c_block CONSTANT VARCHAR2(30) := 'BLOCK'; -- BLOCK
   c_where CONSTANT VARCHAR2(400) := ''; -- WHERE
   c_detail CONSTANT VARCHAR2(30) := ''; -- DETAIL
+  c_detail2 CONSTANT VARCHAR2(30) := ''; -- DETAIL2
   g_master NUMBER;                  -- the master whose detail is on the screen
+  g_detail NUMBER;                  -- the record of the detail whose own detail is on the screen
 
   FUNCTION num(p_item VARCHAR2) RETURN NUMBER IS
   BEGIN
@@ -54,21 +57,37 @@ PACKAGE BODY ui IS
 
   -- the detail of the master record on the screen (once for each master record: going back to the
   -- master brings this trigger again)
+  -- (three levels: the detail is the master of c_detail2, e.g. an invoice, its lines, their serials)
   PROCEDURE master(p_block VARCHAR2) IS
     id_ NUMBER := num(p_block || '.ID');
   BEGIN
-    IF c_detail IS NULL OR p_block <> c_block OR id_ IS NULL OR id_ = g_master THEN
+    IF id_ IS NULL THEN
       RETURN;
     END IF;
-    g_master := id_;
-    go_block(c_detail);
-    execute_query;
-    go_block(c_block);
+    IF p_block = c_block AND c_detail IS NOT NULL THEN
+      IF id_ = g_master THEN
+        RETURN;
+      END IF;
+      g_master := id_;
+      g_detail := NULL;
+      go_block(c_detail);
+      execute_query;
+      go_block(c_block);
+    ELSIF p_block = c_detail AND c_detail2 IS NOT NULL THEN
+      IF id_ = g_detail THEN
+        RETURN;
+      END IF;
+      g_detail := id_;
+      go_block(c_detail2);
+      execute_query;
+      go_block(c_detail);
+    END IF;
   END;
 
   PROCEDURE again(p_block VARCHAR2) IS
   BEGIN
     g_master := NULL;
+    g_detail := NULL;
     go_block(p_block);
     execute_query;
     IF p_block <> c_block THEN
@@ -264,6 +283,27 @@ PACKAGE BODY ui IS
       forms_ddl('COMMIT');
       show_only(v);
       message('Πρόχειρο πιστωτικό: έλεγξε τις γραμμές και καταχώρισέ το');
+    -- the serials of a line of cards: a sale takes this card (scanned) in its line, or gives one
+    -- back; a purchase loads this card (and its PIN) in the line chosen
+    ELSIF p_item = 'CTL.ADDSER' THEN
+      v := num('DOC.ID');
+      SELECT t.side, t.stock_sign INTO sd, n FROM mm_doc d, mm_doc_type t WHERE d.id = v AND t.code = d.doc_type;
+      IF sd = 'S' AND n = -1 THEN
+        n := mm_core.sell_serial(v, NULL, name_in('CTL.S_SERIAL'));
+      ELSE
+        n := mm_core.add_serial(num('DL.ID'), name_in('CTL.S_SERIAL'), name_in('CTL.S_PIN'));
+      END IF;
+      forms_ddl('COMMIT');
+      copy('', 'CTL.S_SERIAL');
+      copy('', 'CTL.S_PIN');
+      show_only(v);
+      message('Το serial μπήκε');
+    ELSIF p_item = 'CTL.DELSER' THEN
+      v := num('DOC.ID');
+      mm_core.release_serial(num('DS.ID'));
+      forms_ddl('COMMIT');
+      show_only(v);
+      message('Η κάρτα γύρισε στις διαθέσιμες');
     ELSIF p_item = 'CTL.DELDOC' THEN
       mm_core.delete_doc(num('DOC.ID'));
       forms_ddl('COMMIT');
@@ -320,6 +360,8 @@ PACKAGE BODY ui IS
       do_key('CREATE_RECORD');
     ELSIF p_item = 'TB.T_DEL' THEN
       do_key('DELETE_RECORD');
+    ELSIF p_item = 'TB.T_LOV' THEN
+      do_key('LIST_VALUES');           -- the list of the item of the cursor
     ELSIF p_item = 'TB.T_PREV' THEN
       do_key('PREVIOUS_RECORD');
     ELSIF p_item = 'TB.T_NEXT' THEN
@@ -328,6 +370,14 @@ PACKAGE BODY ui IS
       new_form('MM_MAIN');
     ELSIF p_item = 'TB.T_EXIT' THEN
       do_key('EXIT_FORM');
+    END IF;
+  END;
+
+  -- a double click on an item with a list: the list (F9 is not the key of the list on the web)
+  PROCEDURE dblclick(p_item VARCHAR2) IS
+  BEGIN
+    IF p_item IS NOT NULL AND get_item_property(p_item, LOV_NAME) IS NOT NULL THEN
+      do_key('LIST_VALUES');
     END IF;
   END;
 
