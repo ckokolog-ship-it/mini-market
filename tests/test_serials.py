@@ -183,3 +183,23 @@ def test_two_tills_never_take_the_same_card(card):
         other.rollback()
         other.close()
     close_open_z(db, ids['reg'])
+
+
+def test_one_card_of_each_in_a_sale(card):
+    """MAX_PER_SALE = 1 (the cards of the demo): a second card of the same value in a sale is refused"""
+    db, ids = card
+    load(db, ids, 2, 'MX')
+    if not db.fn('open_z_of', int, ids['reg']):
+        db.fn('open_z', int, ids['reg'])
+    db.cur.execute('update mm_item set max_per_sale = 1 where id = :i', i=ids['card'])
+    db.commit()
+    try:
+        d = db.fn('new_doc', int, 'ALP', p_register_id=ids['reg'])
+        db.fn('sell_serial', int, d, ids['card'])
+        db.commit()
+        db.fails(157, 'sell_serial', d, ids['card'], rtype=int)
+        db.fn('post_doc', int, d)                                  # one: fine
+        db.commit()
+    finally:
+        db.cur.execute('update mm_item set max_per_sale = null where id = :i', i=ids['card'])
+        db.commit()
