@@ -3,7 +3,7 @@
 -- mkforms.py puts it in each form. The triggers only call it:
 --   WHEN-NEW-FORM-INSTANCE  ui.init
 --   WHEN-NEW-RECORD-INSTANCE ui.master(:SYSTEM.TRIGGER_BLOCK)   (a master: its detail again)
---   WHEN-BUTTON-PRESSED     ui.press(:SYSTEM.TRIGGER_ITEM)
+--   WHEN-BUTTON-PRESSED     ui.press(:SYSTEM.TRIGGER_ITEM)   (the toolbar: ui.tool)
 --   WHEN-VALIDATE-ITEM      ui.validate(:SYSTEM.TRIGGER_ITEM)
 --   POST-QUERY              ui.post_query(:SYSTEM.TRIGGER_BLOCK)
 --   ON-ERROR                ui.on_error(ERROR_CODE, ERROR_TYPE, ERROR_TEXT, DBMS_ERROR_TEXT)
@@ -12,6 +12,7 @@
 PACKAGE ui IS
   PROCEDURE init;
   PROCEDURE press(p_item VARCHAR2);
+  PROCEDURE tool(p_item VARCHAR2);
   PROCEDURE validate(p_item VARCHAR2);
   PROCEDURE post_query(p_block VARCHAR2);
   PROCEDURE master(p_block VARCHAR2);
@@ -247,6 +248,30 @@ PACKAGE BODY ui IS
       execute_query;
     ELSE
       action(p_item);
+    END IF;
+  END;
+
+  -- the toolbar: the keys of the Forms on the block of the cursor (the buttons do not take it)
+  PROCEDURE tool(p_item VARCHAR2) IS
+  BEGIN
+    IF p_item = 'TB.T_SAVE' THEN
+      do_key('COMMIT_FORM');
+    ELSIF p_item = 'TB.T_ENTERQ' THEN
+      do_key('ENTER_QUERY');
+    ELSIF p_item = 'TB.T_EXECQ' THEN
+      do_key('EXECUTE_QUERY');
+    ELSIF p_item = 'TB.T_NEW' THEN
+      do_key('CREATE_RECORD');
+    ELSIF p_item = 'TB.T_DEL' THEN
+      do_key('DELETE_RECORD');
+    ELSIF p_item = 'TB.T_PREV' THEN
+      do_key('PREVIOUS_RECORD');
+    ELSIF p_item = 'TB.T_NEXT' THEN
+      do_key('NEXT_RECORD');
+    ELSIF p_item = 'TB.T_MAIN' THEN
+      new_form('MM_MAIN');
+    ELSIF p_item = 'TB.T_EXIT' THEN
+      do_key('EXIT_FORM');
     END IF;
   END;
 

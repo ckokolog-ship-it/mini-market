@@ -407,6 +407,25 @@ def menu_xml():
     return xml
 
 
+# the toolbar of all the forms: a horizontal toolbar canvas TBC with the buttons of the block TB; they
+# do not take the cursor (MouseNavigate false), so they act on the block where it is (ui.tool)
+TOOLBAR = [('T_SAVE', 'Αποθήκευση', 100), ('T_ENTERQ', 'Αναζήτηση', 90), ('T_EXECQ', 'Εκτέλεση', 80),
+           ('T_NEW', 'Νέα', 60), ('T_DEL', 'Διαγραφή', 80), ('T_PREV', '<', 34), ('T_NEXT', '>', 34),
+           ('T_MAIN', 'Μενού', 70), ('T_EXIT', 'Έξοδος', 70)]
+TB_CANVAS, TB_H = 'TBC', 34
+
+
+def toolbar_items(say):
+    out, x = [], 4
+    for name, label, w in TOOLBAR:
+        out.append(dict(Name=name, ItemType='Push Button', CanvasName=TB_CANVAS, XPosition=x, YPosition=4,
+                        Width=w, Height=26, Label=ascii_text(label), MouseNavigate='false',
+                        KeyboardNavigable='false'))
+        say('TB.' + name, 'LABEL', label)
+        x += w + 4
+    return out, x + 4
+
+
 def attrs(a):
     return ' '.join('%s=%s' % (k, quoteattr(str(v))) for k, v in a.items())
 
@@ -579,6 +598,8 @@ def build(name, f):
         height = max(height, b['top'] + b['rows'] * ROW_H + 40)
         out_blocks.append((b, items))
     ctl = [ctl_item(c, say) for c in (FIND_CTL if 'find' in f else []) + f.get('ctl', [])]
+    tb, tbw = toolbar_items(say)           # (before program(): its labels go to ui.init)
+    width = max(width, tbw)
     for c in f.get('ctl', []):
         if c[1] == 'date':
             texts.append("COPY(to_char(sysdate, 'DD/MM/YYYY'), 'CTL.%s');" % c[0])
@@ -618,16 +639,23 @@ def build(name, f):
     out.append('    <Block Name="CTL" DatabaseBlock="false" RecordsDisplayCount="1">')
     out += ['      <Item %s/>' % attrs(a) for a in ctl]
     out += [trigger('WHEN-BUTTON-PRESSED', 'ui.press(:SYSTEM.TRIGGER_ITEM);', '      '),
+            '    </Block>']
+    out.append('    <Block Name="TB" DatabaseBlock="false" RecordsDisplayCount="1">')
+    out += ['      <Item %s/>' % attrs(a) for a in tb]
+    out += [trigger('WHEN-BUTTON-PRESSED', 'ui.tool(:SYSTEM.TRIGGER_ITEM);', '      '),
             '    </Block>',
-            '    <Canvas Name="%s" WindowName="%s" Width="%d" Height="%d"/>' % (CANVAS, WINDOW, width, height)]
+            '    <Canvas Name="%s" WindowName="%s" Width="%d" Height="%d"/>' % (CANVAS, WINDOW, width, height),
+            '    <Canvas Name="%s" WindowName="%s" CanvasType="Horizontal Toolbar" Width="%d" Height="%d"/>'
+            % (TB_CANVAS, WINDOW, width, TB_H)]
     out += groups + lovx
     out += ['    <ProgramUnit Name="UI" ProgramUnitType="Package Spec" ProgramUnitText=%s/>' % quoteattr(spec),
             '    <ProgramUnit Name="UI" ProgramUnitType="Package Body" ProgramUnitText=%s/>' % quoteattr(body),
             trigger('WHEN-NEW-FORM-INSTANCE', 'ui.init;', '    '),
             trigger('ON-ERROR', 'ui.on_error(ERROR_CODE, ERROR_TYPE, ERROR_TEXT, DBMS_ERROR_TEXT);', '    '),
             trigger('WHEN-WINDOW-CLOSED', 'exit_form;', '    '),
-            '    <Window Name="%s" Title=%s XPosition="0" YPosition="0" Width="%d" Height="%d"/>'
-            % (WINDOW, quoteattr(greeklish(f['title'])), width, height),
+            '    <Window Name="%s" Title=%s XPosition="0" YPosition="0" Width="%d" Height="%d" '
+            'HorizontalToolbarCanvasName="%s"/>'
+            % (WINDOW, quoteattr(greeklish(f['title'])), width, height + TB_H, TB_CANVAS),
             '  </FormModule>',
             '</Module>']
     xml = '\n'.join(out) + '\n'
