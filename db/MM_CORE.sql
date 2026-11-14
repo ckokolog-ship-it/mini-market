@@ -55,6 +55,8 @@ create or replace package mm_core as
                                                                          -- to a line of a draft purchase
   function sell_serial(p_doc_id number, p_item_id number default null,
                        p_serial varchar2 default null) return number;   -- the oldest available, or this one
+  function sell_serials(p_doc_id number, p_item_id number, p_qty number) return number;
+                                                                         -- p_qty of the oldest: how many
   procedure release_serial(p_serial_id number);                         -- back from a draft sale
   function reveal_pin(p_serial_id number, p_user varchar2 default null) return varchar2;
   function receipt_pin(p_serial_id number) return varchar2;             -- a card sold today
@@ -110,15 +112,15 @@ create or replace package body mm_core as
     delete from mm_serial where in_line_id = p_line_id and status = 'N';
   end;
 
-  -- a sale: at most MAX_PER_SALE of an item (p_extra: what is about to be added)
+  -- a retail receipt: at most MAX_PER_SALE of an item (p_extra: what is about to be added); an
+  -- invoice of sale has no limit (a reseller takes 50 cards: 50 serials on one line)
   procedure check_max(p_doc_id number, p_item_id number, p_extra number) is
     m number;
     c varchar2(20);
     q number;
     n number;
   begin
-    select count(*) into n from mm_doc d join mm_doc_type t on t.code = d.doc_type
-    where d.id = p_doc_id and t.side = 'S' and t.stock_sign = -1;
+    select count(*) into n from mm_doc d where d.id = p_doc_id and d.doc_type = 'ALP';
     if n = 0 then
       return;
     end if;
@@ -128,7 +130,7 @@ create or replace package body mm_core as
     end if;
     select nvl(sum(qty), 0) into q from mm_doc_line where doc_id = p_doc_id and item_id = p_item_id;
     if q + p_extra > m then
-      fail(57, 'Το ' || c || ' πουλιέται το πολύ ' || m || ' ανά απόδειξη');
+      fail(57, 'Το ' || c || ' πουλιέται το πολύ ' || m || ' ανά απόδειξη λιανικής');
     end if;
   end;
 
@@ -701,6 +703,24 @@ create or replace package body mm_core as
     end if;
     update mm_serial set status = 'R', out_line_id = ln.id, out_doc_id = p_doc_id where id = sid;
     return sid;
+  end;
+
+  -- many cards at once (an invoice to a reseller): the p_qty oldest available, all or none
+  function sell_serials(p_doc_id number, p_item_id number, p_qty number) return number is
+    sid number;
+  begin
+    if nvl(p_qty, 0) < 1 or p_qty <> trunc(p_qty) then
+      fail(24, 'Λάθος ποσότητα');
+    end if;
+    savepoint mm_sell_serials;
+    for k in 1 .. p_qty loop
+      sid := sell_serial(p_doc_id, p_item_id);
+    end loop;
+    return p_qty;
+  exception
+    when others then
+      rollback to mm_sell_serials;
+      raise;
   end;
 
   procedure release_serial(p_serial_id number) is

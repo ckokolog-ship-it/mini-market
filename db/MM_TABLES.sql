@@ -439,3 +439,11 @@ begin
   end if;
 end;
 /
+
+-- the serials of each line of a document (an invoice: under each line its cards), without PINs
+create or replace view mm_doc_serials as
+select d.id doc_id, d.doc_type, d.doc_no, l.id line_id, l.line_no, i.code, i.name, s.serial, s.status
+from mm_serial s
+join mm_doc_line l on l.id = s.out_line_id
+join mm_doc d on d.id = l.doc_id
+join mm_item i on i.id = s.item_id;

@@ -7,6 +7,7 @@ drop package if exists mm_core;
 drop package if exists mm_text;
 drop package if exists mm_pin;
 drop view if exists mm_serial_check;
+drop view if exists mm_doc_serials;
 drop view if exists mm_item_avail;
 drop view if exists mm_kit_avail;
 drop view if exists mm_reservation_need;
