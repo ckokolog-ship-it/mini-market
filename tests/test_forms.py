@@ -72,13 +72,15 @@ begin
   fstub.queries := fstub.queries || fstub.block || ':' || w || ';';
 end;""",
     "create or replace procedure forms_ddl(p varchar2) is begin execute immediate p; end;",
+    "create or replace procedure call_form(f varchar2) is begin fstub.props('CALL_FORM') := f; end;",
+    "create or replace procedure exit_form is begin fstub.props('EXIT_FORM') := 'Y'; end;",
     """create or replace function show_lov(l varchar2) return boolean is
 begin
   if fstub.lov_answer then fstub.items('CTL.FIND_ID') := fstub.lov_id; end if;
   return fstub.lov_answer;
 end;""",
 ]
-DROP = ['package ui', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
+DROP = ['package ui', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
         'procedure set_item_property', 'procedure set_window_property', 'function default_where',
         'function prompt_text', 'function label', 'function title', 'procedure message', 'procedure copy',
@@ -111,7 +113,7 @@ def test_xml_ascii_and_references(name):
         for m in lv.findall('f:LOVColumnMapping', NS):
             if m.get('ReturnItem'):
                 assert m.get('ReturnItem') in items, m.get('ReturnItem')
-    assert 'LOV_FIND' in lovs
+    assert 'LOV_FIND' in lovs or name == 'MM_MAIN'                           # the menu finds nothing
 
 
 BUILTINS = ('NAME_IN', 'COPY', 'SHOW_LOV', 'GO_BLOCK', 'EXECUTE_QUERY', 'MESSAGE', 'TX')
@@ -449,3 +451,28 @@ def test_variants_form(cur, env):
     assert item(cur, 'VG.STOCK') == '0'
     run(cur, "ui.press('CTL.NEWVAR');", MODEL__ID=str(model), CTL__V_COLOR_ID=str(black), CTL__V_SIZE_ID=str(m))
     assert 'MM-165' in msgs(cur)                                              # twice: a message
+
+
+def test_menu_shape():
+    """the menu: no block of a table, a button for each of the other forms, and the exit"""
+    root = xml_of('MM_MAIN')
+    blocks = [b.get('Name') for b in root.iter('{%s}Block' % NS['f'])]
+    assert blocks == ['CTL']
+    buttons = [i.get('Name') for i in root.iter('{%s}Item' % NS['f'])]
+    forms = {b[3:] for b in buttons if b.startswith('GO_')}
+    assert forms == set(BUILT) - {'MM_MAIN'}
+    assert 'EXIT' in buttons
+
+
+@needs_db
+def test_menu_form(cur):
+    compile_ui(cur, 'MM_MAIN')
+    run(cur, 'ui.init;')
+    cur.execute('begin :v := fstub.queries; end;', v=(q := cur.var(str)))
+    assert q.getvalue() is None                                               # nothing to query
+    assert prop(cur, 'WINDOW WIN#1') == 'Mini market'
+    assert prop(cur, 'CTL.GO_MM_KITS#2') == 'Καλάθια και σετ'
+    run(cur, "ui.press('CTL.GO_MM_RESERVATIONS');")
+    assert prop(cur, 'CALL_FORM') == 'MM_RESERVATIONS'
+    run(cur, "ui.press('CTL.EXIT');")
+    assert prop(cur, 'EXIT_FORM') == 'Y'
