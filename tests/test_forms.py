@@ -74,6 +74,10 @@ end;""",
     "create or replace procedure forms_ddl(p varchar2) is begin execute immediate p; end;",
     "create or replace procedure call_form(f varchar2) is begin fstub.props('CALL_FORM') := f; end;",
     "create or replace procedure do_key(k varchar2) is begin fstub.props('DO_KEY') := k; end;",
+    "create or replace function status return number is begin return 7; end;",
+    "create or replace function query_status return number is begin return 8; end;",
+    """create or replace procedure set_record_property(r number, b varchar2, p number, v number) is
+begin fstub.props('RECORD ' || upper(b) || '#' || p) := v; end;""",
     "create or replace procedure new_form(f varchar2) is begin fstub.props('NEW_FORM') := f; end;",
     """create or replace procedure set_menu_item_property(m varchar2, p number, v varchar2) is
 begin fstub.props('MENU ' || upper(m) || '#' || p) := v; end;""",
@@ -84,7 +88,8 @@ begin
   return fstub.lov_answer;
 end;""",
 ]
-DROP = ['package ui', 'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
+DROP = ['package ui', 'function status', 'function query_status', 'procedure set_record_property',
+        'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
         'procedure set_item_property', 'procedure set_window_property', 'function default_where',
         'function prompt_text', 'function label', 'function title', 'procedure message', 'procedure copy',
@@ -253,7 +258,8 @@ def test_items_form(cur):
     # the post-query: the category, the VAT rate, the stock
     cur.execute("select id, stock from mm_item where code = 'ART01'")
     iid, stock = cur.fetchone()
-    run(cur, "ui.post_query('ITEM');", ITEM__ID=str(iid))
+    run(cur, "ui.post_query('ITEM');", ITEM__ID=str(iid), SYSTEM__TRIGGER_RECORD='1')
+    assert prop(cur, 'RECORD ITEM#7') == '8'           # STATUS = QUERY_STATUS: what it filled is no change
     assert item(cur, 'ITEM.CAT_NAME') == 'Αρτοποιήματα'
     assert float(item(cur, 'ITEM.VAT_RATE')) == 13
     assert float(item(cur, 'ITEM.STOCK')) == float(stock)
