@@ -18,6 +18,7 @@ drop view if exists mm_reservation_need;
 drop table if exists mm_promo_item cascade constraints purge;
 drop table if exists mm_promo cascade constraints purge;
 drop table if exists mm_kit_component cascade constraints purge;
+drop table if exists mm_payment cascade constraints purge;
 drop table if exists mm_reservation_line cascade constraints purge;
 drop table if exists mm_reservation cascade constraints purge;
 drop table if exists mm_pin_log cascade constraints purge;

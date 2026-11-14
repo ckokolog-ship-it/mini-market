@@ -28,12 +28,14 @@
     </Menu>
     <Menu Name="SALES_MENU">
       <MenuItem Name="INVOICES" Label="Timologia polisis" CommandType="PL/SQL" MenuItemCode="new_form('MM_INVOICES');"/>
+      <MenuItem Name="RECEIPTS" Label="Eispraxeis" CommandType="PL/SQL" MenuItemCode="new_form('MM_PAYMENTS');"/>
       <MenuItem Name="CUSTOMERS" Label="Pelates" CommandType="PL/SQL" MenuItemCode="new_form('MM_CUSTOMERS');"/>
       <MenuItem Name="RESERV" Label="Kratiseis" CommandType="PL/SQL" MenuItemCode="new_form('MM_RESERVATIONS');"/>
       <MenuItem Name="PROMOS" Label="Prosfores" CommandType="PL/SQL" MenuItemCode="new_form('MM_PROMOS');"/>
     </Menu>
     <Menu Name="BUY_MENU">
       <MenuItem Name="PINVOICES" Label="Timologia agoras" CommandType="PL/SQL" MenuItemCode="new_form('MM_INVOICES');"/>
+      <MenuItem Name="PAYMENTS" Label="Pliromes" CommandType="PL/SQL" MenuItemCode="new_form('MM_PAYMENTS');"/>
       <MenuItem Name="SUPPLIERS" Label="Promitheytes" CommandType="PL/SQL" MenuItemCode="new_form('MM_SUPPLIERS');"/>
     </Menu>
   </MenuModule>

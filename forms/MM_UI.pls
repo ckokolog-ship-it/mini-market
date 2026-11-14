@@ -1,5 +1,6 @@
 -- MM_UI.pls -- the package UI of the forms of the mini market (MM_ITEMS, MM_CUSTOMERS,
--- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, MM_INVOICES, the menu MM_MAIN):
+-- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, MM_INVOICES, MM_PAYMENTS,
+-- the menu MM_MAIN):
 -- mkforms.py puts it in each form. The triggers only call it:
 --   WHEN-NEW-FORM-INSTANCE  ui.init
 --   WHEN-NEW-RECORD-INSTANCE ui.master(:SYSTEM.TRIGGER_BLOCK)   (a master: its detail again)
@@ -304,6 +305,29 @@ PACKAGE BODY ui IS
       forms_ddl('COMMIT');
       show_only(v);
       message('Η κάρτα γύρισε στις διαθέσιμες');
+    -- a receipt (R) or a payment (P); with a register (CTL.REG_CODE): a move of its open Z too
+    ELSIF p_item = 'CTL.NEWPAY' THEN
+      s := NULL;
+      IF name_in('CTL.REG_CODE') IS NOT NULL THEN
+        s := register_id;
+      END IF;
+      IF upper(name_in('CTL.P_KIND')) = 'P' THEN
+        v := mm_core.pay(num('CTL.SUPP_ID'), num('CTL.P_AMOUNT'), upper(nvl(name_in('CTL.P_METHOD'), 'BANK')),
+                         date_in('CTL.P_DATE'), s, name_in('CTL.P_NOTES'));
+      ELSE
+        v := mm_core.receive(num('CTL.CUST_ID'), num('CTL.P_AMOUNT'), upper(nvl(name_in('CTL.P_METHOD'), 'CASH')),
+                             date_in('CTL.P_DATE'), s, name_in('CTL.P_NOTES'));
+      END IF;
+      forms_ddl('COMMIT');
+      copy('', 'CTL.P_AMOUNT');
+      copy('', 'CTL.P_NOTES');
+      show_only(v);
+      message('Καταχωρήθηκε');
+    ELSIF p_item = 'CTL.CANCELPAY' THEN
+      mm_core.cancel_payment(num('PAY.ID'));
+      forms_ddl('COMMIT');
+      again(c_block);
+      message('Ακυρώθηκε');
     ELSIF p_item = 'CTL.DELDOC' THEN
       mm_core.delete_doc(num('DOC.ID'));
       forms_ddl('COMMIT');
@@ -445,6 +469,16 @@ PACKAGE BODY ui IS
         SELECT name INTO n FROM mm_supplier WHERE id = id_;
       END IF;
       copy(n, 'DOC.PARTNER_TEXT');
+    ELSIF p_block = 'PAY' THEN
+      c_ := num('PAY.CUSTOMER_ID');
+      id_ := num('PAY.SUPPLIER_ID');
+      n := NULL;
+      IF c_ IS NOT NULL THEN
+        SELECT name INTO n FROM mm_customer WHERE id = c_;
+      ELSIF id_ IS NOT NULL THEN
+        SELECT name INTO n FROM mm_supplier WHERE id = id_;
+      END IF;
+      copy(n, 'PAY.PARTNER_TEXT');
     ELSIF p_block = 'DL' THEN
       id_ := num('DL.ITEM_ID');
       SELECT code || ' ' || name INTO n FROM mm_item WHERE id = id_;
