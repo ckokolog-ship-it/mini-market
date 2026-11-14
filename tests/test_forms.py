@@ -73,6 +73,8 @@ begin
 end;""",
     "create or replace procedure forms_ddl(p varchar2) is begin execute immediate p; end;",
     "create or replace procedure call_form(f varchar2) is begin fstub.props('CALL_FORM') := f; end;",
+    "create or replace procedure do_key(k varchar2) is begin fstub.props('DO_KEY') := k; end;",
+    "create or replace procedure new_form(f varchar2) is begin fstub.props('NEW_FORM') := f; end;",
     """create or replace procedure set_menu_item_property(m varchar2, p number, v varchar2) is
 begin fstub.props('MENU ' || upper(m) || '#' || p) := v; end;""",
     "create or replace procedure exit_form is begin fstub.props('EXIT_FORM') := 'Y'; end;",
@@ -82,7 +84,7 @@ begin
   return fstub.lov_answer;
 end;""",
 ]
-DROP = ['package ui', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
+DROP = ['package ui', 'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
         'procedure set_item_property', 'procedure set_window_property', 'function default_where',
         'function prompt_text', 'function label', 'function title', 'procedure message', 'procedure copy',
@@ -459,7 +461,7 @@ def test_menu_shape():
     """the menu: no block of a table, a button for each of the other forms, and the exit"""
     root = xml_of('MM_MAIN')
     blocks = [b.get('Name') for b in root.iter('{%s}Block' % NS['f'])]
-    assert blocks == ['CTL']
+    assert blocks == ['CTL', 'TB']                                           # and the toolbar
     buttons = [i.get('Name') for i in root.iter('{%s}Item' % NS['f'])]
     forms = {b[3:] for b in buttons if b.startswith('GO_')}
     assert forms == set(BUILT) - {'MM_MAIN'}
@@ -511,3 +513,32 @@ def test_menu_labels_in_greek(cur):
     run(cur, 'ui.init;')
     assert prop(cur, 'MENU MAIN_MENU.SALES#2') == 'Πωλήσεις'
     assert prop(cur, 'MENU STOCK_MENU.VARIANTS#2') == 'Ρούχα και παπούτσια'
+
+
+def test_toolbar_shape():
+    """every form: the block TB on a horizontal toolbar canvas of its window; its buttons do not
+    take the cursor"""
+    for name in BUILT:
+        root = xml_of(name)
+        canv = {c.get('Name'): c for c in root.iter('{%s}Canvas' % NS['f'])}
+        assert canv['TBC'].get('CanvasType') == 'Horizontal Toolbar'
+        win = root.find('.//f:Window', NS)
+        assert win.get('HorizontalToolbarCanvasName') == 'TBC'
+        tb = [b for b in root.iter('{%s}Block' % NS['f']) if b.get('Name') == 'TB'][0]
+        items = tb.findall('f:Item', NS)
+        assert [i.get('Name') for i in items] == [t[0] for t in mkforms.TOOLBAR]
+        assert all(i.get('MouseNavigate') == 'false' and i.get('CanvasName') == 'TBC' for i in items)
+
+
+@needs_db
+def test_toolbar(cur):
+    compile_ui(cur, 'MM_ITEMS')
+    run(cur, 'ui.init;')
+    assert prop(cur, 'TB.T_SAVE#2') == 'Αποθήκευση'
+    for button, key in (('T_SAVE', 'COMMIT_FORM'), ('T_ENTERQ', 'ENTER_QUERY'), ('T_EXECQ', 'EXECUTE_QUERY'),
+                        ('T_NEW', 'CREATE_RECORD'), ('T_DEL', 'DELETE_RECORD'), ('T_PREV', 'PREVIOUS_RECORD'),
+                        ('T_NEXT', 'NEXT_RECORD'), ('T_EXIT', 'EXIT_FORM')):
+        run(cur, f"ui.tool('TB.{button}');")
+        assert prop(cur, 'DO_KEY') == key, button
+    run(cur, "ui.tool('TB.T_MAIN');")
+    assert prop(cur, 'NEW_FORM') == 'MM_MAIN'
