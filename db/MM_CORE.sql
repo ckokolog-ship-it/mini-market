@@ -78,6 +78,12 @@ create or replace package mm_core as
   procedure promo_item(p_promo_id number, p_item_id number default null, p_category_id number default null,
                        p_qty number default 1);
 
+  -- clothes and shoes: a variant of a model (a colour and/or a size), an item of its own; the first one
+  -- makes the item a model (not sold, no stock); model_price: the price to the model and its variants
+  function make_variant(p_model_id number, p_color_id number default null, p_size_id number default null,
+                        p_barcode varchar2 default null) return number;
+  procedure model_price(p_model_id number, p_price number);
+
   -- reservations (e.g. New Year cakes): a name, a phone, the day of the pickup; their quantities are
   -- reserved (MM_ITEM_AVAIL) until the delivery, a receipt that counts the deposit
   function new_reservation(p_name varchar2, p_phone varchar2, p_pickup_date date,
@@ -121,6 +127,19 @@ create or replace package body mm_core as
     update mm_serial set status = 'A', out_line_id = null, out_doc_id = null
     where out_line_id = p_line_id and status = 'R';
     delete from mm_serial where in_line_id = p_line_id and status = 'N';
+  end;
+
+  -- a model is not sold, counted, reserved or put in a basket: its variants are
+  procedure not_model(p_item_id number) is
+    m varchar2(1);
+    c varchar2(20);
+  begin
+    select is_model, code into m, c from mm_item where id = p_item_id;
+    if m = 'Y' then
+      fail(61, 'Το ' || c || ' είναι μοντέλο: διάλεξε χρώμα και μέγεθος');
+    end if;
+  exception
+    when no_data_found then null;
   end;
 
   -- a retail receipt: at most MAX_PER_SALE of an item (p_extra: what is about to be added); an
@@ -257,7 +276,7 @@ create or replace package body mm_core as
   -- the promotions of the day of a draft sale on its lines, then the discount of the document spread
   -- over them (by value: the VAT of each rate stays right); every line once more: net, VAT, total
   procedure reprice(p_doc_id number) is
-    type t_line is record (id number, item_id number, cat_id number, qty number, base number,
+    type t_line is record (id number, item_id number, parent_id number, cat_id number, qty number, base number,
                            rate number, pdisc number, ddisc number, promo number, used boolean);
     type t_lines is table of t_line index by pls_integer;
     l t_lines;
@@ -269,7 +288,7 @@ create or replace package body mm_core as
       c number;
     begin
       select count(*) into c from mm_promo_item
-      where promo_id = p_promo and (item_id = l(i).item_id or category_id = l(i).cat_id);
+      where promo_id = p_promo and (item_id in (l(i).item_id, l(i).parent_id) or category_id = l(i).cat_id);
       return c > 0;
     end;
   begin
@@ -278,11 +297,12 @@ create or replace package body mm_core as
     if not (d.status = 'D' and t.side = 'S' and t.stock_sign = -1) then
       return;
     end if;
-    for x in (select dl.id, dl.item_id, i.category_id, dl.qty, dl.price, dl.discount, dl.vat_rate
+    for x in (select dl.id, dl.item_id, i.parent_id, i.category_id, dl.qty, dl.price, dl.discount, dl.vat_rate
               from mm_doc_line dl join mm_item i on i.id = dl.item_id
               where dl.doc_id = p_doc_id order by dl.line_no) loop
       n := n + 1;
-      l(n).id := x.id; l(n).item_id := x.item_id; l(n).cat_id := x.category_id; l(n).qty := x.qty;
+      l(n).id := x.id; l(n).item_id := x.item_id; l(n).parent_id := x.parent_id;
+      l(n).cat_id := x.category_id; l(n).qty := x.qty;
       l(n).base := round(x.price * x.qty * (1 - x.discount / 100), 2);
       l(n).rate := x.vat_rate; l(n).pdisc := 0; l(n).ddisc := 0; l(n).promo := null; l(n).used := false;
     end loop;
@@ -393,7 +413,7 @@ create or replace package body mm_core as
         for p in (select pr.id, pr.pct from mm_promo pr
                   where pr.kind = 'PCT' and pr.active = 'Y' and d.doc_date between pr.date_from and pr.date_to
                     and exists (select 1 from mm_promo_item x where x.promo_id = pr.id
-                                and (x.item_id = l(i).item_id or x.category_id = l(i).cat_id))
+                                and (x.item_id in (l(i).item_id, l(i).parent_id) or x.category_id = l(i).cat_id))
                   order by pr.pct desc, pr.id fetch first 1 row only) loop
           l(i).pdisc := round(l(i).base * p.pct / 100, 2);
           l(i).promo := p.id;
@@ -474,6 +494,7 @@ create or replace package body mm_core as
     if i.serial_tracked = 'Y' and not (t.side = 'P' and t.stock_sign = 1) then
       fail(27, 'Το ' || i.code || ' έχει serials: πώληση με sell_serial, φόρτωση με τιμολόγιο αγοράς');
     end if;
+    not_model(p_item_id);
     check_max(p_doc_id, p_item_id, p_qty);
     select rate into r from mm_vat where code = i.vat_code;
     p := nvl(p_price, default_price(d.doc_type, p_item_id));
@@ -708,6 +729,7 @@ create or replace package body mm_core as
     if p_note is null then
       fail(16, 'Η διόρθωση αποθέματος θέλει αιτιολογία');
     end if;
+    not_model(p_item_id);
     if tracked(p_item_id) then
       fail(33, 'Το απόθεμα ενός είδους με serials αλλάζει με τα serials (load_serial)');
     end if;
@@ -986,6 +1008,79 @@ create or replace package body mm_core as
   end;
 
   -- ---------------------------------------------------------------------------------------------
+  function make_variant(p_model_id number, p_color_id number default null, p_size_id number default null,
+                        p_barcode varchar2 default null) return number is
+    m mm_item%rowtype;
+    cc varchar2(10); cn varchar2(40);
+    sc varchar2(10);
+    n number;
+    v number;
+  begin
+    begin
+      select * into m from mm_item where id = p_model_id;
+    exception
+      when no_data_found then fail(6, 'Δεν υπάρχει είδος ' || p_model_id);
+    end;
+    if m.parent_id is not null then
+      fail(63, 'Το ' || m.code || ' είναι ήδη παραλλαγή: δεν γίνεται μοντέλο');
+    end if;
+    if m.serial_tracked = 'Y' or m.kit = 'Y' then
+      fail(63, 'Το ' || m.code || ' έχει serials ή είναι καλάθι: δεν γίνεται μοντέλο');
+    end if;
+    if p_color_id is null and p_size_id is null then
+      fail(64, 'Η παραλλαγή θέλει χρώμα ή μέγεθος');
+    end if;
+    if m.is_model = 'N' then
+      -- an item becomes a model only while nothing has happened to it
+      select count(*) into n from mm_stock_move where item_id = p_model_id;
+      select n + count(*) into n from mm_doc_line where item_id = p_model_id;
+      select n + count(*) into n from mm_kit_component where component_id = p_model_id;
+      if n > 0 then
+        fail(62, 'Το ' || m.code || ' έχει ήδη κινήσεις: φτιάξε νέο μοντέλο');
+      end if;
+      update mm_item set is_model = 'Y', barcode = null where id = p_model_id;
+    end if;
+    if p_color_id is not null then
+      begin
+        select code, name into cc, cn from mm_color where id = p_color_id;
+      exception
+        when no_data_found then fail(64, 'Δεν υπάρχει χρώμα ' || p_color_id);
+      end;
+    end if;
+    if p_size_id is not null then
+      begin
+        select code into sc from mm_size where id = p_size_id;
+      exception
+        when no_data_found then fail(64, 'Δεν υπάρχει μέγεθος ' || p_size_id);
+      end;
+    end if;
+    insert into mm_item (code, barcode, name, category_id, vat_code, unit, price, cost, min_stock,
+                         max_per_sale, parent_id, color_id, size_id, active)
+    values (substr(m.code || case when cc is not null then '-' || cc end || case when sc is not null then '-' || sc end, 1, 20),
+            p_barcode,
+            substr(m.name || case when cn is not null then ' ' || cn end || case when sc is not null then ' ' || sc end, 1, 100),
+            m.category_id, m.vat_code, m.unit, m.price, m.cost, 0, m.max_per_sale,
+            p_model_id, p_color_id, p_size_id, m.active)
+    returning id into v;
+    return v;
+  exception
+    when dup_val_on_index then fail(65, 'Η παραλλαγή (ή ο κωδικός/barcode της) υπάρχει ήδη');
+  end;
+
+  procedure model_price(p_model_id number, p_price number) is
+    n number;
+  begin
+    if p_price is null or p_price < 0 then
+      fail(24, 'Λάθος τιμή');
+    end if;
+    select count(*) into n from mm_item where id = p_model_id and is_model = 'Y';
+    if n = 0 then
+      fail(66, 'Το είδος ' || p_model_id || ' δεν είναι μοντέλο');
+    end if;
+    update mm_item set price = p_price where id = p_model_id or parent_id = p_model_id;
+  end;
+
+  -- ---------------------------------------------------------------------------------------------
   procedure set_doc_discount(p_doc_id number, p_pct number default 0, p_amount number default 0,
                              p_reason varchar2 default null) is
     d mm_doc%rowtype := draft(p_doc_id);
@@ -1088,6 +1183,8 @@ create or replace package body mm_core as
     if k.serial_tracked = 'Y' or c.serial_tracked = 'Y' then
       fail(53, 'Καλάθι και είδη με serials δεν συνδυάζονται');
     end if;
+    not_model(p_kit_id);
+    not_model(p_component_id);
     if p_kit_id = p_component_id then
       fail(55, 'Το καλάθι δεν μπαίνει στον εαυτό του');
     end if;
@@ -1173,6 +1270,7 @@ create or replace package body mm_core as
     if i.serial_tracked = 'Y' then
       fail(52, 'Τα είδη με serials δεν μπαίνουν σε κράτηση');
     end if;
+    not_model(p_item_id);
     if p_qty is null or p_qty < 0 then
       fail(24, 'Λάθος ποσότητα');
     end if;
@@ -1275,6 +1373,7 @@ create or replace package body mm_core as
     if it is null then
       fail(23, 'Δεν βρέθηκε είδος με κωδικό ' || p_code);
     end if;
+    not_model(it);
     if tracked(it) then
       fail(31, 'Τα είδη με serials δεν μετριούνται στην απογραφή: το απόθεμά τους είναι οι κάρτες τους');
     end if;

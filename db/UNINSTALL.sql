@@ -10,6 +10,7 @@ drop view if exists mm_serial_check;
 drop view if exists mm_doc_serials;
 drop view if exists mm_item_avail;
 drop view if exists mm_kit_avail;
+drop view if exists mm_variant_grid;
 drop view if exists mm_reservation_need;
 drop table if exists mm_promo_item cascade constraints purge;
 drop table if exists mm_promo cascade constraints purge;
@@ -34,6 +35,8 @@ drop table if exists mm_supplier cascade constraints purge;
 drop table if exists mm_customer cascade constraints purge;
 drop table if exists mm_item cascade constraints purge;
 drop table if exists mm_category cascade constraints purge;
+drop table if exists mm_color cascade constraints purge;
+drop table if exists mm_size cascade constraints purge;
 drop table if exists mm_vat cascade constraints purge;
 prompt == MM UNINSTALL OK
 exit
