@@ -639,12 +639,17 @@ create or replace package body mm_core as
     for l in (select l.*, i.kit from mm_doc_line l join mm_item i on i.id = l.item_id
               where l.doc_id = p_doc_id) loop
       if l.kit = 'Y' and t.stock_sign = -1 then
-        -- a kit out: the ready ones first, the rest from its components
+        -- a kit out: the ready ones first, the rest from its components. The stock is reservable:
+        -- this transaction reads it without its own changes, so what the lines before took of
+        -- the same kit is taken off here (two lines of one basket: one ready, not two)
         declare
           ready number;
           take number;
         begin
-          select greatest(stock, 0) into ready from mm_item where id = l.item_id;
+          select stock + 0 into ready from mm_item where id = l.item_id;
+          select ready + nvl(sum(qty), 0) into ready from mm_stock_move
+          where doc_id = p_doc_id and item_id = l.item_id;
+          ready := greatest(ready, 0);
           take := least(ready, l.qty);
           stock_move(l.item_id, 'DOC', -take, p_doc_id, l.id);
           for c in (select component_id, qty from mm_kit_component where kit_id = l.item_id) loop
