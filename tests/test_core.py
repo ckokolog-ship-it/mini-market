@@ -170,6 +170,10 @@ def test_default_price(env):
     assert db.fn('default_price', float, 'ALP', ids['b']) == 2.26
     assert db.fn('default_price', float, 'TPY', ids['b']) == 2.0       # 2.26 / 1.13
     assert db.fn('default_price', float, 'TAG', ids['b']) == 1.0       # the cost
+    db.cur.execute('update mm_item set wholesale_price = 1.75 where id = :i', i=ids['b'])
+    assert db.fn('default_price', float, 'TPY', ids['b']) == 1.75      # the wholesale price
+    assert db.fn('default_price', float, 'ALP', ids['b']) == 2.26      # retail: as before
+    db.conn.rollback()
 
 
 def test_find_item(env):

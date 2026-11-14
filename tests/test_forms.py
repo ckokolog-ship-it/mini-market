@@ -548,3 +548,56 @@ def test_toolbar(cur):
         assert prop(cur, 'DO_KEY') == key, button
     run(cur, "ui.tool('TB.T_MAIN');")
     assert prop(cur, 'NEW_FORM') == 'MM_MAIN'
+
+
+@needs_db
+def test_invoices_form(cur, env):
+    """a wholesale invoice: new, a line at the wholesale price, cards with their serials, post,
+    a credit note (draft, then deleted), cancel"""
+    db, ids = env
+    cat = db.one('select min(id) from mm_category')[0]
+    db.cur.execute("update mm_item set wholesale_price = 1.5 where id = :i", i=ids['b'])
+    db.cur.execute("insert into mm_item (code, name, category_id, vat_code, price, serial_tracked) "
+                   "values (:c, 'Test card inv', :cat, 'A', 10, 'Y')", c=f"TST{ids['tag']}I", cat=cat)
+    card = db.one('select id from mm_item where code = :c', c=f"TST{ids['tag']}I")[0]
+    for k in range(3):
+        db.fn('load_serial', int, card, f"INV-{ids['tag']}-{k}", '1234')
+    db.commit()
+    compile_ui(cur, 'MM_INVOICES')
+    run(cur, 'ui.init;')
+    today = __import__('datetime').date.today().strftime('%d/%m/%Y')
+    assert item(cur, 'CTL.D_DATE') == today
+    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='TPY', CTL__CUST_ID=str(ids['customer']),
+        CTL__D_PAY='CREDIT', CTL__D_DATE=today)
+    d = db.one('select max(id) from mm_doc where customer_id = :c', c=ids['customer'])[0]
+    cur.execute('begin :v := fstub.queries; end;', v=(q := cur.var(str)))
+    assert f'DOC:id = {d};' in q.getvalue()
+    run(cur, "ui.press('CTL.ADDLINE');", DOC__ID=str(d), CTL__L_ITEM_ID=str(ids['b']), CTL__L_QTY='2')
+    assert float(db.one('select price from mm_doc_line where doc_id = :d and item_id = :i', d=d, i=ids['b'])[0]) == 1.5
+    run(cur, "ui.press('CTL.ADDLINE');", DOC__ID=str(d), CTL__L_ITEM_ID=str(card), CTL__L_QTY='2')
+    assert db.one('select count(*) from mm_serial where out_doc_id = :d', d=d)[0] == 2   # their serials
+    run(cur, "ui.press('CTL.POSTDOC');", DOC__ID=str(d))
+    assert 'αριθμό' in msgs(cur)
+    assert db.one('select status from mm_doc where id = :d', d=d)[0] == 'P'
+    run(cur, "ui.post_query('DOC');", DOC__CUSTOMER_ID=str(ids['customer']))
+    assert item(cur, 'DOC.PARTNER_TEXT') == db.one('select name from mm_customer where id = :c', c=ids['customer'])[0]
+    run(cur, "ui.post_query('DL');", DL__ITEM_ID=str(ids['b']))
+    assert item(cur, 'DL.ITEM_TEXT').startswith(f"TST{ids['tag']}B ")
+    run(cur, "ui.press('CTL.CREDIT');", DOC__ID=str(d))
+    assert 'MM-129' in msgs(cur)                                              # cards: no credit note
+    run(cur, "ui.press('CTL.CANCELDOC');", DOC__ID=str(d))
+    assert db.one('select status from mm_doc where id = :d', d=d)[0] == 'C'
+    # an invoice without cards: its credit note, a draft, deleted
+    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='TPY', CTL__CUST_ID=str(ids['customer']), CTL__D_DATE=today)
+    d2 = db.one('select max(id) from mm_doc where customer_id = :c', c=ids['customer'])[0]
+    run(cur, "ui.press('CTL.ADDLINE');", DOC__ID=str(d2), CTL__L_ITEM_ID=str(ids['b']), CTL__L_QTY='1',
+        CTL__L_PRICE='3', CTL__L_DISC='10')
+    assert float(db.one('select price from mm_doc_line where doc_id = :d', d=d2)[0]) == 3
+    run(cur, "ui.press('CTL.POSTDOC');", DOC__ID=str(d2))
+    run(cur, "ui.press('CTL.CREDIT');", DOC__ID=str(d2))
+    c = db.one("select id from mm_doc where ref_doc_id = :d", d=d2)[0]
+    assert db.one('select doc_type, status from mm_doc where id = :c', c=c) == ('PPY', 'D')
+    run(cur, "ui.press('CTL.DELDOC');", DOC__ID=str(c))
+    assert db.one('select count(*) from mm_doc where id = :c', c=c)[0] == 0
+    db.cur.execute("update mm_item set wholesale_price = null where id = :i", i=ids['b'])
+    db.commit()

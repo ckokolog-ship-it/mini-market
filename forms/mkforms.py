@@ -86,6 +86,7 @@ FORMS = {
             C('VAT_RATE', '%', 40, num=True, db=False, display=True, mask='90'),
             C('UNIT', 'Μονάδα', 60, len=3, req=True, upper=True, lov='LOV_UNIT', init='PCS'),
             C('PRICE', 'Τιμή λιαν.', 70, num=True, req=True, mask='99G990D00'),
+            C('WHOLESALE_PRICE', 'Χονδρική', 70, num=True, mask='99G990D00'),
             C('COST', 'Κόστος', 70, num=True, req=True, init='0', mask='99G990D00'),
             C('MIN_STOCK', 'Ελάχιστο', 64, num=True, req=True, init='0'),
             C('STOCK', 'Απόθεμα', 70, num=True, db=False, display=True),
@@ -340,10 +341,83 @@ FORMS['MM_VARIANTS'] = dict(
            [('ID', 0, 'Κωδ.', 'CTL.V_SIZE_ID'), ('TEXT', 160, 'Μέγεθος', 'CTL.V_SIZE_TEXT')])])
 
 
+
+# invoicing (wholesale): invoices of sale and of purchase and their credit notes (master), their
+# lines (detail); new, a line (the cards of mobile phones: with their serials), delete a line, post,
+# cancel, a credit note, delete a draft
+FORMS['MM_INVOICES'] = dict(
+    title='Τιμολόγια',
+    blocks=[
+        dict(name='DOC', table='MM_DOC', order='doc_date desc, id desc', top=80, rows=6, read_only=True,
+             where="doc_type in ('TPY', 'PPY', 'TAG', 'PAG')",
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('DOC_TYPE', 'Είδος', 50, len=3),
+                   C('DOC_NO', 'Αριθμός', 70, num=True),
+                   C('DOC_DATE', 'Ημερομηνία', 90, date=True),
+                   C('STATUS', 'Κατ.', 40, len=1),
+                   C('CUSTOMER_ID', '', 0, num=True, hidden=True),
+                   C('SUPPLIER_ID', '', 0, num=True, hidden=True),
+                   C('PARTNER_TEXT', 'Πελάτης / προμηθευτής', 220, len=100, db=False, display=True),
+                   C('PAYMENT', 'Πληρωμή', 70, len=6),
+                   C('NET', 'Καθαρό', 80, num=True, mask='99G990D00'),
+                   C('VAT', 'ΦΠΑ', 70, num=True, mask='99G990D00'),
+                   C('TOTAL', 'Σύνολο', 80, num=True, mask='99G990D00')]),
+        dict(name='DL', table='MM_DOC_LINE', order='line_no', top=330, rows=8, read_only=True,
+             where='doc_id = :DOC.ID',
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('ITEM_ID', '', 0, num=True, hidden=True),
+                   C('ITEM_TEXT', 'Είδος', 260, len=200, db=False, display=True),
+                   C('QTY', 'Ποσότητα', 70, num=True),
+                   C('PRICE', 'Τιμή', 80, num=True, mask='9G990D0000'),
+                   C('DISCOUNT', 'Έκπτ. %', 50, num=True),
+                   C('PROMO_DISC', 'Προσφορά', 70, num=True, mask='99G990D00'),
+                   C('NET', 'Καθαρό', 80, num=True, mask='99G990D00'),
+                   C('VAT', 'ΦΠΑ', 70, num=True, mask='99G990D00'),
+                   C('TOTAL', 'Σύνολο', 80, num=True, mask='99G990D00')])],
+    ctl=[('D_TYPE', 'text', 10, 260, 60, 'Είδος (F9)', {'len': 3, 'upper': True, 'init': 'TPY', 'lov': 'LOV_DTYPE'}),
+         ('CUST_TEXT', 'text', 76, 260, 200, 'Πελάτης (F9)', {'len': 100, 'lov': 'LOV_CUST'}),
+         ('CUST_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('SUPP_TEXT', 'text', 282, 260, 200, 'ή προμηθευτής (F9)', {'len': 100, 'lov': 'LOV_SUPP'}),
+         ('SUPP_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('D_PAY', 'text', 488, 260, 70, 'Πληρωμή', {'len': 6, 'upper': True, 'init': 'CREDIT', 'lov': 'LOV_PAY'}),
+         ('D_DATE', 'date', 564, 260, 90, 'Ημερομηνία', {}),
+         ('NEWDOC', 'button', 660, 258, 120, 'Νέο', {}),
+         ('POSTDOC', 'button', 830, 80, 160, 'Καταχώριση', {}),
+         ('CANCELDOC', 'button', 830, 112, 160, 'Ακύρωση', {}),
+         ('CREDIT', 'button', 830, 144, 160, 'Πιστωτικό', {}),
+         ('DELDOC', 'button', 830, 176, 160, 'Σβήσε πρόχειρο', {}),
+         ('L_ITEM_TEXT', 'text', 910, 330, 220, 'Είδος (F9)', {'len': 200, 'lov': 'LOV_ITEMI'}),
+         ('L_ITEM_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('L_QTY', 'text', 910, 376, 60, 'Ποσότητα', {'num': True, 'init': '1'}),
+         ('L_PRICE', 'text', 976, 376, 80, 'Τιμή (κενή: του είδους)', {'num': True}),
+         ('L_DISC', 'text', 1062, 376, 50, 'Έκπτ. %', {'num': True}),
+         ('ADDLINE', 'button', 910, 410, 220, 'Βάλε γραμμή', {}),
+         ('DELLINE', 'button', 910, 444, 220, 'Σβήσε τη γραμμή', {})],
+    find_title='Τιμολόγια',
+    find=("select d.id, d.doc_type || ' ' || d.doc_no || ' ' || to_char(d.doc_date, 'dd/mm/yyyy') text, "
+          "nvl(c.name, s.name) partner from mm_doc d left join mm_customer c on c.id = d.customer_id "
+          "left join mm_supplier s on s.id = d.supplier_id where d.doc_type in ('TPY', 'PPY', 'TAG', 'PAG') "
+          "order by d.doc_date desc, d.id desc",
+          [('ID', 0, 'Κωδ.', 'FIND_ID'), ('TEXT', 180, 'Παραστατικό', 'FIND_TEXT'), ('PARTNER', 220, 'Πελάτης / προμηθευτής', None)]),
+    lovs=[('LOV_DTYPE', 'Είδος παραστατικού', "select code, name from mm_doc_type "
+                                             "where code in ('TPY', 'PPY', 'TAG', 'PAG') order by code",
+           [('CODE', 50, 'Είδος', 'CTL.D_TYPE'), ('NAME', 220, 'Περιγραφή', None)]),
+          ('LOV_CUST', 'Πελάτες', "select id, name from mm_customer where active = 'Y' order by name",
+           [('ID', 0, 'Κωδ.', 'CTL.CUST_ID'), ('NAME', 260, 'Πελάτης', 'CTL.CUST_TEXT')]),
+          ('LOV_SUPP', 'Προμηθευτές', "select id, name from mm_supplier where active = 'Y' order by name",
+           [('ID', 0, 'Κωδ.', 'CTL.SUPP_ID'), ('NAME', 260, 'Προμηθευτής', 'CTL.SUPP_TEXT')]),
+          ('LOV_PAY', 'Πληρωμή', ' union all '.join(
+              "select '%s' code, mm_text.t('%s') descr from dual" % (c, WORDS.key(d))
+              for c, d in (('CREDIT', 'Πίστωση'), ('CASH', 'Μετρητά'), ('CARD', 'Κάρτα'))),
+           [('CODE', 70, 'Πληρωμή', 'CTL.D_PAY'), ('DESCR', 120, 'Περιγραφή', None)]),
+          ('LOV_ITEMI', 'Είδη', "select id, code || ' ' || name text from mm_item where active = 'Y' "
+                                "and is_model = 'N' order by code",
+           [('ID', 0, 'Κωδ.', 'CTL.L_ITEM_ID'), ('TEXT', 320, 'Είδος', 'CTL.L_ITEM_TEXT')])])
+
 # the menu: a button for each form (CALL_FORM: closing it comes back here), and the exit
 MENU_FORMS = [('MM_ITEMS', 'Είδη'), ('MM_CUSTOMERS', 'Πελάτες'), ('MM_SUPPLIERS', 'Προμηθευτές'),
               ('MM_CARDS', 'Κάρτες κινητής'), ('MM_RESERVATIONS', 'Κρατήσεις'), ('MM_KITS', 'Καλάθια και σετ'),
-              ('MM_PROMOS', 'Προσφορές'), ('MM_VARIANTS', 'Ρούχα και παπούτσια')]
+              ('MM_PROMOS', 'Προσφορές'), ('MM_VARIANTS', 'Ρούχα και παπούτσια'), ('MM_INVOICES', 'Τιμολόγια')]
 FORMS['MM_MAIN'] = dict(
     title='Mini market',
     blocks=[],
@@ -368,10 +442,12 @@ MENU_BAR = [
                           ('VARIANTS', 'Ρούχα και παπούτσια', "new_form('MM_VARIANTS');"),
                           ('KITS', 'Καλάθια και σετ', "new_form('MM_KITS');"),
                           ('CARDS', 'Κάρτες κινητής', "new_form('MM_CARDS');")]),
-    ('SALES', 'Πωλήσεις', [('CUSTOMERS', 'Πελάτες', "new_form('MM_CUSTOMERS');"),
+    ('SALES', 'Πωλήσεις', [('INVOICES', 'Τιμολόγια πώλησης', "new_form('MM_INVOICES');"),
+                           ('CUSTOMERS', 'Πελάτες', "new_form('MM_CUSTOMERS');"),
                            ('RESERV', 'Κρατήσεις', "new_form('MM_RESERVATIONS');"),
                            ('PROMOS', 'Προσφορές', "new_form('MM_PROMOS');")]),
-    ('BUY', 'Αγορές', [('SUPPLIERS', 'Προμηθευτές', "new_form('MM_SUPPLIERS');")]),
+    ('BUY', 'Αγορές', [('PINVOICES', 'Τιμολόγια αγοράς', "new_form('MM_INVOICES');"),
+                       ('SUPPLIERS', 'Προμηθευτές', "new_form('MM_SUPPLIERS');")]),
 ]
 
 

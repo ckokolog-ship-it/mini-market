@@ -225,6 +225,39 @@ begin
 end;
 /
 
+-- wholesale prices (without VAT) for the drinks and the snacks; the others: the retail without VAT
+update mm_item i set wholesale_price = round(i.price / (1 + (select v.rate from mm_vat v where v.code = i.vat_code) / 100) * 0.85, 2)
+where i.wholesale_price is null and i.code in ('POT01', 'POT02', 'POT03', 'POT04', 'POT05', 'POT06',
+                                               'SNK01', 'SNK02', 'SNK03', 'SNK04');
+
+-- two invoices: a purchase of beers from a supplier, a wholesale sale to a taverna (on credit)
+declare
+  d number;
+  l number;
+  n number;
+  function id_of(c varchar2) return number is
+    x number;
+  begin
+    select id into x from mm_item where code = c;
+    return x;
+  end;
+begin
+  select count(*) into n from mm_doc where doc_type in ('TPY', 'TAG');
+  if n = 0 then
+    select id into n from mm_supplier where afm = '999000079';
+    d := mm_core.new_doc('TAG', p_supplier_id => n, p_payment => 'CREDIT');
+    l := mm_core.add_line(d, id_of('POT05'), 48, 0.80);
+    l := mm_core.add_line(d, id_of('POT01'), 120, 0.18);
+    n := mm_core.post_doc(d);
+    select id into n from mm_customer where afm = '999000020';
+    d := mm_core.new_doc('TPY', p_customer_id => n, p_payment => 'CREDIT');
+    l := mm_core.add_line(d, id_of('POT05'), 24);
+    l := mm_core.add_line(d, id_of('POT01'), 48);
+    n := mm_core.post_doc(d);
+  end if;
+end;
+/
+
 -- the cards of mobile phones: items with serials, 5 cards each (made-up serials and PINs), when
 -- MM_PIN works (DBMS_CRYPTO: GRANT_CRYPTO.sql)
 insert into mm_category (name)

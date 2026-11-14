@@ -15,7 +15,7 @@
 # - frmcmp.exe with batch=yes; NLS_LANG EL8MSWIN1253 for the tools (the forms are ASCII).
 # This file is ASCII on purpose: Windows PowerShell 5 reads a file without BOM as ANSI.
 param(
-  [string[]]$Forms = @('MM_MENU', 'MM_MAIN', 'MM_ITEMS', 'MM_CUSTOMERS', 'MM_SUPPLIERS', 'MM_CARDS', 'MM_RESERVATIONS', 'MM_KITS', 'MM_PROMOS', 'MM_VARIANTS'),
+  [string[]]$Forms = @('MM_MENU', 'MM_MAIN', 'MM_ITEMS', 'MM_CUSTOMERS', 'MM_SUPPLIERS', 'MM_CARDS', 'MM_RESERVATIONS', 'MM_KITS', 'MM_PROMOS', 'MM_VARIANTS', 'MM_INVOICES'),
   [string]$UserId = '/@MM_DB',
   [string]$OracleHome = 'C:\Oracle\Middleware\Oracle_Home',
   [string]$Domain = 'C:\Oracle\Middleware\Oracle_Home\user_projects\domains\forms_domain',

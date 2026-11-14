@@ -141,12 +141,17 @@ def test_discount_of_the_document(pr):
     assert total(db, d) == 14.66
 
 
-def test_invoice_without_vat_in_the_prices(pr):
+def test_promotions_on_the_retail_receipt_only(pr):
+    """an invoice of sale (wholesale) has its own price: no promotion; the discount of the document
+    still holds, on the net (prices without VAT)"""
     db, ids = pr
     promo(db, 'b 50%', 'PCT', items=[(ids['b'], 1)], p_pct=50)
     d = receipt(db, ids, [('b', 2)], kind='TPY')                       # 2 x 2,00 net
     (q, pd, dd, n, v, t, nm), = lines(db, d)
-    assert (pd, n, v, t) == (2.00, 2.00, 0.26, 2.26)
+    assert (pd, n, v, t, nm) == (0, 4.00, 0.52, 4.52, None)
+    db.proc('set_doc_discount', d, 50, 0, 'Χονδρική')
+    (q, pd, dd, n, v, t, nm), = lines(db, d)
+    assert (dd, n, v, t) == (2.00, 2.00, 0.26, 2.26)
 
 
 def test_posted_with_the_promotion_and_z(pr):
