@@ -13,6 +13,9 @@ set define on
 set verify off
 set feedback off
 whenever sqlerror exit failure rollback
+-- a form or another session that uses a table holds it a moment: wait for it up to 60 seconds
+-- (else ORA-00054 at once, e.g. at "create index if not exists" of a table a form has open)
+alter session set ddl_lock_timeout = 60;
 
 -- &1 empty when not given (else sqlplus would ask for it)
 set termout off
