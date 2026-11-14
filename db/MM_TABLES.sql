@@ -661,3 +661,18 @@ select 'NEXT_NO', null, t.code || ': ' || t.next_no || ' <= ' || m.no
 from mm_doc_type t
 join (select doc_type, max(doc_no) no from mm_doc group by doc_type) m on m.doc_type = t.code
 where t.next_no <= m.no;
+
+-- the ledger on the screen (the form MM_LEDGER): MM_LEDGER.FILL puts the rows of one item, customer
+-- or supplier here, for the session only (a global temporary table: each user sees his own)
+create global temporary table if not exists mm_ledger_row (
+  seq         number        not null,
+  kind        varchar2(1)   not null,  -- O from the carry-over (the balance before the period), M a move
+  ldate       date,
+  doc_id      number,
+  doc_text    varchar2(40),
+  partner     varchar2(100),
+  descr       varchar2(200),
+  debit       number,                  -- an item: in; a customer or supplier: debit
+  credit      number,                  -- an item: out; a customer or supplier: credit
+  balance     number
+) on commit preserve rows;

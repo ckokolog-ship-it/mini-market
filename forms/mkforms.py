@@ -470,11 +470,51 @@ FORMS['MM_PAYMENTS'] = dict(
               for c, d in (('CASH', 'Μετρητά'), ('CARD', 'Κάρτα'), ('BANK', 'Έμβασμα'))),
            [('CODE', 60, 'Τρόπος', 'CTL.P_METHOD'), ('DESCR', 120, 'Περιγραφή', None)])])
 
+# the ledgers (MM_LEDGER in the database): of an item, a customer or a supplier for a period; the
+# rows in MM_LEDGER_ROW (a temporary table of the session): the carry-over first, then the moves with
+# the running balance; under them the carry-over, the totals of the period and the balance at its end
+MONEY = '999G999G990D00'
+FORMS['MM_LEDGER'] = dict(
+    title='Καρτέλες',
+    blocks=[
+        dict(name='LED', table='MM_LEDGER_ROW', order='seq', top=170, rows=15, read_only=True,
+             cols=[C('SEQ', '', 0, num=True, hidden=True),
+                   C('KIND', '', 0, len=1, hidden=True),
+                   C('LDATE', 'Ημερομηνία', 90, date=True),
+                   C('DOC_TEXT', 'Παραστατικό', 110, len=40),
+                   C('PARTNER', 'Πελάτης / προμηθευτής / ταμείο', 200, len=100),
+                   C('DESCR', 'Περιγραφή', 260, len=200),
+                   C('DEBIT', 'Χρέωση', 90, num=True, mask=MONEY),
+                   C('CREDIT', 'Πίστωση', 90, num=True, mask=MONEY),
+                   C('BALANCE', 'Υπόλοιπο', 100, num=True, mask=MONEY)])],
+    ctl=[('L_FROM', 'date', 10, 24, 90, 'Από', {'year_start': True}),
+         ('L_TO', 'date', 106, 24, 90, 'Έως', {}),
+         ('ITEM_TEXT', 'text', 206, 24, 260, 'Είδος (λίστα)', {'len': 200, 'lov': 'LOV_LITEM'}),
+         ('ITEM_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('SHOWITEM', 'button', 472, 22, 170, 'Καρτέλα είδους', {}),
+         ('CUST_TEXT', 'text', 206, 70, 260, 'Πελάτης (λίστα)', {'len': 100, 'lov': 'LOV_CUST'}),
+         ('CUST_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('SHOWCUST', 'button', 472, 68, 170, 'Καρτέλα πελάτη', {}),
+         ('SUPP_TEXT', 'text', 206, 116, 260, 'Προμηθευτής (λίστα)', {'len': 100, 'lov': 'LOV_SUPP'}),
+         ('SUPP_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('SHOWSUPP', 'button', 472, 114, 170, 'Καρτέλα προμηθευτή', {}),
+         ('L_TITLE', 'display', 660, 24, 314, 'Καρτέλα', {'len': 200}),
+         ('O_OPEN', 'display', 548, 520, 130, 'Από μεταφορά', {'num': True}),
+         ('O_DEBIT', 'display', 686, 520, 90, 'Σύνολο', {'num': True}),
+         ('O_CREDIT', 'display', 780, 520, 90, 'Σύνολο', {'num': True}),
+         ('O_CLOSE', 'display', 874, 520, 100, 'Γενικό υπόλοιπο', {'num': True})],
+    lovs=[('LOV_LITEM', 'Είδη', "select id, code || ' ' || name text from mm_item where is_model = 'N' order by code",
+           [('ID', 0, 'Κωδ.', 'CTL.ITEM_ID'), ('TEXT', 320, 'Είδος', 'CTL.ITEM_TEXT')]),
+          ('LOV_CUST', 'Πελάτες', "select id, name from mm_customer order by name",
+           [('ID', 0, 'Κωδ.', 'CTL.CUST_ID'), ('NAME', 260, 'Πελάτης', 'CTL.CUST_TEXT')]),
+          ('LOV_SUPP', 'Προμηθευτές', "select id, name from mm_supplier order by name",
+           [('ID', 0, 'Κωδ.', 'CTL.SUPP_ID'), ('NAME', 260, 'Προμηθευτής', 'CTL.SUPP_TEXT')])])
+
 # the menu: a button for each form (CALL_FORM: closing it comes back here), and the exit
 MENU_FORMS = [('MM_ITEMS', 'Είδη'), ('MM_CUSTOMERS', 'Πελάτες'), ('MM_SUPPLIERS', 'Προμηθευτές'),
               ('MM_CARDS', 'Κάρτες κινητής'), ('MM_RESERVATIONS', 'Κρατήσεις'), ('MM_KITS', 'Καλάθια και σετ'),
               ('MM_PROMOS', 'Προσφορές'), ('MM_VARIANTS', 'Ρούχα και παπούτσια'), ('MM_INVOICES', 'Τιμολόγια'),
-              ('MM_PAYMENTS', 'Εισπράξεις και πληρωμές')]
+              ('MM_PAYMENTS', 'Εισπράξεις και πληρωμές'), ('MM_LEDGER', 'Καρτέλες')]
 FORMS['MM_MAIN'] = dict(
     title='Mini market',
     blocks=[],
@@ -499,15 +539,18 @@ MENU_BAR = [
     ('STOCK', 'Αποθήκη', [('ITEMS', 'Είδη', "new_form('MM_ITEMS');"),
                           ('VARIANTS', 'Ρούχα και παπούτσια', "new_form('MM_VARIANTS');"),
                           ('KITS', 'Καλάθια και σετ', "new_form('MM_KITS');"),
-                          ('CARDS', 'Κάρτες κινητής', "new_form('MM_CARDS');")]),
+                          ('CARDS', 'Κάρτες κινητής', "new_form('MM_CARDS');"),
+                          ('ILEDGER', 'Καρτέλα είδους', "new_form('MM_LEDGER');")]),
     ('SALES', 'Πωλήσεις', [('INVOICES', 'Τιμολόγια πώλησης', "new_form('MM_INVOICES');"),
                            ('RECEIPTS', 'Εισπράξεις', "new_form('MM_PAYMENTS');"),
                            ('CUSTOMERS', 'Πελάτες', "new_form('MM_CUSTOMERS');"),
                            ('RESERV', 'Κρατήσεις', "new_form('MM_RESERVATIONS');"),
-                           ('PROMOS', 'Προσφορές', "new_form('MM_PROMOS');")]),
+                           ('PROMOS', 'Προσφορές', "new_form('MM_PROMOS');"),
+                           ('CLEDGER', 'Καρτέλα πελάτη', "new_form('MM_LEDGER');")]),
     ('BUY', 'Αγορές', [('PINVOICES', 'Τιμολόγια αγοράς', "new_form('MM_INVOICES');"),
                        ('PAYMENTS', 'Πληρωμές', "new_form('MM_PAYMENTS');"),
-                       ('SUPPLIERS', 'Προμηθευτές', "new_form('MM_SUPPLIERS');")]),
+                       ('SUPPLIERS', 'Προμηθευτές', "new_form('MM_SUPPLIERS');"),
+                       ('SLEDGER', 'Καρτέλα προμηθευτή', "new_form('MM_LEDGER');")]),
 ]
 
 
@@ -740,7 +783,9 @@ def build(name, f):
     width = max(width, tbw)
     for c in f.get('ctl', []):
         if c[1] == 'date':
-            texts.append("COPY(to_char(sysdate, 'DD/MM/YYYY'), 'CTL.%s');" % c[0])
+            # (year_start: the 1st of January, e.g. the start of a ledger)
+            texts.append("COPY(to_char(%s, 'DD/MM/YYYY'), 'CTL.%s');"
+                         % ("trunc(sysdate, 'YYYY')" if c[6].get('year_start') else 'sysdate', c[0]))
         elif 'init' in c[6]:
             # (the initial value of an item of CTL did not show on the web: put by ui.init too)
             texts.append("COPY('%s', 'CTL.%s');" % (c[6]['init'], c[0]))

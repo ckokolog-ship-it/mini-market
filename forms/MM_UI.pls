@@ -1,5 +1,5 @@
 -- MM_UI.pls -- the package UI of the forms of the mini market (MM_ITEMS, MM_CUSTOMERS,
--- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, MM_INVOICES, MM_PAYMENTS,
+-- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, MM_INVOICES, MM_PAYMENTS, MM_LEDGER,
 -- the menu MM_MAIN):
 -- mkforms.py puts it in each form. The triggers only call it:
 --   WHEN-NEW-FORM-INSTANCE  ui.init
@@ -328,6 +328,56 @@ PACKAGE BODY ui IS
       forms_ddl('COMMIT');
       again(c_block);
       message('Ακυρώθηκε');
+    -- a ledger: of the item, the customer or the supplier chosen, for the period CTL.L_FROM - L_TO
+    ELSIF p_item IN ('CTL.SHOWITEM', 'CTL.SHOWCUST', 'CTL.SHOWSUPP') THEN
+      DECLARE
+        w VARCHAR2(1);
+        t VARCHAR2(200);
+        o1 NUMBER;
+        o2 NUMBER;
+        o3 NUMBER;
+        o4 NUMBER;
+      BEGIN
+        IF p_item = 'CTL.SHOWITEM' THEN
+          w := 'I';
+          v := num('CTL.ITEM_ID');
+          t := name_in('CTL.ITEM_TEXT');
+          set_item_property('LED.DEBIT', PROMPT_TEXT, 'Εισαγωγή');
+          set_item_property('LED.CREDIT', PROMPT_TEXT, 'Εξαγωγή');
+          set_item_property('LED.BALANCE', PROMPT_TEXT, 'Απόθεμα');
+          set_item_property('CTL.O_CLOSE', PROMPT_TEXT, 'Τελικό απόθεμα');
+          set_item_property('LED.DEBIT', FORMAT_MASK, '999G999G990D000');
+          set_item_property('LED.CREDIT', FORMAT_MASK, '999G999G990D000');
+          set_item_property('LED.BALANCE', FORMAT_MASK, '999G999G990D000');
+        ELSE
+          IF p_item = 'CTL.SHOWCUST' THEN
+            w := 'C';
+            v := num('CTL.CUST_ID');
+            t := name_in('CTL.CUST_TEXT');
+          ELSE
+            w := 'S';
+            v := num('CTL.SUPP_ID');
+            t := name_in('CTL.SUPP_TEXT');
+          END IF;
+          set_item_property('LED.DEBIT', PROMPT_TEXT, 'Χρέωση');
+          set_item_property('LED.CREDIT', PROMPT_TEXT, 'Πίστωση');
+          set_item_property('LED.BALANCE', PROMPT_TEXT, 'Υπόλοιπο');
+          set_item_property('CTL.O_CLOSE', PROMPT_TEXT, 'Γενικό υπόλοιπο');
+          set_item_property('LED.DEBIT', FORMAT_MASK, '999G999G990D00');
+          set_item_property('LED.CREDIT', FORMAT_MASK, '999G999G990D00');
+          set_item_property('LED.BALANCE', FORMAT_MASK, '999G999G990D00');
+        END IF;
+        mm_ledger.fill(w, v, date_in('CTL.L_FROM'), date_in('CTL.L_TO'), o1, o2, o3, o4);
+        forms_ddl('COMMIT');
+        copy(t || ': ' || name_in('CTL.L_FROM') || ' - ' || name_in('CTL.L_TO'), 'CTL.L_TITLE');
+        copy(to_char(o1), 'CTL.O_OPEN');
+        copy(to_char(o2), 'CTL.O_DEBIT');
+        copy(to_char(o3), 'CTL.O_CREDIT');
+        copy(to_char(o4), 'CTL.O_CLOSE');
+        go_block('LED');
+        execute_query;
+        message('Η καρτέλα είναι έτοιμη');
+      END;
     ELSIF p_item = 'CTL.DELDOC' THEN
       mm_core.delete_doc(num('DOC.ID'));
       forms_ddl('COMMIT');
