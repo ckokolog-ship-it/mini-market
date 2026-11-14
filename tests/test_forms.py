@@ -74,6 +74,9 @@ end;""",
     "create or replace procedure forms_ddl(p varchar2) is begin execute immediate p; end;",
     "create or replace procedure call_form(f varchar2) is begin fstub.props('CALL_FORM') := f; end;",
     "create or replace procedure do_key(k varchar2) is begin fstub.props('DO_KEY') := k; end;",
+    "create or replace function lov_name return number is begin return 9; end;",
+    """create or replace function get_item_property(i varchar2, p number) return varchar2 is
+begin if fstub.props.exists(upper(i) || '#' || p) then return fstub.props(upper(i) || '#' || p); end if; return null; end;""",
     "create or replace function status return number is begin return 7; end;",
     "create or replace function query_status return number is begin return 8; end;",
     """create or replace procedure set_record_property(r number, b varchar2, p number, v number) is
@@ -88,7 +91,7 @@ begin
   return fstub.lov_answer;
 end;""",
 ]
-DROP = ['package ui', 'function status', 'function query_status', 'procedure set_record_property',
+DROP = ['package ui', 'function lov_name', 'function get_item_property', 'function status', 'function query_status', 'procedure set_record_property',
         'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
         'procedure set_item_property', 'procedure set_window_property', 'function default_where',
@@ -542,7 +545,8 @@ def test_toolbar(cur):
     run(cur, 'ui.init;')
     assert prop(cur, 'TB.T_SAVE#2') == 'Αποθήκευση'
     for button, key in (('T_SAVE', 'COMMIT_FORM'), ('T_ENTERQ', 'ENTER_QUERY'), ('T_EXECQ', 'EXECUTE_QUERY'),
-                        ('T_NEW', 'CREATE_RECORD'), ('T_DEL', 'DELETE_RECORD'), ('T_PREV', 'PREVIOUS_RECORD'),
+                        ('T_NEW', 'CREATE_RECORD'), ('T_DEL', 'DELETE_RECORD'), ('T_LOV', 'LIST_VALUES'),
+                        ('T_PREV', 'PREVIOUS_RECORD'),
                         ('T_NEXT', 'NEXT_RECORD'), ('T_EXIT', 'EXIT_FORM')):
         run(cur, f"ui.tool('TB.{button}');")
         assert prop(cur, 'DO_KEY') == key, button
@@ -601,3 +605,16 @@ def test_invoices_form(cur, env):
     assert db.one('select count(*) from mm_doc where id = :c', c=c)[0] == 0
     db.cur.execute("update mm_item set wholesale_price = null where id = :i", i=ids['b'])
     db.commit()
+
+
+@needs_db
+def test_lists_and_defaults(cur):
+    """a double click opens the list of an item that has one; the defaults of CTL from ui.init"""
+    compile_ui(cur, 'MM_INVOICES')
+    run(cur, 'ui.init;')
+    assert item(cur, 'CTL.D_TYPE') == 'TPY' and item(cur, 'CTL.D_PAY') == 'CREDIT' and item(cur, 'CTL.L_QTY') == '1'
+    run(cur, "fstub.props('CTL.CUST_TEXT#9') := 'LOV_CUST'; ui.dblclick('CTL.CUST_TEXT');")
+    assert prop(cur, 'DO_KEY') == 'LIST_VALUES'
+    run(cur, "ui.dblclick('CTL.NEWDOC');")                                   # no list: nothing
+    assert prop(cur, 'DO_KEY') is None
+    assert 'WHEN-MOUSE-DOUBLECLICK' in [t.get('Name') for t in xml_of('MM_INVOICES').findall('f:FormModule/f:Trigger', NS)]

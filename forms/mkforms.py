@@ -184,7 +184,7 @@ FORMS['MM_RESERVATIONS'] = dict(
          ('R_PHONE', 'text', 216, 260, 110, 'Τηλέφωνο', {'len': 20}),
          ('R_DATE', 'date', 332, 260, 90, 'Παραλαβή', {}),
          ('NEWRES', 'button', 428, 258, 140, 'Νέα κράτηση', {}),
-         ('ITEM_TEXT', 'text', 600, 330, 260, 'Είδος (F9)', {'len': 200, 'lov': 'LOV_ITEMR'}),
+         ('ITEM_TEXT', 'text', 600, 330, 260, 'Είδος (λίστα)', {'len': 200, 'lov': 'LOV_ITEMR'}),
          ('ITEM_ID', 'hidden', 0, 0, 0, '', {'num': True}),
          ('QTY', 'text', 866, 330, 60, 'Ποσότητα', {'num': True, 'init': '1'}),
          ('RESERVE', 'button', 932, 328, 120, 'Βάλε / άλλαξε', {}),
@@ -231,9 +231,9 @@ FORMS['MM_KITS'] = dict(
                    C('COMP_TEXT', 'Είδος', 300, len=200, db=False, display=True),
                    C('QTY', 'Ποσότητα', 80, num=True),
                    C('COMP_STOCK', 'Απόθεμα', 80, num=True, db=False, display=True)])],
-    ctl=[('NEWKIT_TEXT', 'text', 10, 250, 300, 'Νέο καλάθι από είδος (F9)', {'len': 200, 'lov': 'LOV_NEWKIT'}),
+    ctl=[('NEWKIT_TEXT', 'text', 10, 250, 300, 'Νέο καλάθι από είδος (λίστα)', {'len': 200, 'lov': 'LOV_NEWKIT'}),
          ('NEWKIT_ID', 'hidden', 0, 0, 0, '', {'num': True}),
-         ('COMP_TEXT', 'text', 520, 320, 260, 'Είδος του καλαθιού (F9)', {'len': 200, 'lov': 'LOV_COMP'}),
+         ('COMP_TEXT', 'text', 520, 320, 260, 'Είδος του καλαθιού (λίστα)', {'len': 200, 'lov': 'LOV_COMP'}),
          ('COMP_ID', 'hidden', 0, 0, 0, '', {'num': True}),
          ('COMP_QTY', 'text', 786, 320, 60, 'Ποσότητα', {'num': True, 'init': '1'}),
          ('ADDCOMP', 'button', 852, 318, 120, 'Βάλε / άλλαξε', {}),
@@ -270,7 +270,7 @@ FORMS['MM_PROMOS'] = dict(
                    C('TEXT', 'Είδος ή κατηγορία', 320, len=200, db=False, display=True),
                    C('QTY', 'Ποσότητα', 80, num=True)])],
     ctl=[('P_NAME', 'text', 10, 260, 220, 'Όνομα', {'len': 100}),
-         ('P_KIND', 'text', 236, 260, 70, 'Είδος (F9)', {'len': 6, 'upper': True, 'lov': 'LOV_PKIND'}),
+         ('P_KIND', 'text', 236, 260, 70, 'Είδος (λίστα)', {'len': 6, 'upper': True, 'lov': 'LOV_PKIND'}),
          ('P_FROM', 'date', 312, 260, 90, 'Από', {}),
          ('P_TO', 'date', 408, 260, 90, 'Έως', {}),
          ('P_PCT', 'text', 504, 260, 50, '%', {'num': True}),
@@ -279,9 +279,9 @@ FORMS['MM_PROMOS'] = dict(
          ('P_PRICE', 'text', 652, 260, 80, 'Τιμή πακέτου', {'num': True}),
          ('NEWPROMO', 'button', 738, 258, 140, 'Νέα προσφορά', {}),
          ('TOGGLE', 'button', 884, 258, 160, 'Ενεργή / ανενεργή', {}),
-         ('PI_ITEM_TEXT', 'text', 520, 400, 260, 'Είδος (F9)', {'len': 200, 'lov': 'LOV_PITEM'}),
+         ('PI_ITEM_TEXT', 'text', 520, 400, 260, 'Είδος (λίστα)', {'len': 200, 'lov': 'LOV_PITEM'}),
          ('PI_ITEM_ID', 'hidden', 0, 0, 0, '', {'num': True}),
-         ('PI_CAT_TEXT', 'text', 520, 446, 260, 'ή κατηγορία (F9)', {'len': 100, 'lov': 'LOV_PCAT'}),
+         ('PI_CAT_TEXT', 'text', 520, 446, 260, 'ή κατηγορία (λίστα)', {'len': 100, 'lov': 'LOV_PCAT'}),
          ('PI_CAT_ID', 'hidden', 0, 0, 0, '', {'num': True}),
          ('PI_QTY', 'text', 786, 400, 60, 'Ποσότητα', {'num': True, 'init': '1'}),
          ('ADDPI', 'button', 852, 398, 120, 'Βάλε / βγάλε', {})],
@@ -319,13 +319,13 @@ FORMS['MM_VARIANTS'] = dict(
                    C('PRICE', 'Τιμή', 70, num=True, mask='99G990D00'),
                    C('STOCK', 'Απόθεμα', 70, num=True, db=False, display=True),
                    C('AVAIL', 'Διαθέσιμα', 70, num=True, db=False, display=True)])],
-    ctl=[('NEWMODEL_TEXT', 'text', 10, 250, 300, 'Νέο μοντέλο από είδος (F9)', {'len': 200, 'lov': 'LOV_NEWMODEL'}),
+    ctl=[('NEWMODEL_TEXT', 'text', 10, 250, 300, 'Νέο μοντέλο από είδος (λίστα)', {'len': 200, 'lov': 'LOV_NEWMODEL'}),
          ('NEWMODEL_ID', 'hidden', 0, 0, 0, '', {'num': True}),
          ('M_PRICE', 'text', 400, 250, 70, 'Τιμή', {'num': True}),
          ('MPRICE', 'button', 476, 248, 160, 'Τιμή σε όλες', {}),
-         ('V_COLOR_TEXT', 'text', 660, 330, 120, 'Χρώμα (F9)', {'len': 40, 'lov': 'LOV_COLOR'}),
+         ('V_COLOR_TEXT', 'text', 660, 330, 120, 'Χρώμα (λίστα)', {'len': 40, 'lov': 'LOV_COLOR'}),
          ('V_COLOR_ID', 'hidden', 0, 0, 0, '', {'num': True}),
-         ('V_SIZE_TEXT', 'text', 786, 330, 110, 'Μέγεθος (F9)', {'len': 40, 'lov': 'LOV_SIZE'}),
+         ('V_SIZE_TEXT', 'text', 786, 330, 110, 'Μέγεθος (λίστα)', {'len': 40, 'lov': 'LOV_SIZE'}),
          ('V_SIZE_ID', 'hidden', 0, 0, 0, '', {'num': True}),
          ('V_BARCODE', 'text', 660, 376, 140, 'Barcode', {'len': 14}),
          ('NEWVAR', 'button', 806, 374, 160, 'Νέα παραλλαγή', {})],
@@ -374,10 +374,10 @@ FORMS['MM_INVOICES'] = dict(
                    C('NET', 'Καθαρό', 80, num=True, mask='99G990D00'),
                    C('VAT', 'ΦΠΑ', 70, num=True, mask='99G990D00'),
                    C('TOTAL', 'Σύνολο', 80, num=True, mask='99G990D00')])],
-    ctl=[('D_TYPE', 'text', 10, 260, 60, 'Είδος (F9)', {'len': 3, 'upper': True, 'init': 'TPY', 'lov': 'LOV_DTYPE'}),
-         ('CUST_TEXT', 'text', 76, 260, 200, 'Πελάτης (F9)', {'len': 100, 'lov': 'LOV_CUST'}),
+    ctl=[('D_TYPE', 'text', 10, 260, 60, 'Είδος (λίστα)', {'len': 3, 'upper': True, 'init': 'TPY', 'lov': 'LOV_DTYPE'}),
+         ('CUST_TEXT', 'text', 76, 260, 200, 'Πελάτης (λίστα)', {'len': 100, 'lov': 'LOV_CUST'}),
          ('CUST_ID', 'hidden', 0, 0, 0, '', {'num': True}),
-         ('SUPP_TEXT', 'text', 282, 260, 200, 'ή προμηθευτής (F9)', {'len': 100, 'lov': 'LOV_SUPP'}),
+         ('SUPP_TEXT', 'text', 282, 260, 200, 'ή προμηθευτής (λίστα)', {'len': 100, 'lov': 'LOV_SUPP'}),
          ('SUPP_ID', 'hidden', 0, 0, 0, '', {'num': True}),
          ('D_PAY', 'text', 488, 260, 70, 'Πληρωμή', {'len': 6, 'upper': True, 'init': 'CREDIT', 'lov': 'LOV_PAY'}),
          ('D_DATE', 'date', 564, 260, 90, 'Ημερομηνία', {}),
@@ -386,10 +386,10 @@ FORMS['MM_INVOICES'] = dict(
          ('CANCELDOC', 'button', 830, 112, 160, 'Ακύρωση', {}),
          ('CREDIT', 'button', 830, 144, 160, 'Πιστωτικό', {}),
          ('DELDOC', 'button', 830, 176, 160, 'Σβήσε πρόχειρο', {}),
-         ('L_ITEM_TEXT', 'text', 910, 330, 220, 'Είδος (F9)', {'len': 200, 'lov': 'LOV_ITEMI'}),
+         ('L_ITEM_TEXT', 'text', 910, 330, 220, 'Είδος (λίστα)', {'len': 200, 'lov': 'LOV_ITEMI'}),
          ('L_ITEM_ID', 'hidden', 0, 0, 0, '', {'num': True}),
          ('L_QTY', 'text', 910, 376, 60, 'Ποσότητα', {'num': True, 'init': '1'}),
-         ('L_PRICE', 'text', 976, 376, 80, 'Τιμή (κενή: του είδους)', {'num': True}),
+         ('L_PRICE', 'text', 976, 376, 80, 'Τιμή', {'num': True}),
          ('L_DISC', 'text', 1062, 376, 50, 'Έκπτ. %', {'num': True}),
          ('ADDLINE', 'button', 910, 410, 220, 'Βάλε γραμμή', {}),
          ('DELLINE', 'button', 910, 444, 220, 'Σβήσε τη γραμμή', {})],
@@ -437,7 +437,8 @@ MENU_BAR = [
                          ('ENTERQ', 'Αναζήτηση (F7)', "do_key('ENTER_QUERY');"),
                          ('EXECQ', 'Εκτέλεση αναζήτησης (F8)', "do_key('EXECUTE_QUERY');"),
                          ('NEWREC', 'Νέα εγγραφή', "do_key('CREATE_RECORD');"),
-                         ('DELREC', 'Διαγραφή εγγραφής', "do_key('DELETE_RECORD');")]),
+                         ('DELREC', 'Διαγραφή εγγραφής', "do_key('DELETE_RECORD');"),
+                         ('LOV', 'Λίστα τιμών (Ctrl+L)', "do_key('LIST_VALUES');")]),
     ('STOCK', 'Αποθήκη', [('ITEMS', 'Είδη', "new_form('MM_ITEMS');"),
                           ('VARIANTS', 'Ρούχα και παπούτσια', "new_form('MM_VARIANTS');"),
                           ('KITS', 'Καλάθια και σετ', "new_form('MM_KITS');"),
@@ -486,7 +487,7 @@ def menu_xml():
 # the toolbar of all the forms: a horizontal toolbar canvas TBC with the buttons of the block TB; they
 # do not take the cursor (MouseNavigate false), so they act on the block where it is (ui.tool)
 TOOLBAR = [('T_SAVE', 'Αποθήκευση', 100), ('T_ENTERQ', 'Αναζήτηση', 90), ('T_EXECQ', 'Εκτέλεση', 80),
-           ('T_NEW', 'Νέα', 60), ('T_DEL', 'Διαγραφή', 80), ('T_PREV', '<', 34), ('T_NEXT', '>', 34),
+           ('T_NEW', 'Νέα', 60), ('T_DEL', 'Διαγραφή', 80), ('T_LOV', 'Λίστα', 60), ('T_PREV', '<', 34), ('T_NEXT', '>', 34),
            ('T_MAIN', 'Μενού', 70), ('T_EXIT', 'Έξοδος', 70)]
 TB_CANVAS, TB_H = 'TBC', 34
 
@@ -679,6 +680,9 @@ def build(name, f):
     for c in f.get('ctl', []):
         if c[1] == 'date':
             texts.append("COPY(to_char(sysdate, 'DD/MM/YYYY'), 'CTL.%s');" % c[0])
+        elif 'init' in c[6]:
+            # (the initial value of an item of CTL did not show on the web: put by ui.init too)
+            texts.append("COPY('%s', 'CTL.%s');" % (c[6]['init'], c[0]))
     for c in f.get('ctl', []):
         if c[1] != 'hidden':
             width = max(width, c[2] + c[4] + 10)
@@ -729,6 +733,7 @@ def build(name, f):
             trigger('WHEN-NEW-FORM-INSTANCE', 'ui.init;', '    '),
             trigger('ON-ERROR', 'ui.on_error(ERROR_CODE, ERROR_TYPE, ERROR_TEXT, DBMS_ERROR_TEXT);', '    '),
             trigger('WHEN-WINDOW-CLOSED', 'exit_form;', '    '),
+            trigger('WHEN-MOUSE-DOUBLECLICK', 'ui.dblclick(:SYSTEM.TRIGGER_ITEM);', '    '),
             '    <Window Name="%s" Title=%s XPosition="0" YPosition="0" Width="%d" Height="%d" '
             'HorizontalToolbarCanvasName="%s"/>'
             % (WINDOW, quoteattr(greeklish(f['title'])), width, height + TB_H, TB_CANVAS),

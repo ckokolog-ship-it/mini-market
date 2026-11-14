@@ -13,6 +13,7 @@ PACKAGE ui IS
   PROCEDURE init;
   PROCEDURE press(p_item VARCHAR2);
   PROCEDURE tool(p_item VARCHAR2);
+  PROCEDURE dblclick(p_item VARCHAR2);
   PROCEDURE validate(p_item VARCHAR2);
   PROCEDURE post_query(p_block VARCHAR2);
   PROCEDURE master(p_block VARCHAR2);
@@ -320,6 +321,8 @@ PACKAGE BODY ui IS
       do_key('CREATE_RECORD');
     ELSIF p_item = 'TB.T_DEL' THEN
       do_key('DELETE_RECORD');
+    ELSIF p_item = 'TB.T_LOV' THEN
+      do_key('LIST_VALUES');           -- the list of the item of the cursor
     ELSIF p_item = 'TB.T_PREV' THEN
       do_key('PREVIOUS_RECORD');
     ELSIF p_item = 'TB.T_NEXT' THEN
@@ -328,6 +331,14 @@ PACKAGE BODY ui IS
       new_form('MM_MAIN');
     ELSIF p_item = 'TB.T_EXIT' THEN
       do_key('EXIT_FORM');
+    END IF;
+  END;
+
+  -- a double click on an item with a list: the list (F9 is not the key of the list on the web)
+  PROCEDURE dblclick(p_item VARCHAR2) IS
+  BEGIN
+    IF p_item IS NOT NULL AND get_item_property(p_item, LOV_NAME) IS NOT NULL THEN
+      do_key('LIST_VALUES');
     END IF;
   END;
 
