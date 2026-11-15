@@ -1,0 +1,69 @@
+/* the pages of the mini market: light and dark, a phone and a desk */
+:root {
+  --bg: #f5f6f8; --panel: #ffffff; --ink: #1d2330; --muted: #667085; --line: #d9dee7;
+  --accent: #1f6feb; --accent-ink: #ffffff; --bad: #c62828; --good: #2e7d32; --row: #f0f3f8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --panel: #1b2029; --ink: #e6e9ef; --muted: #98a2b3; --line: #2d3442;
+    --accent: #4c8dff; --accent-ink: #0b0d12; --bad: #ff6b6b; --good: #63d471; --row: #222836;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }   /* (else display:flex of a form wins over hidden) */
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, "Segoe UI", Roboto, Arial, sans-serif; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px;
+         background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
+.brand { font-weight: 700; color: var(--ink); text-decoration: none; }
+nav { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; }
+nav a { padding: 6px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; }
+nav a.on, nav a:hover { background: var(--row); }
+#who { color: var(--muted); font-size: 13px; }
+main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 20px; margin: 4px 0 12px; }
+h2 { font-size: 16px; margin: 18px 0 8px; }
+.muted { color: var(--muted); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+form.row, .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
+input, select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+                border-radius: 6px; padding: 7px 9px; min-width: 0; }
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+         border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.danger { color: var(--bad); }
+button:disabled { opacity: .5; cursor: default; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.wrap { white-space: normal; }
+tr.carry td { font-weight: 600; background: var(--row); }
+tr.total td { font-weight: 700; border-top: 2px solid var(--line); }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--row); }
+.neg { color: var(--bad); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+.big { font-size: 22px; font-weight: 700; }
+.login { max-width: 340px; margin: 10vh auto; }
+.login input, .login button { width: 100%; }
+.login form { display: grid; gap: 10px; }
+#toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--ink); color: var(--bg);
+         padding: 9px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+#toast.show { opacity: .95; }
+#toast.bad { background: var(--bad); color: #fff; }
+.scan input[name=code] { font-size: 20px; width: 14em; }
+@media (max-width: 640px) {
+  main { padding: 10px; }
+  header { padding: 8px 10px; }
+  /* a phone: the name, who and logout on top; the menu its own line under them, scrolled sideways */
+  #who { flex: 1; text-align: right; }
+  nav { order: 3; flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; }
+  nav a { white-space: nowrap; }
+  .hide-phone { display: none; }
+  .scan input[name=code] { width: 100%; }
+}

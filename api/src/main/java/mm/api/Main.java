@@ -28,13 +28,14 @@ public final class Main {
         Db db = Db.fromEnvironment();
         HttpServer server = HttpServer.create(new InetSocketAddress(bind, port), 64);
         new Api(db).register(server);
+        Web.register(server);
         server.setExecutor(Executors.newFixedThreadPool(8));
         server.start();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             server.stop(1);
             db.close();
         }));
-        System.out.println("== mm-api on http://" + bind + ":" + port + "/api/health");
+        System.out.println("== mm-api on http://" + bind + ":" + port + "/  (the pages; the REST: /api/)");
     }
 
     static String env(String name, String fallback) {
