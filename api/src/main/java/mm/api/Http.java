@@ -83,6 +83,50 @@ final class Http {
         }
     }
 
+    /** the JSON object of a POST (at most 64 KB) */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> body(HttpExchange ex) throws IOException {
+        byte[] b = ex.getRequestBody().readNBytes(64 * 1024 + 1);
+        if (b.length > 64 * 1024) {
+            throw new Fail(413, "too_large", "at most 64 KB");
+        }
+        if (b.length == 0) {
+            return new HashMap<>();
+        }
+        try {
+            Object o = GSON.fromJson(new String(b, StandardCharsets.UTF_8), Object.class);
+            if (o instanceof Map<?, ?> m) {
+                return (Map<String, Object>) m;
+            }
+        } catch (com.google.gson.JsonParseException e) {
+            // below
+        }
+        throw new Fail(400, "bad_json", "a JSON object");
+    }
+
+    static String text(Map<String, Object> body, String name, boolean required) {
+        Object v = body.get(name);
+        if (v == null || String.valueOf(v).isBlank()) {
+            if (required) {
+                throw new Fail(400, "missing", name);
+            }
+            return null;
+        }
+        return String.valueOf(v);
+    }
+
+    static java.math.BigDecimal decimal(Map<String, Object> body, String name, java.math.BigDecimal fallback) {
+        Object v = body.get(name);
+        if (v == null) {
+            return fallback;
+        }
+        try {
+            return new java.math.BigDecimal(String.valueOf(v));
+        } catch (NumberFormatException e) {
+            throw new Fail(400, "bad_number", name + ": a number");
+        }
+    }
+
     static void send(HttpExchange ex, int status, Object body) throws IOException {
         byte[] b = GSON.toJson(body).getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
@@ -94,11 +138,19 @@ final class Http {
         }
     }
 
-    /** an error of the database: MM-1xx of MM_CORE / MM_LEDGER as 400 with its words; else 500 */
+    /**
+     * an error of the database: MM-1xx of MM_CORE / MM_LEDGER / MM_AUTH as 400 with its words (the login:
+     * MM-177 wrong name or password and MM-179 no session as 401, MM-178 locked as 423); else 500
+     */
     static Fail fromSql(SQLException e) {
         Matcher m = MM_ERROR.matcher(String.valueOf(e.getMessage()));
         if (m.find()) {
-            return new Fail(400, m.group(1), m.group(2).trim());
+            int status = switch (m.group(1)) {
+                case "MM-177", "MM-179" -> 401;
+                case "MM-178" -> 423;
+                default -> 400;
+            };
+            return new Fail(status, m.group(1), m.group(2).trim());
         }
         System.err.println("== mm-api: " + e);
         return new Fail(500, "db_error", "database error");

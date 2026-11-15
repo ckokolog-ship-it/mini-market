@@ -10,7 +10,7 @@ import java.util.concurrent.Executors;
  * a file or in an argument):
  *
  * <pre>
- *   MM_API_BIND      the address it listens on (127.0.0.1: only this computer, until the login)
+ *   MM_API_BIND      the address it listens on (127.0.0.1: only this computer; 0.0.0.0: the network)
  *   MM_API_PORT      its port (8090)
  *   MM_DB_URL        the database (jdbc:oracle:thin:/@MM_DB: the alias of the wallet)
  *   MM_TNS_ADMIN     the folder of tnsnames.ora and sqlnet.ora (the domain of the Forms on Windows)
