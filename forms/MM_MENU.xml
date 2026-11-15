@@ -11,6 +11,8 @@
     </Menu>
     <Menu Name="FILE_MENU">
       <MenuItem Name="MAIN" Label="Archiko menoy" CommandType="PL/SQL" MenuItemCode="new_form('MM_MAIN');"/>
+      <MenuItem Name="USERS" Label="Christes" CommandType="PL/SQL" MenuItemCode="new_form('MM_USERS');"/>
+      <MenuItem Name="LOGOUT" Label="Aposyndesi" CommandType="PL/SQL" MenuItemCode="BEGIN mm_auth.logout(NAME_IN('GLOBAL.MM_TOKEN')); FORMS_DDL('COMMIT'); EXCEPTION WHEN OTHERS THEN NULL; END; COPY('', 'GLOBAL.MM_TOKEN'); NEW_FORM('MM_LOGIN');"/>
       <MenuItem Name="EXIT" Label="Exodos" CommandType="PL/SQL" MenuItemCode="do_key('EXIT_FORM');"/>
     </Menu>
     <Menu Name="REC_MENU">

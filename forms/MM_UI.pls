@@ -1,5 +1,5 @@
 -- MM_UI.pls -- the package UI of the forms of the mini market (MM_ITEMS, MM_CUSTOMERS,
--- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, MM_INVOICES, MM_PAYMENTS, MM_LEDGER, MM_REPORTS, MM_POS,
+-- MM_SUPPLIERS, MM_CARDS, MM_RESERVATIONS, MM_KITS, MM_PROMOS, MM_VARIANTS, MM_INVOICES, MM_PAYMENTS, MM_LEDGER, MM_REPORTS, MM_POS, MM_LOGIN, MM_USERS,
 -- the menu MM_MAIN):
 -- mkforms.py puts it in each form. The triggers only call it:
 --   WHEN-NEW-FORM-INSTANCE  ui.init
@@ -27,6 +27,9 @@ PACKAGE BODY ui IS
   c_where CONSTANT VARCHAR2(400) := ''; -- WHERE
   c_detail CONSTANT VARCHAR2(30) := ''; -- DETAIL
   c_detail2 CONSTANT VARCHAR2(30) := ''; -- DETAIL2
+  c_role CONSTANT VARCHAR2(10) := ''; -- ROLE
+  g_user VARCHAR2(30);              -- who logged in (MM_LOGIN: the token in GLOBAL.MM_TOKEN), and the role
+  g_role VARCHAR2(10);
   g_master NUMBER;                  -- the master whose detail is on the screen
   g_detail NUMBER;                  -- the record of the detail whose own detail is on the screen
   g_lwhat VARCHAR2(1);              -- the ledger on the screen (MM_LEDGER): I, C or S, its id, period
@@ -52,9 +55,63 @@ PACKAGE BODY ui IS
     RAISE form_trigger_failure;
   END;
 
+  -- the roles: CASHIER < MANAGER < ADMIN
+  FUNCTION rank(p_role VARCHAR2) RETURN NUMBER IS
+  BEGIN
+    IF p_role = 'ADMIN' THEN
+      RETURN 3;
+    ELSIF p_role = 'MANAGER' THEN
+      RETURN 2;
+    ELSIF p_role = 'CASHIER' THEN
+      RETURN 1;
+    END IF;
+    RETURN 0;
+  END;
+
+  FUNCTION can(p_role VARCHAR2) RETURN BOOLEAN IS
+  BEGIN
+    RETURN rank(g_role) >= rank(p_role);
+  END;
+
+  -- the login of this form: the token of MM_LOGIN still good (the user active, the same role), and a
+  -- role enough for the form; else to the login, or back to the first menu. The database knows who it
+  -- is (CLIENT_IDENTIFIER: the PINs)
+  FUNCTION session_ok RETURN BOOLEAN IS
+    u NUMBER;
+    t VARCHAR2(100);
+  BEGIN
+    IF c_role IS NULL THEN                -- MM_LOGIN itself
+      RETURN TRUE;
+    END IF;
+    default_value('', 'GLOBAL.MM_TOKEN');
+    t := name_in('GLOBAL.MM_TOKEN');
+    BEGIN
+      mm_auth.check_token(t, u, g_user, g_role);
+      forms_ddl('COMMIT');                -- (its last_seen)
+    EXCEPTION
+      WHEN OTHERS THEN
+        g_user := NULL;
+        g_role := NULL;
+        new_form('MM_LOGIN');
+        RETURN FALSE;
+    END;
+    dbms_session.set_identifier(g_user);
+    set_window_property('WIN', TITLE, get_window_property('WIN', TITLE) || '  [' || g_user || ']');
+    IF NOT can(c_role) THEN
+      message('Η φόρμα αυτή θέλει ρόλο ' || c_role || ': ο ' || g_user || ' είναι ' || g_role);
+      new_form('MM_MAIN');
+      RETURN FALSE;
+    END IF;
+    RETURN TRUE;
+  END;
+
   PROCEDURE init IS
   BEGIN
     NULL; -- TEXTS
+    IF NOT session_ok THEN
+      RETURN;
+    END IF;
+    NULL; -- ROLES
     IF c_block IS NOT NULL THEN          -- (the menu has no block of a table)
       go_block(c_block);
       set_block_property(c_block, DEFAULT_WHERE, c_where);
@@ -219,6 +276,82 @@ PACKAGE BODY ui IS
     IF p_item LIKE 'CTL.GO\_%' ESCAPE '\' THEN           -- the menu: the form of the button
       call_form(substr(p_item, 8));
       RETURN;
+    -- the login: the token to GLOBAL.MM_TOKEN, then the first menu; the password never stays on the screen
+    ELSIF p_item IN ('CTL.LOGIN', 'CTL.L_PW') THEN
+      DECLARE
+        t VARCHAR2(100);
+        r VARCHAR2(10);
+        e DATE;
+        pw VARCHAR2(200) := name_in('CTL.L_PW');
+      BEGIN
+        copy('', 'CTL.L_PW');
+        mm_auth.login(lower(name_in('CTL.L_USER')), pw, 'forms', t, r, e);
+        forms_ddl('COMMIT');
+        copy(t, 'GLOBAL.MM_TOKEN');
+        new_form('MM_MAIN');
+      END;
+    ELSIF p_item = 'CTL.LOGOUT' THEN
+      BEGIN
+        mm_auth.logout(name_in('GLOBAL.MM_TOKEN'));
+        forms_ddl('COMMIT');
+      EXCEPTION
+        WHEN OTHERS THEN NULL;            -- an old session: out all the same
+      END;
+      copy('', 'GLOBAL.MM_TOKEN');
+      new_form('MM_LOGIN');
+    -- the users (MM_USERS, ADMIN): a new one, its password, role, active, unlock, may see the PINs
+    ELSIF p_item = 'CTL.NEWUSER' THEN
+      IF nvl(name_in('CTL.U_PW'), '-') <> nvl(name_in('CTL.U_PW2'), '+') THEN
+        copy('', 'CTL.U_PW');
+        copy('', 'CTL.U_PW2');
+        fail('Οι δύο κωδικοί διαφέρουν');
+      END IF;
+      v := mm_auth.create_user(name_in('CTL.U_NAME'), name_in('CTL.U_FULL'), upper(name_in('CTL.U_ROLE')),
+                               name_in('CTL.U_PW'));
+      forms_ddl('COMMIT');
+      copy('', 'CTL.U_PW');
+      copy('', 'CTL.U_PW2');
+      copy('', 'CTL.U_NAME');
+      copy('', 'CTL.U_FULL');
+      again(c_block);
+      message('Ο χρήστης φτιάχτηκε');
+    ELSIF p_item = 'CTL.SETPW' THEN
+      IF nvl(name_in('CTL.U_PW'), '-') <> nvl(name_in('CTL.U_PW2'), '+') THEN
+        copy('', 'CTL.U_PW');
+        copy('', 'CTL.U_PW2');
+        fail('Οι δύο κωδικοί διαφέρουν');
+      END IF;
+      mm_auth.set_password(name_in('USR.USERNAME'), name_in('CTL.U_PW'));
+      forms_ddl('COMMIT');
+      copy('', 'CTL.U_PW');
+      copy('', 'CTL.U_PW2');
+      message('Νέος κωδικός για τον ' || name_in('USR.USERNAME') || ': οι συνδέσεις του έκλεισαν');
+    ELSIF p_item = 'CTL.SETROLE' THEN
+      mm_auth.set_role(name_in('USR.USERNAME'), upper(name_in('CTL.U_ROLE')));
+      forms_ddl('COMMIT');
+      again(c_block);
+    ELSIF p_item = 'CTL.TOGGLEACT' THEN
+      IF name_in('USR.ACTIVE') = 'Y' THEN
+        mm_auth.set_active(name_in('USR.USERNAME'), 'N');
+      ELSE
+        mm_auth.set_active(name_in('USR.USERNAME'), 'Y');
+      END IF;
+      forms_ddl('COMMIT');
+      again(c_block);
+    ELSIF p_item = 'CTL.UNLOCK' THEN
+      mm_auth.unlock(name_in('USR.USERNAME'));
+      forms_ddl('COMMIT');
+      again(c_block);
+    ELSIF p_item = 'CTL.TOGGLEPIN' THEN
+      s_ := upper(name_in('USR.USERNAME'));
+      SELECT COUNT(*) INTO n FROM mm_pin_user WHERE username = s_;
+      IF n > 0 THEN
+        DELETE FROM mm_pin_user WHERE username = s_;
+      ELSE
+        INSERT INTO mm_pin_user (username) VALUES (s_);
+      END IF;
+      forms_ddl('COMMIT');
+      again(c_block);
     ELSIF p_item = 'CTL.EXIT' THEN
       exit_form;
       RETURN;
@@ -233,7 +366,7 @@ PACKAGE BODY ui IS
       again('SER');
       message('Η κάρτα φορτώθηκε');
     ELSIF p_item = 'CTL.PIN' THEN
-      pin := mm_core.reveal_pin(num('SER.ID'), name_in('CTL.USERNAME'));
+      pin := mm_core.reveal_pin(num('SER.ID'), g_user);         -- who logged in, not a name typed
       forms_ddl('COMMIT');                                     -- the log of who saw it
       copy(pin, 'SER.PIN_SHOW');
     ELSIF p_item = 'CTL.NEWRES' THEN
@@ -710,6 +843,14 @@ PACKAGE BODY ui IS
         SELECT name INTO n FROM mm_supplier WHERE id = id_;
       END IF;
       copy(n, 'DOC.PARTNER_TEXT');
+    ELSIF p_block = 'USR' THEN
+      n := upper(name_in('USR.USERNAME'));
+      SELECT COUNT(*) INTO id_ FROM mm_pin_user WHERE username = n;
+      IF id_ > 0 THEN
+        copy('Y', 'USR.PIN_OK');
+      ELSE
+        copy('N', 'USR.PIN_OK');
+      END IF;
     ELSIF p_block = 'PAY' THEN
       c_ := num('PAY.CUSTOMER_ID');
       id_ := num('PAY.SUPPLIER_ID');

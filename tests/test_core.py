@@ -96,8 +96,9 @@ TEST_DOCS = (f"select doc_id from mm_doc_line where item_id in ({TEST_ITEMS}) un
 
 
 def cleanup(c):
-    c.execute("delete from mm_auth_log where username like 'tst%'")
-    c.execute("delete from mm_user where username like 'tst%'")         # (their sessions with them)
+    # (tstf...: the users of test_forms.py, which removes them itself)
+    c.execute("delete from mm_auth_log where username like 'tst%' and username not like 'tstf%'")
+    c.execute("delete from mm_user where username like 'tst%' and username not like 'tstf%'")   # (their sessions too)
     c.execute("delete from mm_cash_move where payment_id in (select id from mm_payment where customer_id in "
               "(select id from mm_customer where name like 'Test %') or supplier_id in "
               "(select id from mm_supplier where name like 'Test %'))")
