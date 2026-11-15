@@ -63,23 +63,26 @@ create or replace package body mm_months as
   procedure doc_change(p_doc_type varchar2, p_status varchar2, p_customer_id number, p_supplier_id number,
                        p_date date, p_payment varchar2, p_total number, p_sign number) is
     side varchar2(1);
-    sg number;
-    out_ boolean;
+    ps number;
+    dr boolean;                      -- a debit of its partner (as MM_PARTNER_EVENT)
     paid boolean := p_payment in ('CASH', 'CARD');
+    deb number;
+    cre number;
   begin
     if p_status is null or p_status <> 'P' or nvl(p_total, 0) = 0 then
       return;
     end if;
-    select t.side, t.stock_sign into side, sg from mm_doc_type t where t.code = p_doc_type;
-    out_ := sg = -1;
+    select t.side, t.partner_sign into side, ps from mm_doc_type t where t.code = p_doc_type;
+    if ps = 0 then
+      return;                        -- a note: the stock only, not the balance
+    end if;
+    dr := ps = case side when 'S' then 1 else -1 end;
+    deb := p_sign * ((case when dr then p_total else 0 end) + (case when paid and not dr then p_total else 0 end));
+    cre := p_sign * ((case when not dr then p_total else 0 end) + (case when paid and dr then p_total else 0 end));
     if side = 'S' and p_customer_id is not null then
-      partner_add('C', p_customer_id, p_date,
-                  p_sign * ((case when out_ then p_total else 0 end) + (case when paid and not out_ then p_total else 0 end)),
-                  p_sign * ((case when not out_ then p_total else 0 end) + (case when paid and out_ then p_total else 0 end)));
+      partner_add('C', p_customer_id, p_date, deb, cre);
     elsif side = 'P' and p_supplier_id is not null then
-      partner_add('S', p_supplier_id, p_date,
-                  p_sign * ((case when out_ then p_total else 0 end) + (case when paid and not out_ then p_total else 0 end)),
-                  p_sign * ((case when not out_ then p_total else 0 end) + (case when paid and out_ then p_total else 0 end)));
+      partner_add('S', p_supplier_id, p_date, deb, cre);
     end if;
   end;
 

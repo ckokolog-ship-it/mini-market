@@ -230,7 +230,8 @@ update mm_item i set wholesale_price = round(i.price / (1 + (select v.rate from 
 where i.wholesale_price is null and i.code in ('POT01', 'POT02', 'POT03', 'POT04', 'POT05', 'POT06',
                                                'SNK01', 'SNK02', 'SNK03', 'SNK04');
 
--- two invoices: a purchase of beers from a supplier, a wholesale sale to a taverna (on credit)
+-- two invoices from their delivery notes: a purchase of beers from a supplier, a wholesale sale to a
+-- taverna (on credit)
 declare
   d number;
   l number;
@@ -242,17 +243,32 @@ declare
     return x;
   end;
 begin
-  select count(*) into n from mm_doc where doc_type in ('TPY', 'TAG');
+  select count(*) into n from mm_doc where doc_type in ('DPA', 'TAG', 'DAP', 'TPY');
   if n = 0 then
+    -- the beers and the waters came with a delivery note (the stock), then its invoice (the balance)
     select id into n from mm_supplier where afm = '999000079';
-    d := mm_core.new_doc('TAG', p_supplier_id => n, p_payment => 'CREDIT');
+    d := mm_core.new_doc('DPA', p_supplier_id => n, p_payment => 'CREDIT');
     l := mm_core.add_line(d, id_of('POT05'), 48, 0.80);
     l := mm_core.add_line(d, id_of('POT01'), 120, 0.18);
     n := mm_core.post_doc(d);
+    d := mm_core.invoice_from(d);
+    n := mm_core.post_doc(d);
+    -- to the taverna: two delivery notes, one invoice of both
     select id into n from mm_customer where afm = '999000020';
-    d := mm_core.new_doc('TPY', p_customer_id => n, p_payment => 'CREDIT');
+    d := mm_core.new_doc('DAP', p_customer_id => n, p_payment => 'CREDIT');
     l := mm_core.add_line(d, id_of('POT05'), 24);
-    l := mm_core.add_line(d, id_of('POT01'), 48);
+    n := mm_core.post_doc(d);
+    select id into n from mm_customer where afm = '999000020';
+    l := mm_core.new_doc('DAP', p_customer_id => n, p_payment => 'CREDIT');
+    n := mm_core.add_line(l, id_of('POT01'), 48);
+    n := mm_core.post_doc(l);
+    d := mm_core.invoice_from(d);
+    mm_core.add_note(d, l);
+    n := mm_core.post_doc(d);
+    -- and one more delivery note, of today: not invoiced yet (the list «Από δελτίο» of the invoices)
+    select id into n from mm_customer where afm = '999000020';
+    d := mm_core.new_doc('DAP', p_customer_id => n, p_payment => 'CREDIT');
+    l := mm_core.add_line(d, id_of('POT01'), 24);
     n := mm_core.post_doc(d);
   end if;
 end;

@@ -11,18 +11,33 @@ when matched then update set t.rate = s.rate, t.descr = s.descr
 when not matched then insert (code, rate, descr) values (s.code, s.rate, s.descr);
 
 -- side S sale, P purchase; stock_sign what a posted document does to the stock
+-- the kinds of documents and what each does: STOCK_SIGN to the stock, PARTNER_SIGN to the balance of the
+-- customer or the supplier, VAT_SIGN to the VAT; REF_TYPE: the delivery note an invoice is made from
+-- (one or more of them: MM_CORE.INVOICE_FROM, ADD_NOTE). A delivery note moves the stock only, an
+-- invoice the balance only (and the VAT); an invoice-delivery note both.
 merge into mm_doc_type t
 using (select * from (values
-         ('ALP', 'Απόδειξη λιανικής πώλησης', 'S', -1, 'Y', 'N'),
-         ('TPY', 'Τιμολόγιο πώλησης',         'S', -1, 'N', 'Y'),
-         ('PPY', 'Πιστωτικό πώλησης',         'S',  1, 'N', 'Y'),
-         ('TAG', 'Τιμολόγιο αγοράς',          'P',  1, 'N', 'Y'),
-         ('PAG', 'Πιστωτικό αγοράς',          'P', -1, 'N', 'Y')
-       ) v (code, name, side, stock_sign, prices_incl_vat, partner_needed)) s
+         --   code   name                                        side stock partner vat  incl partner ref
+         ('ALP', 'Απόδειξη λιανικής πώλησης',               'S', -1,  0,  1, 'Y', 'N', null),
+         ('DAP', 'Δελτίο αποστολής',                        'S', -1,  0,  0, 'N', 'Y', null),
+         ('DEP', 'Δελτίο επιστροφής από πελάτη',            'S',  1,  0,  0, 'N', 'Y', null),
+         ('TPY', 'Τιμολόγιο πώλησης',                       'S',  0,  1,  1, 'N', 'Y', 'DAP'),
+         ('PPY', 'Πιστωτικό τιμολόγιο πώλησης',             'S',  0, -1, -1, 'N', 'Y', 'DEP'),
+         ('TDA', 'Τιμολόγιο - δελτίο αποστολής',            'S', -1,  1,  1, 'N', 'Y', null),
+         ('DPA', 'Δελτίο παραλαβής',                        'P',  1,  0,  0, 'N', 'Y', null),
+         ('DEA', 'Δελτίο επιστροφής σε προμηθευτή',         'P', -1,  0,  0, 'N', 'Y', null),
+         ('TAG', 'Τιμολόγιο αγοράς',                        'P',  0,  1,  1, 'N', 'Y', 'DPA'),
+         ('PAG', 'Πιστωτικό τιμολόγιο αγοράς',              'P',  0, -1, -1, 'N', 'Y', 'DEA'),
+         ('TAD', 'Τιμολόγιο - δελτίο παραλαβής',     'P',  1,  1,  1, 'N', 'Y', null)
+       ) v (code, name, side, stock_sign, partner_sign, vat_sign, prices_incl_vat, partner_needed, ref_type)) s
 on (t.code = s.code)
 when matched then update set t.name = s.name, t.side = s.side, t.stock_sign = s.stock_sign,
-                             t.prices_incl_vat = s.prices_incl_vat, t.partner_needed = s.partner_needed
-when not matched then insert (code, name, side, stock_sign, prices_incl_vat, partner_needed)
-                      values (s.code, s.name, s.side, s.stock_sign, s.prices_incl_vat, s.partner_needed);
+                             t.partner_sign = s.partner_sign, t.vat_sign = s.vat_sign,
+                             t.prices_incl_vat = s.prices_incl_vat, t.partner_needed = s.partner_needed,
+                             t.ref_type = s.ref_type
+when not matched then insert (code, name, side, stock_sign, partner_sign, vat_sign, prices_incl_vat,
+                              partner_needed, ref_type)
+                      values (s.code, s.name, s.side, s.stock_sign, s.partner_sign, s.vat_sign,
+                              s.prices_incl_vat, s.partner_needed, s.ref_type);
 
 commit;

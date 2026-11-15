@@ -146,7 +146,7 @@ def test_promotions_on_the_retail_receipt_only(pr):
     still holds, on the net (prices without VAT)"""
     db, ids = pr
     promo(db, 'b 50%', 'PCT', items=[(ids['b'], 1)], p_pct=50)
-    d = receipt(db, ids, [('b', 2)], kind='TPY')                       # 2 x 2,00 net
+    d = receipt(db, ids, [('b', 2)], kind='TDA')                       # 2 x 2,00 net
     (q, pd, dd, n, v, t, nm), = lines(db, d)
     assert (pd, n, v, t, nm) == (0, 4.00, 0.52, 4.52, None)
     db.proc('set_doc_discount', d, 50, 0, 'Χονδρική')

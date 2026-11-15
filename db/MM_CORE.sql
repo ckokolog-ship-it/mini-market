@@ -42,7 +42,13 @@ create or replace package mm_core as
   procedure set_payment(p_doc_id number, p_payment varchar2);  -- a draft: CASH, CARD (CREDIT not retail)
   function post_doc(p_doc_id number) return number;     -- returns the number of the document
   procedure cancel_doc(p_doc_id number);                 -- a posted one, while its Z is open
-  function credit_note(p_doc_id number) return number;  -- a draft PPY/PAG with the lines of an invoice
+  -- the return of an invoice: a draft delivery note of return (DEP of a sale, DEA of a purchase) with its
+  -- lines; posted, its credit note is made from it (invoice_from). Not an invoice with cards (MM-129)
+  function credit_note(p_doc_id number) return number;
+  -- an invoice (or a credit note) from posted delivery notes of one customer or supplier: its kind is
+  -- the one whose REF_TYPE is the kind of the note; their lines into it; a note into one invoice only
+  function invoice_from(p_note_id number, p_doc_date date default trunc(sysdate)) return number;  -- a new draft
+  procedure add_note(p_invoice_id number, p_note_id number);            -- one more note into a draft
 
   -- the stock by hand
   procedure adjust_stock(p_item_id number, p_qty number, p_note varchar2);
@@ -309,6 +315,7 @@ create or replace package body mm_core as
   begin
     select * into d from mm_doc where id = p_doc_id;
     t := doc_type_row(d.doc_type);
+    -- (the sales whose lines are keyed in: a receipt, a note, a TDA; an invoice of notes keeps their lines)
     if not (d.status = 'D' and t.side = 'S' and t.stock_sign = -1) then
       return;
     end if;
@@ -510,7 +517,7 @@ create or replace package body mm_core as
       fail(7, 'Το είδος ' || i.code || ' δεν είναι ενεργό');
     end if;
     if i.serial_tracked = 'Y' and not (t.side = 'P' and t.stock_sign = 1) then
-      fail(27, 'Το ' || i.code || ' έχει serials: πώληση με sell_serial, φόρτωση με τιμολόγιο αγοράς');
+      fail(27, 'Το ' || i.code || ' έχει serials: πώληση με sell_serial, φόρτωση με δελτίο παραλαβής');
     end if;
     not_model(p_item_id);
     check_max(p_doc_id, p_item_id, p_qty);
@@ -576,6 +583,7 @@ create or replace package body mm_core as
       release_line(l.id);
     end loop;
     update mm_reservation set doc_id = null where doc_id = p_doc_id;   -- its delivery again later
+    update mm_doc set invoice_id = null where invoice_id = p_doc_id;    -- its notes free again
     delete from mm_doc where id = p_doc_id;
   end;
 
@@ -627,12 +635,19 @@ create or replace package body mm_core as
         fail(12, 'Το ταμείο δεν έχει ανοιχτό Ζ');
       end if;
     end if;
+    -- an invoice or a credit note of notes: at least one (INVOICE_FROM, ADD_NOTE)
+    if t.ref_type is not null then
+      select count(*) into lines from mm_doc where invoice_id = p_doc_id;
+      if lines = 0 then
+        fail(83, 'Το ' || t.name || ' βγαίνει από δελτίο (' || t.ref_type || '): «Από δελτίο»');
+      end if;
+    end if;
     for x in (select distinct item_id from mm_doc_line where doc_id = p_doc_id) loop
       check_max(p_doc_id, x.item_id, 0);
     end loop;
-    -- a line of cards: as many serials as its quantity
+    -- a line of cards: as many serials as its quantity (a kind that moves the stock)
     for l in (select l.id, l.qty, i.code from mm_doc_line l join mm_item i on i.id = l.item_id
-              where l.doc_id = p_doc_id and i.serial_tracked = 'Y') loop
+              where l.doc_id = p_doc_id and i.serial_tracked = 'Y' and t.stock_sign <> 0) loop
       select count(*) into lines from mm_serial where in_line_id = l.id or out_line_id = l.id;
       if lines <> l.qty then
         fail(28, 'Το ' || l.code || ': ' || l.qty || ' τεμάχια, ' || lines || ' serials');
@@ -650,7 +665,9 @@ create or replace package body mm_core as
 
     for l in (select l.*, i.kit from mm_doc_line l join mm_item i on i.id = l.item_id
               where l.doc_id = p_doc_id) loop
-      if l.kit = 'Y' and t.stock_sign = -1 then
+      if t.stock_sign = 0 then
+        null;                                   -- an invoice of notes: the notes moved the stock
+      elsif l.kit = 'Y' and t.stock_sign = -1 then
         -- a kit out: the ready ones first, the rest from its components. The stock is reservable:
         -- this transaction reads it without its own changes, so what the lines before took of
         -- the same kit is taken off here (two lines of one basket: one ready, not two)
@@ -671,7 +688,7 @@ create or replace package body mm_core as
       else
         stock_move(l.item_id, 'DOC', t.stock_sign * l.qty, p_doc_id, l.id);
       end if;
-      if t.side = 'P' and t.stock_sign = 1 and l.qty > 0 then
+      if t.side = 'P' and (t.stock_sign = 1 or t.partner_sign = 1) and l.qty > 0 and l.net > 0 then
         update mm_item set cost = round(l.net / l.qty, 4) where id = l.item_id;   -- the last cost
       end if;
     end loop;
@@ -691,7 +708,7 @@ create or replace package body mm_core as
   procedure cancel_doc(p_doc_id number) is
     d mm_doc%rowtype;
     t mm_doc_type%rowtype;
-    zs varchar2(1);
+    zs varchar2(60);
     lines number;
   begin
     begin
@@ -709,6 +726,11 @@ create or replace package body mm_core as
       end if;
     end if;
     t := doc_type_row(d.doc_type);
+    if d.invoice_id is not null then
+      select doc_type || ' ' || doc_no into zs from mm_doc where id = d.invoice_id;
+      fail(85, 'Το δελτίο είναι στο ' || zs || ': ακύρωσε πρώτα εκείνο');
+    end if;
+    update mm_doc set invoice_id = null where invoice_id = p_doc_id;   -- its notes free again
     select count(*) into lines from mm_serial where in_doc_id = p_doc_id and status <> 'A';
     if lines > 0 then
       fail(30, 'Από τις κάρτες αυτής της αγοράς έχουν πουληθεί ή δεσμευτεί ' || lines);
@@ -731,6 +753,7 @@ create or replace package body mm_core as
 
   function credit_note(p_doc_id number) return number is
     d mm_doc%rowtype;
+    t mm_doc_type%rowtype;
     c varchar2(3);
     v number;
   begin
@@ -739,8 +762,10 @@ create or replace package body mm_core as
     exception
       when no_data_found then fail(3, 'Δεν υπάρχει παραστατικό ' || p_doc_id);
     end;
-    -- a retail receipt is cancelled (cancel_doc) while its Z is open
-    c := case d.doc_type when 'TPY' then 'PPY' when 'TAG' then 'PAG' end;
+    t := doc_type_row(d.doc_type);
+    -- a retail receipt is cancelled (cancel_doc) while its Z is open; an invoice gets its goods back with a
+    -- delivery note of return, then its credit note from that note
+    c := case when t.partner_sign = 1 and t.side = 'S' then 'DEP' when t.partner_sign = 1 and t.side = 'P' then 'DEA' end;
     if c is null or d.status <> 'P' then
       fail(15, 'Πιστωτικό γίνεται μόνο για καταχωρημένο τιμολόγιο');
     end if;
@@ -749,12 +774,62 @@ create or replace package body mm_core as
     if v > 0 then
       fail(29, 'Το παραστατικό έχει κάρτες με serials: ακύρωσέ το (όσο το Ζ είναι ανοιχτό)');
     end if;
-    v := new_doc(c, d.customer_id, d.supplier_id, d.register_id, d.payment);
+    v := new_doc(c, d.customer_id, d.supplier_id, null, 'CREDIT');
     update mm_doc set ref_doc_id = p_doc_id where id = v;
     insert into mm_doc_line (doc_id, line_no, item_id, qty, price, discount, vat_code, vat_rate, net, vat, total)
     select v, line_no, item_id, qty, price, discount, vat_code, vat_rate, net, vat, total
     from mm_doc_line where doc_id = p_doc_id;
     recalc(v);
+    return v;
+  end;
+
+  procedure add_note(p_invoice_id number, p_note_id number) is
+    inv mm_doc%rowtype := draft(p_invoice_id);
+    ti mm_doc_type%rowtype := doc_type_row(inv.doc_type);
+    n mm_doc%rowtype;
+    no_ number;
+  begin
+    begin
+      select * into n from mm_doc where id = p_note_id for update;
+    exception
+      when no_data_found then fail(3, 'Δεν υπάρχει παραστατικό ' || p_note_id);
+    end;
+    if ti.ref_type is null or n.doc_type <> ti.ref_type then
+      fail(84, 'Το ' || ti.name || ' βγαίνει από δελτίο ' || nvl(ti.ref_type, '-') || ', όχι από ' || n.doc_type);
+    end if;
+    if n.status <> 'P' then
+      fail(84, 'Το δελτίο ' || n.doc_type || ' πρέπει να είναι καταχωρημένο');
+    end if;
+    if n.invoice_id is not null then
+      fail(84, 'Το δελτίο ' || n.doc_type || ' ' || n.doc_no || ' είναι ήδη σε τιμολόγιο');
+    end if;
+    if nvl(n.customer_id, -1) <> nvl(inv.customer_id, -1) or nvl(n.supplier_id, -1) <> nvl(inv.supplier_id, -1) then
+      fail(84, 'Το δελτίο είναι άλλου πελάτη ή προμηθευτή');
+    end if;
+    select nvl(max(line_no), 0) into no_ from mm_doc_line where doc_id = p_invoice_id;
+    insert into mm_doc_line (doc_id, line_no, item_id, qty, price, discount, vat_code, vat_rate, net, vat, total)
+    select p_invoice_id, no_ + line_no, item_id, qty, price, discount, vat_code, vat_rate, net, vat, total
+    from mm_doc_line where doc_id = p_note_id;
+    update mm_doc set invoice_id = p_invoice_id where id = p_note_id;
+    recalc(p_invoice_id);
+  end;
+
+  function invoice_from(p_note_id number, p_doc_date date default trunc(sysdate)) return number is
+    n mm_doc%rowtype;
+    k varchar2(3);
+    v number;
+  begin
+    begin
+      select * into n from mm_doc where id = p_note_id;
+    exception
+      when no_data_found then fail(3, 'Δεν υπάρχει παραστατικό ' || p_note_id);
+    end;
+    select min(code) into k from mm_doc_type where ref_type = n.doc_type;
+    if k is null then
+      fail(84, 'Από το ' || n.doc_type || ' δεν βγαίνει τιμολόγιο');
+    end if;
+    v := new_doc(k, n.customer_id, n.supplier_id, null, 'CREDIT', p_doc_date);
+    add_note(v, p_note_id);
     return v;
   end;
 

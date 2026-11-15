@@ -114,6 +114,7 @@ def cleanup(c):
     c.execute("delete from mm_cash_move where reservation_id in (select id from mm_reservation where name like 'Test %')")
     c.execute("delete from mm_reservation where name like 'Test %'")
     c.execute(f'update mm_doc set ref_doc_id = null where ref_doc_id in ({TEST_DOCS})')
+    c.execute(f'update mm_doc set invoice_id = null where invoice_id in ({TEST_DOCS})')
     c.execute(f'delete from mm_stock_move where item_id in ({TEST_ITEMS}) or doc_id in ({TEST_DOCS})')
     c.execute(f'delete from mm_count_line where item_id in ({TEST_ITEMS})')
     c.execute("delete from mm_count where name like 'TST %'")
@@ -242,9 +243,9 @@ def test_rules_of_posting(env):
     d = db.fn('new_doc', int, 'ALP')
     db.fn('add_line', int, d, ids['b'], 1)
     db.fails(110, 'post_doc', d, rtype=int)                 # retail without a register
-    d = db.fn('new_doc', int, 'TPY')
+    d = db.fn('new_doc', int, 'TDA')
     db.fails(109, 'post_doc', d, rtype=int)                 # no lines
-    d = db.fn('new_doc', int, 'TPY')
+    d = db.fn('new_doc', int, 'TDA')
     db.fn('add_line', int, d, ids['b'], 1)
     db.fails(104, 'post_doc', d, rtype=int)                 # an invoice without a customer
     db.fails(104, 'new_doc', 'TAG', p_customer_id=ids['customer'], rtype=int)
@@ -255,7 +256,7 @@ def test_rules_of_posting(env):
 def test_purchase_raises_stock_and_cost(env):
     db, ids = env
     s = db.stock(ids['a'])
-    d = db.fn('new_doc', int, 'TAG', p_supplier_id=ids['supplier'], p_payment='CREDIT')
+    d = db.fn('new_doc', int, 'TAD', p_supplier_id=ids['supplier'], p_payment='CREDIT')
     db.fn('add_line', int, d, ids['a'], 10, 5.5)
     db.fn('post_doc', int, d)
     db.commit()
@@ -324,22 +325,130 @@ def test_z(env):
     db.fails(112, 'cash_in_out', ids['reg'], 5, 'x')
 
 
-def test_credit_note(env):
+def balance(db, kind, pid):
+    """the balance of a customer (C, + he owes) or of a supplier (S, + we owe), as its ledger"""
+    b = float(db.one('select nvl(sum(debit - credit), 0) from mm_partner_event where kind = :k and partner_id = :p',
+                     k=kind, p=pid)[0])
+    return round(b if kind == 'C' else -b, 2)
+
+
+def note(db, ids, kind, lines, partner='customer'):
+    d = db.fn('new_doc', int, kind, p_payment='CREDIT', **{'p_%s_id' % partner: ids[partner]})
+    for it, q in lines:
+        db.fn('add_line', int, d, ids[it], q)
+    db.fn('post_doc', int, d)
+    return d
+
+
+def total(db, d):
+    return float(db.one('select total from mm_doc where id = :d', d=d)[0])
+
+
+def test_notes_and_their_invoice(env):
+    """a delivery note moves the stock, not the balance; its invoice the balance, not the stock; one
+    invoice of many notes"""
     db, ids = env
-    s = db.stock(ids['b'])
-    d = db.fn('new_doc', int, 'TPY', p_customer_id=ids['customer'], p_payment='CREDIT')
-    db.fn('add_line', int, d, ids['b'], 5)
+    c = ids['customer']
+    s, b0 = db.stock(ids['b']), balance(db, 'C', c)
+    n1 = note(db, ids, 'DAP', [('b', 5)])
+    n2 = note(db, ids, 'DAP', [('b', 2), ('a', 1)])
+    db.commit()
+    assert db.stock(ids['b']) == s - 7 and balance(db, 'C', c) == b0
+    j = db.fn('new_doc', int, 'TPY', p_customer_id=c, p_payment='CREDIT')
+    db.fn('add_line', int, j, ids['b'], 1)
+    db.fails(183, 'post_doc', j, rtype=int)                           # an invoice of sale: from its notes
+    i = db.fn('invoice_from', int, n1)
+    db.proc('add_note', i, n2)
+    t, st = db.one('select doc_type, status from mm_doc where id = :i', i=i)
+    assert (t, st) == ('TPY', 'D')
+    assert db.one('select count(*) from mm_doc_line where doc_id = :i', i=i)[0] == 3
+    assert total(db, i) == round(total(db, n1) + total(db, n2), 2)
+    db.fn('post_doc', int, i)
+    db.commit()
+    assert db.stock(ids['b']) == s - 7                                # the invoice: no stock
+    assert balance(db, 'C', c) == round(b0 + total(db, i), 2)
+    db.cur.execute('select invoice_id from mm_doc where id in (:a, :b)', a=n1, b=n2)
+    assert {r[0] for r in db.cur} == {i}
+    # a note into one invoice only; a note of another kind or of another customer: not into it
+    j = db.fn('new_doc', int, 'TPY', p_customer_id=c, p_payment='CREDIT')
+    db.commit()
+    db.fails(184, 'add_note', j, n1)
+    p = note(db, ids, 'DPA', [('b', 1)], 'supplier')
+    db.commit()
+    db.fails(184, 'add_note', j, p)
+    other = db.one("select min(id) from mm_customer where id <> :c", c=c)[0]
+    n3 = db.fn('new_doc', int, 'DAP', p_customer_id=other, p_payment='CREDIT')
+    db.fn('add_line', int, n3, ids['b'], 1)
+    db.commit()
+    db.fails(184, 'add_note', j, n3)                                   # a draft note
+    db.fn('post_doc', int, n3)
+    db.commit()
+    db.fails(184, 'add_note', j, n3)                                   # another customer
+    db.proc('delete_doc', j)
+    # a note in an invoice is not cancelled before its invoice; the invoice cancelled frees its notes
+    db.fails(185, 'cancel_doc', n1)
+    db.proc('cancel_doc', i)
+    db.commit()
+    assert balance(db, 'C', c) == b0 and db.stock(ids['b']) == s - 7      # (+1 of the DPA, -1 of n3)
+    assert db.one('select count(invoice_id) from mm_doc where id in (:a, :b)', a=n1, b=n2)[0] == 0
+    db.proc('cancel_doc', n1)
+    db.commit()
+    assert db.stock(ids['b']) == s - 2
+
+
+def test_purchase_note_and_invoice(env):
+    db, ids = env
+    sp = ids['supplier']
+    s, b0 = db.stock(ids['a']), balance(db, 'S', sp)
+    d = db.fn('new_doc', int, 'DPA', p_supplier_id=sp, p_payment='CREDIT')
+    db.fn('add_line', int, d, ids['a'], 4, 6.5)
     db.fn('post_doc', int, d)
     db.commit()
-    assert db.stock(ids['b']) == s - 5
-    c = db.fn('credit_note', int, d)
-    t, ref, tot = db.one('select doc_type, ref_doc_id, total from mm_doc where id = :c', c=c)
-    assert (t, ref) == ('PPY', d)
-    assert tot == db.one('select total from mm_doc where id = :d', d=d)[0]
-    db.fn('post_doc', int, c)
+    assert db.stock(ids['a']) == s + 4 and balance(db, 'S', sp) == b0
+    i = db.fn('invoice_from', int, d)
+    assert db.one('select doc_type from mm_doc where id = :i', i=i)[0] == 'TAG'
+    db.fn('post_doc', int, i)
     db.commit()
-    assert db.stock(ids['b']) == s
-    db.fails(115, 'credit_note', c, rtype=int)            # not of a credit note
+    assert db.stock(ids['a']) == s + 4 and balance(db, 'S', sp) == round(b0 + total(db, i), 2)
+    assert float(db.one('select cost from mm_item where id = :i', i=ids['a'])[0]) == 6.5
+
+
+def test_tda_both(env):
+    """an invoice that is also its delivery note: the stock and the balance"""
+    db, ids = env
+    c = ids['customer']
+    s, b0 = db.stock(ids['b']), balance(db, 'C', c)
+    d = note(db, ids, 'TDA', [('b', 3)])
+    db.commit()
+    assert db.stock(ids['b']) == s - 3 and balance(db, 'C', c) == round(b0 + total(db, d), 2)
+    db.fails(184, 'invoice_from', d, rtype=int)                       # no invoice from it
+
+
+def test_credit_note(env):
+    """goods back of an invoice: a return note (the stock back), then its credit note (the balance)"""
+    db, ids = env
+    c = ids['customer']
+    n = note(db, ids, 'DAP', [('b', 5)])
+    d = db.fn('invoice_from', int, n)
+    db.fn('post_doc', int, d)
+    db.commit()
+    s, b0 = db.stock(ids['b']), balance(db, 'C', c)
+    r = db.fn('credit_note', int, d)
+    t, ref, st = db.one('select doc_type, ref_doc_id, status from mm_doc where id = :c', c=r)
+    assert (t, ref, st) == ('DEP', d, 'D')
+    assert total(db, r) == total(db, d)
+    line = db.one('select id from mm_doc_line where doc_id = :r', r=r)[0]
+    db.proc('update_line', line, 2, 2)                                 # 2 of the 5 back
+    db.fn('post_doc', int, r)
+    db.commit()
+    assert db.stock(ids['b']) == s + 2 and balance(db, 'C', c) == b0
+    cn = db.fn('invoice_from', int, r)
+    assert db.one('select doc_type from mm_doc where id = :c', c=cn)[0] == 'PPY'
+    db.fn('post_doc', int, cn)
+    db.commit()
+    assert db.stock(ids['b']) == s + 2 and balance(db, 'C', c) == round(b0 - total(db, cn), 2)
+    db.fails(115, 'credit_note', cn, rtype=int)            # not of a credit note
+    db.fails(115, 'credit_note', n, rtype=int)             # not of a note
 
 
 def test_adjust_stock(env):
@@ -427,9 +536,9 @@ def test_max_per_sale(env):
         db.fails(157, 'update_line', line, 3, 2.26)
         db.fn('post_doc', int, d)
         db.commit()
-        i = db.fn('new_doc', int, 'TPY', p_customer_id=ids['customer'], p_payment='CREDIT')
+        i = db.fn('new_doc', int, 'TDA', p_customer_id=ids['customer'], p_payment='CREDIT')
         db.fn('add_line', int, i, ids['b'], 10)                      # an invoice: no limit
-        p = db.fn('new_doc', int, 'TAG', p_supplier_id=ids['supplier'], p_payment='CREDIT')
+        p = db.fn('new_doc', int, 'TAD', p_supplier_id=ids['supplier'], p_payment='CREDIT')
         db.fn('add_line', int, p, ids['b'], 10)                      # a purchase: no limit
         db.conn.rollback()
     finally:

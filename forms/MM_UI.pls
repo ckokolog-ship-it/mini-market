@@ -455,7 +455,8 @@ PACKAGE BODY ui IS
       forms_ddl('COMMIT');
       again(c_block);
     -- invoicing: a new document (alone on the screen: its totals and lines as they change), a line
-    -- (a card of mobile phones in a sale: as many cards, with their serials), post, cancel, credit
+    -- (a card of mobile phones in a sale: as many cards, with their serials), post, cancel, goods back,
+    -- an invoice from its notes
     ELSIF p_item = 'CTL.NEWDOC' THEN
       v := mm_core.new_doc(upper(name_in('CTL.D_TYPE')), num('CTL.CUST_ID'), num('CTL.SUPP_ID'), NULL,
                            upper(nvl(name_in('CTL.D_PAY'), 'CREDIT')), date_in('CTL.D_DATE'));
@@ -496,11 +497,33 @@ PACKAGE BODY ui IS
       forms_ddl('COMMIT');
       show_only(v);
       message('Ακυρώθηκε');
+    -- goods back of an invoice: a draft return note with its lines (as many as came back), then its
+    -- credit note from it (Από δελτίο)
     ELSIF p_item = 'CTL.CREDIT' THEN
       v := mm_core.credit_note(num('DOC.ID'));
       forms_ddl('COMMIT');
       show_only(v);
-      message('Πρόχειρο πιστωτικό: έλεγξε τις γραμμές και καταχώρισέ το');
+      message('Πρόχειρο δελτίο επιστροφής: κράτησε ό,τι γύρισε, καταχώρισέ το, μετά «Από δελτίο» για το πιστωτικό');
+    -- an invoice from the note of the list: into the draft invoice on the screen when it is made of
+    -- that kind of note, else a new one (the date of CTL.D_DATE)
+    ELSIF p_item = 'CTL.FROMNOTE' THEN
+      s := num('CTL.N_NOTE_ID');
+      v := num('DOC.ID');
+      n := 0;
+      IF v IS NOT NULL THEN
+        SELECT COUNT(*) INTO n FROM mm_doc d, mm_doc_type t, mm_doc x
+        WHERE d.id = v AND d.status = 'D' AND t.code = d.doc_type AND x.id = s AND x.doc_type = t.ref_type;
+      END IF;
+      IF n > 0 THEN
+        mm_core.add_note(v, s);
+      ELSE
+        v := mm_core.invoice_from(s, nvl(date_in('CTL.D_DATE'), trunc(sysdate)));
+      END IF;
+      forms_ddl('COMMIT');
+      copy('', 'CTL.N_NOTE_ID');
+      copy('', 'CTL.N_NOTE_TEXT');
+      show_only(v);
+      message('Το δελτίο μπήκε στο πρόχειρο: βάλε κι άλλο δελτίο ή καταχώρισέ το');
     -- the serials of a line of cards: a sale takes this card (scanned) in its line, or gives one
     -- back; a purchase loads this card (and its PIN) in the line chosen
     ELSIF p_item = 'CTL.ADDSER' THEN
@@ -843,6 +866,13 @@ PACKAGE BODY ui IS
         SELECT name INTO n FROM mm_supplier WHERE id = id_;
       END IF;
       copy(n, 'DOC.PARTNER_TEXT');
+      -- a note: the invoice it is in
+      id_ := num('DOC.INVOICE_ID');
+      n := NULL;
+      IF id_ IS NOT NULL THEN
+        SELECT doc_type || ' ' || doc_no INTO n FROM mm_doc WHERE id = id_;
+      END IF;
+      copy(n, 'DOC.INVOICE_TEXT');
     ELSIF p_block = 'USR' THEN
       n := upper(name_in('USR.USERNAME'));
       SELECT COUNT(*) INTO id_ FROM mm_pin_user WHERE username = n;

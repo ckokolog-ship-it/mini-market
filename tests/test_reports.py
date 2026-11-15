@@ -124,6 +124,25 @@ def test_sales_vat_and_min_stock(env):
     db.proc('cancel_doc', d)                       # cancelled: no sale
     db.commit()
     assert db.one('select nvl(max(total), 0) from mm_sales_day where day = trunc(sysdate)')[0] == before[0]
+    # a delivery note: no sale, no VAT; its invoice: both; a TDA: with the invoices
+    q = 'select nvl(max(tpy_total), 0), nvl(max(total), 0) from mm_sales_day where day = trunc(sysdate)'
+    qv = 'select nvl(sum(s_vat), 0) from mm_vat_day where day = trunc(sysdate)'
+    t0, v0 = db.one(q), db.one(qv)[0]
+    n = db.fn('new_doc', int, 'DAP', p_customer_id=ids['customer'], p_payment='CREDIT')
+    db.fn('add_line', int, n, ids['a'], 1)
+    db.fn('post_doc', int, n)
+    db.commit()
+    assert db.one(q) == t0 and db.one(qv)[0] == v0
+    i = db.fn('invoice_from', int, n)
+    db.fn('post_doc', int, i)
+    x = db.fn('new_doc', int, 'TDA', p_customer_id=ids['customer'], p_payment='CREDIT')
+    db.fn('add_line', int, x, ids['a'], 1)
+    db.fn('post_doc', int, x)
+    db.commit()
+    ti, vi = db.one('select total, vat from mm_doc where id = :i', i=i)
+    tx, vx = db.one('select total, vat from mm_doc where id = :x', x=x)
+    assert db.one(q) == (round(t0[0] + ti + tx, 2), round(t0[1] + ti + tx, 2))
+    assert db.one(qv)[0] == round(v0 + vi + vx, 2)
     # an item under its minimum: in the report, with what is missing and its supplier
     db.cur.execute('update mm_item set min_stock = stock + 5 where id = :i', i=ids['b'])
     db.commit()
