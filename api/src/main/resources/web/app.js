@@ -3,12 +3,15 @@
 // login (sessionStorage: gone with the tab). Every value goes in as text (textContent), never as HTML.
 // The pages by role: CASHIER the till, the items and the counts; MANAGER all the rest; as the REST service.
 
+import { barsSvg, itemBars, qrSvg } from './codes.js';
+
 const $ = (sel) => document.querySelector(sel);
 const main = () => $('#main');
 const RANK = { CASHIER: 1, MANAGER: 2, ADMIN: 3 };
 const PAGES = [
   ['#/pos', 'Ταμείο', 'CASHIER'],
   ['#/items', 'Είδη', 'CASHIER'],
+  ['#/labels', 'Ετικέτες', 'CASHIER'],
   ['#/partners/customers', 'Πελάτες', 'MANAGER'],
   ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER'],
   ['#/reports/sales', 'Πωλήσεις', 'MANAGER'],
@@ -194,6 +197,7 @@ async function itemPage(code) {
       el('div', { class: 'panel' }, el('dl', { class: 'kv' }, rows.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v ?? '')]))),
       el('div', { class: 'row' },
         el('button', { onclick: () => history.back() }, 'Πίσω'),
+        el('button', { onclick: () => { labelAdd(x, 1); location.hash = '#/labels'; } }, 'Ετικέτα'),
         can('MANAGER') && el('button', { class: 'primary', onclick: () => { location.hash = '#/ledger/item/' + x.id; } }, 'Καρτέλα')));
   } catch (e) {
     fail(e);
@@ -444,6 +448,127 @@ async function countPage(id) {
   code.focus();
 }
 
+// -- the labels: A4 sheets of stickers (3 x 8 or 3 x 7), each the name, the price, the barcode (its
+// EAN-13, else its code in Code 128) and a QR of the address of the item in these pages ---------------
+const SHEETS = {
+  '3x8': { cols: 3, rows: 8, w: 70, h: 37, name: '3 × 8 (70 × 37 mm)' },
+  '3x7': { cols: 3, rows: 7, w: 70, h: 42.3, name: '3 × 7 (70 × 42,3 mm)' },
+};
+function store(key, fallback) {
+  try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (e) { return fallback; }
+}
+function keep(key, v) {
+  try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* a private window */ }
+}
+let labelList = store('mm.labels', []);          // [{ code, barcode, name, price, unit, n }]
+function labelAdd(x, n) {
+  const have = labelList.find((l) => l.code === x.code);
+  if (have) have.n += n;
+  else labelList.push({ code: x.code, barcode: x.barcode, name: x.name, price: x.price, unit: x.unit, n });
+  keep('mm.labels', labelList);
+}
+function label(x, opt) {
+  const b = itemBars(x);
+  const price = opt.price && x.price !== null && x.price !== undefined
+    ? el('div', { class: 'price' }, money(x.price) + ' €' + (x.unit === 'KG' ? ' / κιλό' : '')) : null;
+  return el('div', { class: 'label' },
+    el('div', { class: 'txt' }, el('div', { class: 'name' }, x.name), price, el('div', { class: 'code' }, x.code)),
+    el('div', { class: 'qr-box' }, qrSvg(opt.base.replace(/\/+$/, '') + '/web/#/item/' + encodeURIComponent(x.code))),
+    el('div', { class: 'bc', 'data-kind': b.kind }, barsSvg(b.bars), el('div', { class: 'digits' }, b.text)));
+}
+function labelSheets(opt) {
+  const s = SHEETS[opt.sheet];
+  const per = s.cols * s.rows;
+  const cells = new Array(Math.max(0, Math.min(per, opt.start) - 1)).fill(null);
+  labelList.forEach((x) => { for (let k = 0; k < x.n; k += 1) cells.push(x); });
+  const sheets = [];
+  for (let i = 0; i < cells.length; i += per) {
+    const page = el('div', { class: 'sheet sheet-' + opt.sheet });
+    cells.slice(i, i + per).forEach((x) => page.append(x ? label(x, opt) : el('div', { class: 'label empty' })));
+    sheets.push(page);
+  }
+  return sheets;
+}
+async function labelsPage() {
+  const opt = { sheet: '3x8', start: 1, price: true, base: location.origin, ...store('mm.labelOpt', {}) };
+  const q = el('input', { name: 'q', type: 'search', placeholder: 'περιγραφή, κωδικός ή barcode (Enter: σάρωση)', autocomplete: 'off' });
+  const found = el('div');
+  const chosen = el('div');
+  const preview = el('div', { class: 'sheets' });
+  const sheet = el('select', { name: 'sheet' }, Object.entries(SHEETS).map(([k, v]) => el('option', { value: k, selected: k === opt.sheet }, v.name)));
+  const start = el('input', { name: 'start', type: 'number', min: '1', max: '24', value: opt.start, class: 'w6' });
+  const price = el('input', { name: 'price', type: 'checkbox', checked: opt.price });
+  const base = el('input', { name: 'base', value: opt.base, class: 'w-wide' });
+  const redraw = () => {
+    Object.assign(opt, { sheet: sheet.value, start: Math.max(1, Number(start.value) || 1), price: price.checked, base: base.value.trim() || location.origin });
+    keep('mm.labelOpt', opt);
+    const total = labelList.reduce((a, x) => a + x.n, 0);
+    chosen.replaceChildren(labelList.length ? table([['Κωδικός'], ['Περιγραφή'], ['Τιμή', 'num'], ['Ετικέτες', 'num'], ['']],
+      labelList.map((x) => {
+        const n = el('input', { type: 'number', min: '0', value: x.n, class: 'w6', 'aria-label': 'Ετικέτες ' + x.code });
+        n.addEventListener('change', () => {
+          x.n = Math.max(0, Math.floor(Number(n.value) || 0));
+          labelList = labelList.filter((y) => y.n > 0);
+          keep('mm.labels', labelList);
+          redraw();
+        });
+        return el('tr', {}, el('td', {}, x.code), el('td', { class: 'wrap' }, x.name), num(x.price), el('td', { class: 'num' }, n),
+          el('td', { class: 'num' }, el('button', {
+            type: 'button', class: 'danger', 'aria-label': 'Βγάλε ' + x.code,
+            onclick: () => { labelList = labelList.filter((y) => y !== x); keep('mm.labels', labelList); redraw(); },
+          }, '×')));
+      })) : el('p', { class: 'muted' }, 'Καμία ετικέτα ακόμα: ψάξε ή σάρωσε είδη.'),
+    el('p', { class: 'muted' }, `${total} ετικέτες`));
+    try {
+      preview.replaceChildren(...labelSheets(opt));
+    } catch (e) { fail(e); }
+    printBtn.disabled = !total;
+  };
+  const search = async () => {
+    const v = q.value.trim();
+    if (!v) { found.replaceChildren(); return; }
+    try {
+      const r = await api('items?limit=20&q=' + encodeURIComponent(v));
+      found.replaceChildren(r.rows.length ? el('div', {},
+        table([['Κωδικός'], ['Περιγραφή'], ['Τιμή', 'num'], ['']], r.rows.map((x) => el('tr', {},
+          el('td', {}, x.code), el('td', { class: 'wrap' }, x.name), num(x.price),
+          el('td', { class: 'num' }, el('button', { type: 'button', onclick: () => { labelAdd(x, 1); redraw(); } }, '+ 1'))))),
+        el('div', { class: 'row' }, el('button', {
+          type: 'button', onclick: () => { r.rows.forEach((x) => labelAdd(x, 1)); redraw(); },
+        }, `Όλα αυτά (${r.rows.length})`), r.total > r.rows.length ? el('span', { class: 'muted' }, `τα πρώτα 20 από ${r.total}`) : null))
+        : el('p', { class: 'muted' }, 'Τίποτα.'));
+    } catch (e) { fail(e); }
+  };
+  let timer;
+  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 250); });
+  q.addEventListener('keydown', async (ev) => {
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    const v = q.value.trim();
+    if (!v) return;
+    try {                                           // a scan: the item straight to the labels
+      labelAdd(await api('items/' + encodeURIComponent(v)), 1);
+      q.value = '';
+      found.replaceChildren();
+      redraw();
+    } catch (e) { search(); }
+    q.focus();
+  });
+  [sheet, start, price, base].forEach((e) => e.addEventListener('change', redraw));
+  const printBtn = el('button', { type: 'button', class: 'primary', onclick: () => window.print() }, 'Εκτύπωση');
+  show(el('div', { class: 'no-print' },
+    el('h1', {}, 'Ετικέτες'),
+    el('div', { class: 'panel row' }, el('label', { class: 'grow' }, 'Είδος', q)), found,
+    el('h2', {}, 'Για εκτύπωση'), chosen,
+    el('div', { class: 'panel row' }, el('label', {}, 'Φύλλο A4', sheet), el('label', {}, 'Από την ετικέτα', start),
+      el('label', { class: 'check' }, price, 'Τιμή'), el('label', {}, 'Διεύθυνση για το QR', base),
+      printBtn, el('button', { type: 'button', onclick: () => { labelList = []; keep('mm.labels', labelList); redraw(); } }, 'Καθάρισε')),
+    el('p', { class: 'muted' }, 'Στην εκτύπωση: μέγεθος A4, κλίμακα 100% (όχι «Προσαρμογή»), χωρίς περιθώρια, κεφαλίδες και υποσέλιδα. «Από την ετικέτα»: για φύλλο που έχει ήδη χρησιμοποιηθεί.')),
+  preview);
+  redraw();
+  q.focus();
+}
+
 // -- the till (as the form MM_POS): a register, its Z, the receipt of the register (made at the first
 // scan: Enter of a scanner), its lines, paid by cash (what was given: the change) or card --------------
 let posReg = null;
@@ -587,6 +712,7 @@ function render() {
     el('p', { class: 'muted' }, 'Η σελίδα αυτή θέλει ρόλο ' + role + '.')));
   switch (p[0]) {
     case 'pos': return posPage();
+    case 'labels': return labelsPage();
     case 'item': return itemPage(p[1]);
     case 'partners': return need('MANAGER', () => partnersPage(p[1], params));
     case 'partner': return need('MANAGER', () => partnerPage(p[1], p[2]));

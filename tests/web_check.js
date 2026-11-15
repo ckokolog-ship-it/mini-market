@@ -2,7 +2,7 @@
 // tests/test_web.py: BASE, MGR / CASHIER (users), PW, ITEM (an item code), XSS (its name), SHOTS (a folder).
 const { chromium } = require('playwright');
 
-const { BASE, MGR, CASHIER, PW, ITEM, ITEM_B, XSS, SHOTS } = process.env;
+const { BASE, MGR, CASHIER, PW, ITEM, ITEM_B, XSS, SHOTS, LABELS } = process.env;
 let failed = 0;
 function ok(cond, what) {
   console.log((cond ? 'ok   ' : 'FAIL ') + what);
@@ -161,6 +161,53 @@ async function waitText(page, sel, text) {
   await waitText(page, 'main', 'Κλειστό');
   ok((await page.textContent('#toast')).includes('έκλεισε'), 'the Z closed: its totals');
 
+  // the labels (a sharp screen: each label a picture, read back by tests/test_web.py): the item of
+  // the tests by a scan (no barcode: its code in Code 128; its name with HTML: as text), the bread by a
+  // search (its EAN-13), 3 of it; the sheet as it prints: A4, the menu not on it
+  if (LABELS) {
+    const sharp = await browser.newContext({ deviceScaleFactor: 4, viewport: { width: 1200, height: 900 } });
+    const lp = await sharp.newPage();
+    lp.on('pageerror', (e) => errors.push(String(e)));
+    lp.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    await lp.goto(BASE + '/web/');
+    await lp.fill('input[name=username]', MGR);
+    await lp.fill('input[name=password]', PW);
+    await lp.click('button[type=submit]');
+    await lp.waitForSelector('#nav a');
+    await lp.goto(BASE + '/web/#/labels');
+    await lp.waitForSelector('input[name=q]');
+    await lp.click('button:has-text("Καθάρισε")');
+    await lp.fill('input[name=base]', 'http://192.168.1.10:8090');
+    await lp.press('input[name=base]', 'Tab');
+    await lp.fill('input[name=q]', ITEM);
+    await lp.press('input[name=q]', 'Enter');
+    await waitText(lp, '.sheets', ITEM);
+    await lp.fill('input[name=q]', 'Ψωμί');
+    await lp.waitForSelector('button:has-text("+ 1")');
+    await lp.click('tr:has-text("ART01") button:has-text("+ 1")');
+    await waitText(lp, 'main', '2 ετικέτες');
+    await lp.fill('input[aria-label="Ετικέτες ART01"]', '3');
+    await lp.press('input[aria-label="Ετικέτες ART01"]', 'Tab');
+    await waitText(lp, 'main', '4 ετικέτες');
+    ok((await lp.$$('.sheet .label:not(.empty)')).length === 4, 'the labels: 4 on the sheet');
+    ok(await lp.evaluate(() => window.__xss === undefined && !document.querySelector('.sheet img')), 'the labels: the name as text');
+    const shots = await lp.$$('.sheet .label:not(.empty)');
+    for (let k = 0; k < 2; k += 1) await shots[k === 0 ? 0 : 1].screenshot({ path: `${LABELS}/label${k}.png` });
+    await lp.emulateMedia({ media: 'print' });
+    ok(await lp.isHidden('header') && await lp.isHidden('input[name=q]'), 'the print: only the sheet');
+    await lp.pdf({ path: LABELS + '/labels.pdf', preferCSSPageSize: true, printBackground: true });
+    await lp.emulateMedia({ media: 'screen' });
+    // the start on a sheet already used: the 23rd and 24th, then a second sheet
+    await lp.fill('input[name=start]', '23');
+    await lp.press('input[name=start]', 'Tab');
+    await lp.waitForFunction(() => document.querySelectorAll('.sheet').length === 2);
+    ok((await lp.$$('.sheet:first-child .label.empty')).length === 22, 'from the 23rd: two sheets, 22 empty');
+    await lp.fill('input[name=start]', '1');
+    await lp.press('input[name=start]', 'Tab');
+    if (SHOTS) await lp.screenshot({ path: SHOTS + '/labels.png' });
+    await sharp.close();
+  }
+
   // logout: the token gone
   await page.click('#logout');
   await page.waitForSelector('input[name=username]');
@@ -176,7 +223,7 @@ async function waitText(page, sel, text) {
   await p2.click('button[type=submit]');
   await p2.waitForSelector('#nav a');
   const nav2 = await p2.$$eval('#nav a', (as) => as.map((a) => a.textContent));
-  ok(nav2.join(',') === 'Ταμείο,Είδη,Απογραφή', 'the menu of a cashier: ' + nav2.join(','));
+  ok(nav2.join(',') === 'Ταμείο,Είδη,Ετικέτες,Απογραφή', 'the menu of a cashier: ' + nav2.join(','));
   await p2.goto(BASE + '/web/#/reports/sales');
   await p2.waitForSelector('h1:has-text("Δεν επιτρέπεται")');
   ok(true, 'a cashier: no reports');
