@@ -28,7 +28,8 @@ import java.util.Optional;
  *   /api/items/{barcode or code}               one item, as the till finds it, with what is reserved
  *   /api/customers?q=   /api/customers/{id}    the customers; one with its balance
  *   /api/suppliers?q=   /api/suppliers/{id}    the suppliers; one with its balance
- *   /api/ledger/{item|customer|supplier}/{id}  a ledger (MM_LEDGER): carry-over, moves, totals
+ *   /api/ledger/{item|customer|supplier}/{id}  a ledger (MM_LEDGER): carry-over, moves, totals;
+ *                                              with ?limit=&offset= a page of its moves, its carry_in, carry_out
  *   /api/reports/sales   /api/reports/vat   /api/reports/min-stock
  *   GET /api/counts   GET /api/counts/{id}      the counts of the stock; one with its lines
  *   POST /api/counts {name}                     a new count                    (MANAGER)
@@ -318,16 +319,19 @@ final class Api {
         String s = like(q);
         int limit = Http.number(q, "limit", 50, 1, MAX_LIMIT);
         int offset = Http.number(q, "offset", 0, 0, Integer.MAX_VALUE);
-        List<Map<String, Object>> rows = Db.rows(c, """
-                select i.id, i.code, i.barcode, i.name, c.name category, i.unit, i.vat_code, i.price,
-                       i.wholesale_price, i.stock + 0 stock, i.min_stock, i.active, i.serial_tracked, i.kit
+        String where = """
                 from mm_item i join mm_category c on c.id = i.category_id
                 where i.is_model = 'N'
                   and (? is null or upper(i.name) like '%' || upper(?) || '%' or i.code like upper(?) || '%'
-                       or i.barcode = ?)
+                       or i.barcode = ?)""";
+        List<Map<String, Object>> rows = Db.rows(c, """
+                select i.id, i.code, i.barcode, i.name, c.name category, i.unit, i.vat_code, i.price,
+                       i.wholesale_price, i.stock + 0 stock, i.min_stock, i.active, i.serial_tracked, i.kit
+                """ + where + """
                 order by i.code
                 offset ? rows fetch next ? rows only""", s, s, s, s, offset, limit);
-        return page(rows, limit, offset);
+        Object total = Db.rows(c, "select count(*) n " + where, s, s, s, s).get(0).get("n");
+        return page(rows, limit, offset, total);
     }
 
     private Object item(Connection c, String code) throws SQLException {
@@ -353,10 +357,11 @@ final class Api {
         String s = like(q);
         int limit = Http.number(q, "limit", 50, 1, MAX_LIMIT);
         int offset = Http.number(q, "offset", 0, 0, Integer.MAX_VALUE);
-        List<Map<String, Object>> rows = Db.rows(c, "select id, name, afm, doy, address, phone, email, active from "
-                + table + " where (? is null or upper(name) like '%' || upper(?) || '%' or afm = ?)"
+        String where = " from " + table + " where (? is null or upper(name) like '%' || upper(?) || '%' or afm = ?)";
+        List<Map<String, Object>> rows = Db.rows(c, "select id, name, afm, doy, address, phone, email, active" + where
                 + " order by name offset ? rows fetch next ? rows only", s, s, s, offset, limit);
-        return page(rows, limit, offset);
+        Object total = Db.rows(c, "select count(*) n" + where, s, s, s).get(0).get("n");
+        return page(rows, limit, offset, total);
     }
 
     private Object partner(Connection c, String table, String kind, long id) throws SQLException {
@@ -403,8 +408,48 @@ final class Api {
         out.put("debit", debit);
         out.put("credit", credit);
         out.put("close", rows.get(rows.size() - 1).get("balance"));
-        out.put("rows", rows);
+        if (q.get("limit") == null) {
+            out.put("rows", rows);                 // all of it: the carry-over row first, then the moves
+            return out;
+        }
+        // a page of the moves (?limit=&offset=), as a page of the report: the totals before its first row
+        // (from the carry-over) and with its last (to the carry-over)
+        int limit = Http.number(q, "limit", 50, 1, MAX_LIMIT);
+        List<Map<String, Object>> moves = rows.subList(1, rows.size());
+        int lastPage = moves.isEmpty() ? 0 : (moves.size() - 1) / limit * limit;      // past the end: the last page
+        int offset = Math.min(Http.number(q, "offset", 0, 0, Integer.MAX_VALUE) / limit * limit, lastPage);
+        int end = Math.min(moves.size(), offset + limit);
+        java.math.BigDecimal d = java.math.BigDecimal.ZERO;
+        java.math.BigDecimal cr = java.math.BigDecimal.ZERO;
+        Map<String, Object> in = null;
+        Map<String, Object> last = null;
+        for (int i = 0; i < end; i++) {
+            if (i == offset) {
+                in = carry(d, cr, i == 0 ? rows.get(0).get("balance") : moves.get(i - 1).get("balance"));
+            }
+            Map<String, Object> m = moves.get(i);
+            d = d.add(m.get("debit") == null ? java.math.BigDecimal.ZERO : (java.math.BigDecimal) m.get("debit"));
+            cr = cr.add(m.get("credit") == null ? java.math.BigDecimal.ZERO : (java.math.BigDecimal) m.get("credit"));
+            last = m;
+        }
+        if (in == null) {                          // no moves at all
+            in = carry(d, cr, rows.get(0).get("balance"));
+        }
+        out.put("limit", limit);
+        out.put("offset", offset);
+        out.put("total", moves.size());
+        out.put("carry_in", in);
+        out.put("carry_out", carry(d, cr, last == null ? rows.get(0).get("balance") : last.get("balance")));
+        out.put("rows", new java.util.ArrayList<>(moves.subList(offset, end)));
         return out;
+    }
+
+    private static Map<String, Object> carry(Object debit, Object credit, Object balance) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("debit", debit);
+        m.put("credit", credit);
+        m.put("balance", balance);
+        return m;
     }
 
     private Object report(Connection c, String name, Map<String, String> q) throws SQLException {
@@ -436,10 +481,11 @@ final class Api {
         return out;
     }
 
-    private static Object page(List<Map<String, Object>> rows, int limit, int offset) {
+    private static Object page(List<Map<String, Object>> rows, int limit, int offset, Object total) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("limit", limit);
         out.put("offset", offset);
+        out.put("total", total);
         out.put("rows", rows);
         return out;
     }
