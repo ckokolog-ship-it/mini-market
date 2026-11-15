@@ -43,10 +43,23 @@ $env:PATH = "$Jdk\bin;$Jdk\bin\server;$OracleHome\bin;$env:PATH"
 # the Greek of the forms
 $env:NLS_LANG = 'GREEK_GREECE.AL32UTF8'
 Write-Host "== ..\db\MM_TEXT.sql"
-# what PowerShell pipes into sqlplus: ASCII. With chcp 65001 it sends UTF-8 with a BOM, and sqlplus
-# reads "<BOM>exit": SP2-0042 unknown command
-$OutputEncoding = New-Object System.Text.ASCIIEncoding
-$o = 'exit' | & $sqlplus -s $UserId "@$here\..\db\MM_TEXT.sql" | Out-String
+# sqlplus gets its "exit" as 6 bytes of ASCII written straight to its input, not through a pipe of
+# PowerShell: a pipe may start with a BOM (a UTF-8 console, chcp 65001; $OutputEncoding ASCII did not
+# help on every PC), and sqlplus reads "<BOM>exit": SP2-0042 unknown command
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = $sqlplus
+$psi.Arguments = "-s $UserId `"@$here\..\db\MM_TEXT.sql`""
+$psi.UseShellExecute = $false
+$psi.RedirectStandardInput = $true
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $true
+$psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+$p = [System.Diagnostics.Process]::Start($psi)
+$bytes = [System.Text.Encoding]::ASCII.GetBytes("exit`r`n")
+$p.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+$p.StandardInput.Close()
+$o = $p.StandardOutput.ReadToEnd() + $p.StandardError.ReadToEnd()
+$p.WaitForExit()
 Write-Host $o
 if ($o -match 'ORA-|SP2-') {
   throw "MM_TEXT.sql: the messages above (the wallet: forms_wallet.cmd -DbUser mm -Alias MM_DB -Section mm)"
