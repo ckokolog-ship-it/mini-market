@@ -33,6 +33,7 @@ def test_the_pages_in_a_browser(api, env, users):
     for k in range(30):                                   # the ledger of the item b: two pages of 25
         db.proc('adjust_stock', ids['b'], k % 4 + 1, 'TST web %d' % k)
     db.commit()
+    test_core.close_open_z(db, ids['reg'])                 # the till: the Z of TST opened in the page
     e = dict(os.environ, BASE=api, MGR=users['MANAGER'], CASHIER=users['CASHIER'], PW=test_api.PW,
              ITEM='TST%sA' % ids['tag'], ITEM_B=str(ids['b']), XSS=XSS, SHOTS=os.environ.get('MM_WEB_SHOTS', ''))
     r = subprocess.run(['node', os.path.join(HERE, 'web_check.js')], env=e, capture_output=True, text=True, timeout=180)

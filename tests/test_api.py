@@ -266,3 +266,55 @@ def test_pages(api, env, users):
     assert get(api, '/api/ledger/item/%d?from=1900-01-01&limit=10&offset=9999' % ids['b'])['offset'] == (len(moves) - 1) // 10 * 10
     none = get(api, '/api/ledger/item/%d?from=1990-01-01&to=1990-12-31&limit=10' % ids['b'])
     assert none['total'] == 0 and none['rows'] == [] and none['carry_in'] == none['carry_out']
+
+
+def test_the_till(api, env, users):
+    """the till of the pages, as a cashier: a Z opened, items scanned (by code and by barcode), a line
+    changed and out, paid by cash with what was given (not enough: nothing posted), money out of the
+    drawer, a receipt voided, the Z closed"""
+    db, ids = env
+    test_core.close_open_z(db, ids['reg'])
+    pos = '/api/pos/tst'
+    assert 'TST' in [r['code'] for r in get(api, '/api/pos', token='CASHIER')['rows']]
+    assert get(api, '/api/pos/nothere', 404, token='CASHIER')['error'] == 'not_found'
+    s = get(api, pos, token='CASHIER')
+    assert s['code'] == 'TST' and s['z'] is None and s['receipt'] is None and s['last'] == []
+    a, b = 'TST%sA' % ids['tag'], 'TST%sB' % ids['tag']
+    assert post(api, pos + '/scan', {'code': b}, token='CASHIER', status=409)['error'] == 'z_closed'
+    s = post(api, pos + '/open', {'cash': 50}, token='CASHIER')
+    assert s['z']['docs'] == 0 and s['z']['drawer'] == 50
+    s = post(api, pos + '/scan', {'code': b, 'qty': 2}, token='CASHIER')               # 2 x 2,26
+    s = post(api, pos + '/scan', {'code': a.lower()}, token='CASHIER')                 # 12,40
+    r = s['receipt']
+    assert [(x['code'], x['qty']) for x in r['lines']] == [(b, 2), (a, 1)] and r['total'] == 16.92
+    assert post(api, pos + '/scan', {'code': 'TSTNOTHING'}, token='CASHIER', status=404)['error'] == 'not_found'
+    lb, la = r['lines'][0]['id'], r['lines'][1]['id']
+    s = post(api, pos + '/lines/%d' % lb, {'qty': 3}, token='CASHIER')
+    assert s['receipt']['total'] == 19.18
+    s = post(api, pos + '/lines/%d' % la, {'qty': 0}, token='CASHIER')                 # out
+    assert [x['code'] for x in s['receipt']['lines']] == [b] and s['receipt']['total'] == 6.78
+    assert post(api, pos + '/lines/1', {'qty': 1}, token='CASHIER', status=404)['error'] == 'not_found'
+    assert post(api, pos + '/lines/%d' % lb, {'qty': -1}, token='CASHIER', status=400)['error'] == 'bad_number'
+    assert post(api, pos + '/pay', {'payment': 'GOLD'}, token='CASHIER', status=400)['error'] == 'bad_payment'
+    assert post(api, pos + '/pay', {'payment': 'CASH', 'given': 5}, token='CASHIER', status=400)['error'] == 'not_enough'
+    assert get(api, pos, token='CASHIER')['receipt']['total'] == 6.78                    # still the draft
+    s = post(api, pos + '/pay', {'payment': 'CASH', 'given': 10}, token='CASHIER')
+    p = s['paid']
+    assert (p['total'], p['change'], p['payment']) == (6.78, 3.22, 'CASH') and p['doc_no'] > 0
+    assert s['receipt'] is None and s['last'][0]['doc_no'] == p['doc_no'] and s['z']['docs'] == 1
+    assert (s['z']['cash'], s['z']['drawer']) == (6.78, 56.78)
+    assert post(api, pos + '/pay', {'payment': 'CARD'}, token='CASHIER', status=409)['error'] == 'no_receipt'
+    s = post(api, pos + '/cash', {'amount': -6.78, 'note': 'TST out'}, token='CASHIER')
+    assert s['z']['drawer'] == 50
+    assert post(api, pos + '/cash', {'amount': 5}, token='CASHIER', status=400)['error'] == 'MM-119'
+    # a card: no change; a draft voided; the Z closed with its totals
+    post(api, pos + '/scan', {'code': b}, token='CASHIER')
+    s = post(api, pos + '/pay', {'payment': 'card', 'given': 100}, token='CASHIER')
+    assert s['paid']['change'] is None and s['z']['card'] == 2.26
+    post(api, pos + '/scan', {'code': b}, token='CASHIER')
+    s = post(api, pos + '/void', token='CASHIER')
+    assert s['receipt'] is None
+    s = post(api, pos + '/close', token='CASHIER')
+    c = s['closed']
+    assert (c['docs'], c['total'], c['cash'], c['card']) == (2, 9.04, 6.78, 2.26) and s['z'] is None
+    assert sum(v['total'] for v in c['vat_rows']) == 9.04

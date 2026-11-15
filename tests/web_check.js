@@ -136,13 +136,38 @@ async function waitText(page, sel, text) {
   await page.waitForSelector('h1:has-text("καταχωρήθηκε")');
   ok(await page.isHidden('form.scan'), 'posted: no more scans');
 
+  // the till: the register TST, its Z opened, an item scanned (the name with HTML: as text), one
+  // more of it, paid by cash with F9 (the change), the Z closed
+  await page.goto(BASE + '/web/#/pos');
+  await page.waitForSelector('select[aria-label="Ταμείο"]');
+  await page.selectOption('select[aria-label="Ταμείο"]', 'TST');
+  await waitText(page, 'main', 'Κλειστό');
+  await page.click('button:has-text("Άνοιγμα Ζ")');
+  await page.waitForSelector('form.scan:not([hidden]) input[name=code]');
+  await page.fill('input[name=code]', ITEM);
+  await page.press('input[name=code]', 'Enter');
+  await waitText(page, '.total-due', '12,40');
+  ok(await page.evaluate(() => window.__xss === undefined && !document.querySelector('main img')), 'the till: the name as text');
+  ok(await page.evaluate(() => document.activeElement.name === 'code'), 'the till: the cursor back on the scan');
+  await page.click('button[aria-label="Μία ακόμα"]');
+  await waitText(page, '.total-due', '24,80');
+  await page.fill('input[name=given]', '30');
+  await page.keyboard.press('F9');
+  await waitText(page, 'main', 'Ρέστα: 5,20');
+  await waitText(page, 'main', 'Τελευταίες αποδείξεις');
+  ok(await page.isHidden('input[name=given]'), 'paid: no receipt open');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/pos.png', fullPage: true });
+  await page.click('button:has-text("Κλείσιμο Ζ")');
+  await waitText(page, 'main', 'Κλειστό');
+  ok((await page.textContent('#toast')).includes('έκλεισε'), 'the Z closed: its totals');
+
   // logout: the token gone
   await page.click('#logout');
   await page.waitForSelector('input[name=username]');
   ok((await page.evaluate(() => sessionStorage.getItem('mm'))) === null, 'logout: nothing kept');
   ok(errors.length === 0, 'no error in the page: ' + errors.join(' | '));
 
-  // a cashier on a phone: the items and the counts only
+  // a cashier on a phone: the till, the items and the counts only
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const p2 = await phone.newPage();
   await p2.goto(BASE + '/web/');
@@ -151,12 +176,16 @@ async function waitText(page, sel, text) {
   await p2.click('button[type=submit]');
   await p2.waitForSelector('#nav a');
   const nav2 = await p2.$$eval('#nav a', (as) => as.map((a) => a.textContent));
-  ok(nav2.join(',') === 'Είδη,Απογραφή', 'the menu of a cashier: ' + nav2.join(','));
+  ok(nav2.join(',') === 'Ταμείο,Είδη,Απογραφή', 'the menu of a cashier: ' + nav2.join(','));
   await p2.goto(BASE + '/web/#/reports/sales');
   await p2.waitForSelector('h1:has-text("Δεν επιτρέπεται")');
   ok(true, 'a cashier: no reports');
   ok(await p2.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'a phone: no page wider than it');
   if (SHOTS) await p2.screenshot({ path: SHOTS + '/phone.png' });
+  await p2.goto(BASE + '/web/#/pos');
+  await waitText(p2, 'main', 'Αρχικό ταμείο');
+  ok(await p2.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'a phone: the till fits');
+  if (SHOTS) await p2.screenshot({ path: SHOTS + '/phone_pos.png' });
 
   await browser.close();
   console.log(failed ? `== ${failed} FAILED` : '== web OK');
