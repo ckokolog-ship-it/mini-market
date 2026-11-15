@@ -1,5 +1,7 @@
 """test_api.py -- the REST service (api/, mm-api.jar) on a live database: it starts the jar on a
-free port of this computer, with MM_DSN, and asks it as a client would.
+free port of this computer, with MM_DSN, and asks it as a client would: a login first (its users:
+a manager and a cashier, tst...), then each call with its token; the roles; a count of the stock as
+the phones of step 9 will do it.
 
     (cd api && mvn -q -B package)        the jar (else the tests build it, if mvn is there)
     MM_DSN=mm/<password>@localhost:1521/FREEPDB1 python3 -m pytest tests
@@ -60,22 +62,116 @@ def api():
         p.wait(timeout=20)
 
 
-def get(base, path, status=200):
+PW = 'Kodikos-2026'
+TOKENS = {}
+
+
+@pytest.fixture(scope='module')
+def users(env, api):
+    """a manager and a cashier of this run; their tokens through the login of the service"""
+    db, ids = env
+    t = ids['tag'].lower()
+    names = {'MANAGER': 'tstm' + t, 'CASHIER': 'tstk' + t}
+    for role, name in names.items():
+        db.cur.callfunc('mm_auth.create_user', int, [name, 'Test ' + role, role, PW])
+    db.commit()
+    for role, name in names.items():
+        r = post(api, '/api/auth/login', {'username': name, 'password': PW}, token=None)
+        assert r['role'] == role and len(r['token']) == 64 and r['username'] == name
+        TOKENS[role] = r['token']
+    TOKENS[None] = TOKENS['MANAGER']
+    return names
+
+
+def call(base, path, method='GET', body=None, token='MANAGER', status=200):
+    req = urllib.request.Request(base + path, method=method,
+                                 data=None if body is None else json.dumps(body).encode())
+    if body is not None:
+        req.add_header('Content-Type', 'application/json')
+    if token:
+        req.add_header('Authorization', 'Bearer ' + TOKENS.get(token, token))
     try:
-        r = NO_PROXY.open(base + path, timeout=30)
-        code, body, ctype = r.status, r.read(), r.headers['Content-Type']
+        r = NO_PROXY.open(req, timeout=30)
+        code, data, ctype = r.status, r.read(), r.headers['Content-Type']
     except urllib.error.HTTPError as e:
-        code, body, ctype = e.code, e.read(), e.headers['Content-Type']
-    assert code == status, (path, code, body[:300])
+        code, data, ctype = e.code, e.read(), e.headers['Content-Type']
+    assert code == status, (method, path, code, data[:300])
     assert ctype == 'application/json; charset=utf-8'
-    return json.loads(body.decode('utf-8'))
+    return json.loads(data.decode('utf-8'))
 
 
-def test_health(api):
-    assert get(api, '/api/health') == {'status': 'ok', 'db': 'ok'}
+def post(base, path, body=None, token='MANAGER', status=200):
+    return call(base, path, 'POST', body if body is not None else {}, token, status)
 
 
-def test_items(api, env):
+def get(base, path, status=200, token='MANAGER'):
+    return call(base, path, token=token, status=status)
+
+
+def test_health_needs_no_login(api):
+    assert get(api, '/api/health', token=None) == {'status': 'ok', 'db': 'ok'}
+
+
+def test_login_tokens_and_roles(api, users):
+    # no token, a wrong one: 401
+    assert get(api, '/api/items', 401, token=None)['error'] == 'auth_required'
+    assert get(api, '/api/items', 401, token='f' * 64)['error'] == 'MM-179'
+    assert post(api, '/api/auth/login', {'username': users['CASHIER'], 'password': 'Wrong-pass-1'},
+                token=None, status=401)['error'] == 'MM-177'
+    assert post(api, '/api/auth/login', {'username': 'tstnobody', 'password': PW}, token=None,
+                status=401)['error'] == 'MM-177'                      # the same answer: no hint
+    assert post(api, '/api/auth/login', {'username': users['CASHIER']}, token=None, status=400)['error'] == 'missing'
+    assert get(api, '/api/auth/me', token='CASHIER') == {'username': users['CASHIER'], 'role': 'CASHIER'}
+    # the cashier: the items and the counts, not the office
+    assert get(api, '/api/items?limit=1', token='CASHIER')['rows']
+    for path in ('/api/customers', '/api/ledger/item/1', '/api/reports/sales'):
+        assert get(api, path, 403, token='CASHIER')['error'] == 'forbidden'
+    assert post(api, '/api/counts', {'name': 'TST no'}, token='CASHIER', status=403)['error'] == 'forbidden'
+    # logout: the token ends
+    r = post(api, '/api/auth/login', {'username': users['CASHIER'], 'password': PW}, token=None)
+    assert post(api, '/api/auth/logout', token=r['token'])['ok'] is True
+    assert get(api, '/api/items', 401, token=r['token'])['error'] == 'MM-179'
+
+
+def test_a_count_from_the_phones(api, env, users):
+    db, ids = env
+    a = 'TST%sA' % ids['tag']
+    c = post(api, '/api/counts', {'name': 'TST count %s' % ids['tag']})
+    assert c['status'] == 'O' and c['lines'] == []
+    cid = c['id']
+    # two phones of cashiers: 3 and 2 of a, then 5 of it set
+    r = post(api, '/api/counts/%d/scan' % cid, {'code': a, 'qty': 3, 'device': 'phone-1'}, token='CASHIER')
+    assert r['code'] == a and r['counted_qty'] == 3 and r['device'] == 'phone-1'
+    r = post(api, '/api/counts/%d/scan' % cid, {'code': a, 'qty': 2}, token='CASHIER')
+    assert r['counted_qty'] == 5 and r['device'] == users['CASHIER']
+    r = post(api, '/api/counts/%d/scan' % cid, {'code': a, 'qty': 7, 'mode': 'set'}, token='CASHIER')
+    assert r['counted_qty'] == 7
+    assert post(api, '/api/counts/%d/scan' % cid, {'code': 'NOPE-1'}, token='CASHIER',
+                status=400)['error'] == 'MM-123'
+    assert post(api, '/api/counts/%d/scan' % cid, {'code': a, 'qty': 'x'}, token='CASHIER',
+                status=400)['error'] == 'bad_number'
+    assert any(x['id'] == cid for x in get(api, '/api/counts', token='CASHIER')['rows'])
+    one = get(api, '/api/counts/%d' % cid, token='CASHIER')
+    assert [x['code'] for x in one['lines']] == [a] and one['lines'][0]['diff'] == 7 - one['lines'][0]['system_qty']
+    # posted by the manager: the stock is what was counted
+    assert post(api, '/api/counts/%d/post' % cid, token='CASHIER', status=403)['error'] == 'forbidden'
+    assert post(api, '/api/counts/%d/post' % cid)['status'] == 'P'
+    assert db.stock(ids['a']) == 7
+    assert post(api, '/api/counts/%d/scan' % cid, {'code': a}, token='CASHIER', status=400)['error'].startswith('MM-')
+    assert get(api, '/api/counts/999999999', 404)['error'] == 'not_found'
+
+
+def test_bad_bodies(api, users):
+    host, port = api[len('http://'):].split(':')
+    for body, code in ((b'not json', 'bad_json'), (b'[1, 2]', 'bad_json'), (b'x' * (64 * 1024 + 10), 'too_large')):
+        c = http.client.HTTPConnection(host, int(port), timeout=10)
+        c.request('POST', '/api/counts', body=body, headers={'Authorization': 'Bearer ' + TOKENS['MANAGER']})
+        r = c.getresponse()
+        assert json.loads(r.read())['error'] == code
+        c.close()
+
+
+def test_items(api, env, users):
     db, ids = env
     r = get(api, '/api/items?q=%CE%A8%CF%89%CE%BC%CE%AF&limit=5')          # «Ψωμί»
     assert r['limit'] == 5 and r['rows'] and all('Ψωμί' in x['name'] for x in r['rows'])
@@ -90,7 +186,7 @@ def test_items(api, env):
     assert get(api, '/api/items/NOPE-1', 404)['error'] == 'not_found'
 
 
-def test_partners_and_ledgers(api, env):
+def test_partners_and_ledgers(api, env, users):
     db, ids = env
     db.fn('receive', int, ids['customer'], 12.5, 'BANK', datetime.date(2001, 1, 2))
     db.commit()
@@ -113,7 +209,7 @@ def test_partners_and_ledgers(api, env):
     assert get(api, '/api/ledger/item/1?from=2026-13-01', 400)['error'] == 'bad_date'
 
 
-def test_reports(api, env):
+def test_reports(api, env, users):
     db, _ = env
     r = get(api, '/api/reports/sales?from=1900-01-01&to=2100-01-01')
     total = db.one('select nvl(sum(total), 0) from mm_sales_day')[0]
@@ -127,7 +223,7 @@ def test_reports(api, env):
 
 def test_only_get_and_no_tricks(api):
     host, port = api[len('http://'):].split(':')
-    for method, path, status in (('POST', '/api/health', 405), ('DELETE', '/api/items/ART01', 405),
+    for method, path, status in (('PUT', '/api/health', 405), ('DELETE', '/api/items/ART01', 405),
                                  ('GET', '/api/health/../items', 400), ('GET', '/api/%2e%2e/x', 400)):
         c = http.client.HTTPConnection(host, int(port), timeout=10)
         c.request(method, path)
