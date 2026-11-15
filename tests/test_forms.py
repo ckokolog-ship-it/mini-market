@@ -55,6 +55,13 @@ end;""",
     "create or replace function prompt_text return number is begin return 3; end;",
     "create or replace function default_where return number is begin return 4; end;",
     "create or replace function format_mask return number is begin return 5; end;",
+    "create or replace function enabled return number is begin return 11; end;",
+    "create or replace function property_false return varchar2 is begin return 'FALSE'; end;",
+    """create or replace procedure default_value(v varchar2, p varchar2) is
+begin if not fstub.items.exists(upper(p)) then fstub.items(upper(p)) := v; end if; end;""",
+    """create or replace function get_window_property(w varchar2, p number) return varchar2 is
+begin if fstub.props.exists('WINDOW ' || upper(w) || '#' || p) then return fstub.props('WINDOW ' || upper(w) || '#' || p); end if;
+return null; end;""",
     "create or replace package web as procedure show_document(u varchar2, t varchar2); end;",
     """create or replace package body web as
   procedure show_document(u varchar2, t varchar2) is begin fstub.props('SHOW_DOCUMENT') := u || ' ' || t; end;
@@ -97,7 +104,8 @@ begin
   return fstub.lov_answer;
 end;""",
 ]
-DROP = ['package ui', 'package web', 'function lov_name', 'function get_item_property', 'function status', 'function query_status', 'procedure set_record_property',
+DROP = ['package ui', 'package web', 'function enabled', 'function property_false', 'procedure default_value',
+        'function get_window_property', 'function lov_name', 'function get_item_property', 'function status', 'function query_status', 'procedure set_record_property',
         'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block', 'procedure go_item',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
         'procedure set_item_property', 'procedure set_window_property', 'function default_where', 'function format_mask',
@@ -131,7 +139,7 @@ def test_xml_ascii_and_references(name):
         for m in lv.findall('f:LOVColumnMapping', NS):
             if m.get('ReturnItem'):
                 assert m.get('ReturnItem') in items, m.get('ReturnItem')
-    assert 'LOV_FIND' in lovs or name in ('MM_MAIN', 'MM_LEDGER', 'MM_REPORTS', 'MM_POS')   # (nothing to find)
+    assert 'LOV_FIND' in lovs or name in ('MM_MAIN', 'MM_LEDGER', 'MM_REPORTS', 'MM_POS', 'MM_LOGIN', 'MM_USERS')
 
 
 BUILTINS = ('NAME_IN', 'COPY', 'SHOW_LOV', 'GO_BLOCK', 'EXECUTE_QUERY', 'MESSAGE', 'TX')
@@ -172,6 +180,19 @@ def test_items_form_stock_is_not_a_column():
 needs_db = pytest.mark.skipif(not DSN, reason='MM_DSN not set (user/password@host:port/service)')
 
 
+# the users of the forms (step 7a): an administrator logged in for every call (GLOBAL.MM_TOKEN), and a
+# cashier for the roles
+LOGIN = {}
+PW = 'Kodikos-2026'
+
+
+def login_as(c, name):
+    t, r, e = c.var(str), c.var(str), c.var(oracledb.DATETIME)
+    c.callproc('mm_auth.login', [name, PW, 'pytest', t, r, e])
+    c.connection.commit()
+    return t.getvalue()
+
+
 @pytest.fixture(scope='module')
 def cur():
     user, rest = DSN.split('/', 1)
@@ -180,8 +201,18 @@ def cur():
     c = conn.cursor()
     for s in STUBS:
         c.execute(s)
+    tag = __import__('uuid').uuid4().hex[:6]
+    for role, key in (('ADMIN', 'admin'), ('CASHIER', 'cashier')):
+        LOGIN[key] = 'tstf%s%s' % (key[0], tag)
+        c.callfunc('mm_auth.create_user', int, [LOGIN[key], 'Test forms', role, PW])
+    conn.commit()
+    LOGIN['token'] = login_as(c, LOGIN['admin'])
     yield c
     conn.rollback()
+    c.execute("delete from mm_auth_log where username like 'tstf%'")
+    c.execute("delete from mm_user where username like 'tstf%'")
+    c.execute("delete from mm_pin_user where username like 'TSTF%'")
+    conn.commit()
     for d in DROP:
         try:
             c.execute('drop ' + d)
@@ -202,7 +233,10 @@ def compile_ui(cur, name):
 
 
 def run(cur, plsql, **items):
+    """a call of the package UI, logged in as the administrator of the tests unless GLOBAL__MM_TOKEN"""
     cur.execute('begin fstub.clear; end;')
+    if LOGIN.get('token') and 'GLOBAL__MM_TOKEN' not in items:
+        items['GLOBAL__MM_TOKEN'] = LOGIN['token']
     for k, v in items.items():
         cur.execute('begin fstub.items(:k) := :v; end;', k=k.replace('__', '.'), v=v)
     cur.execute('begin %s end;' % plsql)
@@ -252,7 +286,7 @@ def test_record_groups_run(cur, name):
 def test_items_form(cur):
     compile_ui(cur, 'MM_ITEMS')
     run(cur, 'ui.init;')
-    assert prop(cur, 'WINDOW WIN#1') == 'Είδη'
+    assert prop(cur, 'WINDOW WIN#1').startswith('Είδη  [tstf')        # the title, then who logged in
     assert prop(cur, 'ITEM.CAT_NAME#3') == 'Κατηγορία'
     assert prop(cur, 'LOV LOV_CAT#1') == 'Κατηγορίες'
     assert prop(cur, 'LOV LOV_VAT.3#1') == 'Περιγραφή'
@@ -290,7 +324,7 @@ def test_items_form(cur):
 def test_partner_forms(cur, name, one):
     compile_ui(cur, name)
     run(cur, 'ui.init;')
-    assert prop(cur, 'WINDOW WIN#1') == one
+    assert prop(cur, 'WINDOW WIN#1').startswith(one)
     assert prop(cur, 'PARTNER.AFM#3') == 'ΑΦΜ'
     assert prop(cur, 'CTL.FIND#2') == 'Βρες...'
     run(cur, "ui.validate('PARTNER.AFM');", PARTNER__AFM='999000018')
@@ -340,7 +374,7 @@ def test_cards_form(cur, env):
     cat = db.one('select min(id) from mm_category')[0]
     db.cur.execute("insert into mm_item (code, name, category_id, vat_code, price, serial_tracked) "
                    "values (:c, 'Test card form', :cat, 'A', 5, 'Y')", c=f"TST{ids['tag']}F", cat=cat)
-    db.cur.execute("insert into mm_pin_user (username) values ('TSTFORMS')")
+    db.cur.execute("insert into mm_pin_user (username) values (upper(:u))", u=LOGIN['admin'])
     db.commit()
     card = db.one('select id from mm_item where code = :c', c=f"TST{ids['tag']}F")[0]
     compile_ui(cur, 'MM_CARDS')
@@ -355,9 +389,12 @@ def test_cards_form(cur, env):
     sid = db.one('select id from mm_serial where serial = :s', s=serial)[0]   # committed: the other session sees it
     run(cur, "ui.press('CTL.LOAD');", CARD__ID=str(card), CTL__NEW_SERIAL=serial, CTL__NEW_PIN='1')
     assert 'MM-136' in msgs(cur) or 'MM-135' in msgs(cur)                   # twice: a message, no failure
-    run(cur, "ui.press('CTL.PIN');", SER__ID=str(sid), CTL__USERNAME='TSTFORMS')
-    assert item(cur, 'SER.PIN_SHOW') == '123456'
+    # the PIN: who logged in (allowed), not a name typed; a cashier logged in is not allowed
     run(cur, "ui.press('CTL.PIN');", SER__ID=str(sid), CTL__USERNAME='NOBODY')
+    assert item(cur, 'SER.PIN_SHOW') == '123456'
+    db.cur.execute("delete from mm_pin_user where username = upper(:u)", u=LOGIN['admin'])
+    db.commit()
+    run(cur, "ui.press('CTL.PIN');", SER__ID=str(sid))
     assert 'MM-143' in msgs(cur) and item(cur, 'SER.PIN_SHOW') is None
     # the detail once for each master record
     run(cur, "ui.master('CARD');", CARD__ID=str(card))
@@ -479,8 +516,8 @@ def test_menu_shape():
     assert blocks == ['CTL', 'TB']                                           # and the toolbar
     buttons = [i.get('Name') for i in root.iter('{%s}Item' % NS['f'])]
     forms = {b[3:] for b in buttons if b.startswith('GO_')}
-    assert forms == set(BUILT) - {'MM_MAIN'}
-    assert 'EXIT' in buttons
+    assert forms == set(BUILT) - {'MM_MAIN', 'MM_LOGIN'}                    # (the login: before it)
+    assert 'EXIT' in buttons and 'LOGOUT' in buttons
 
 
 @needs_db
@@ -489,7 +526,7 @@ def test_menu_form(cur):
     run(cur, 'ui.init;')
     cur.execute('begin :v := fstub.queries; end;', v=(q := cur.var(str)))
     assert q.getvalue() is None                                               # nothing to query
-    assert prop(cur, 'WINDOW WIN#1') == 'Mini market'
+    assert prop(cur, 'WINDOW WIN#1').startswith('Mini market')
     assert prop(cur, 'CTL.GO_MM_KITS#2') == 'Καλάθια και σετ'
     run(cur, "ui.press('CTL.GO_MM_RESERVATIONS');")
     assert prop(cur, 'CALL_FORM') == 'MM_RESERVATIONS'
@@ -515,9 +552,12 @@ def test_pulldown_menu():
         for it in m.findall('f:MenuItem', NS):
             code = it.get('MenuItemCode')
             assert it.get('CommandType') == 'PL/SQL' and code.endswith(';')
+            if code == mkforms.LOGOUT_CODE:                                   # the logout: to the login
+                assert "NEW_FORM('MM_LOGIN')" in code and 'mm_auth.logout' in code
+                continue
             opened |= set(re.findall(r"new_form\('(\w+)'\)", code))
             assert re.fullmatch(r"(new_form\('\w+'\)|do_key\('\w+'\));", code), code
-    assert opened == set(BUILT)                                             # every form, once
+    assert opened == set(BUILT) - {'MM_LOGIN'}                              # every form, once
     for name in BUILT:
         assert xml_of(name).find('f:FormModule', NS).get('MenuModule') == 'MM_MENU'
 
@@ -826,3 +866,90 @@ def test_pos_form(cur, env):
     run(cur, "ui.press('CTL.CLOSEZ');", **reg)
     assert 'έκλεισε' in msgs(cur)
     assert db.one("select count(*) from mm_z where register_id = :r and status = 'O'", r=ids['reg'])[0] == 0
+
+
+@needs_db
+def test_login_form(cur):
+    """MM_LOGIN: a wrong password, a message; the right one, the token and the first menu; logout"""
+    compile_ui(cur, 'MM_LOGIN')
+    run(cur, 'ui.init;', GLOBAL__MM_TOKEN='')
+    assert prop(cur, 'NEW_FORM') is None                                     # the login itself: no check
+    run(cur, "ui.press('CTL.LOGIN');", CTL__L_USER=LOGIN['cashier'], CTL__L_PW='Wrong-pass-1', GLOBAL__MM_TOKEN='')
+    assert 'MM-177' in msgs(cur) and item(cur, 'CTL.L_PW') is None and prop(cur, 'NEW_FORM') is None
+    run(cur, "ui.press('CTL.L_PW');", CTL__L_USER=LOGIN['cashier'].upper(), CTL__L_PW=PW, GLOBAL__MM_TOKEN='')
+    token = item(cur, 'GLOBAL.MM_TOKEN')
+    assert prop(cur, 'NEW_FORM') == 'MM_MAIN' and len(token) == 64 and item(cur, 'CTL.L_PW') is None
+    # the first menu with that token: the cashier; then logout
+    compile_ui(cur, 'MM_MAIN')
+    run(cur, 'ui.init;', GLOBAL__MM_TOKEN=token)
+    assert prop(cur, 'NEW_FORM') is None and prop(cur, 'WINDOW WIN#1').endswith('[%s]' % LOGIN['cashier'])
+    run(cur, "ui.press('CTL.LOGOUT');", GLOBAL__MM_TOKEN=token)
+    assert prop(cur, 'NEW_FORM') == 'MM_LOGIN' and item(cur, 'GLOBAL.MM_TOKEN') is None
+    v = cur.var(str)
+    cur.execute("begin begin mm_auth.check_token(:t, :a, :b, :c); :v := 'alive'; "
+                "exception when others then :v := sqlerrm; end; end;",
+                t=token, a=cur.var(int), b=cur.var(str), c=cur.var(str), v=v)
+    assert 'MM-179' in v.getvalue()
+
+
+@needs_db
+def test_roles_of_the_forms(cur):
+    """no login: to MM_LOGIN; a cashier: not the office (back to the first menu), its buttons and the
+    items of the bar that open the office off; an administrator: all on"""
+    compile_ui(cur, 'MM_ITEMS')
+    run(cur, 'ui.init;', GLOBAL__MM_TOKEN='')
+    assert prop(cur, 'NEW_FORM') == 'MM_LOGIN'
+    cashier = login_as(cur, LOGIN['cashier'])
+    run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
+    assert prop(cur, 'NEW_FORM') == 'MM_MAIN' and 'MANAGER' in msgs(cur)
+    cur.execute('begin :v := fstub.queries; end;', v=(q := cur.var(str)))
+    assert q.getvalue() is None                                               # nothing shown
+    compile_ui(cur, 'MM_MAIN')
+    run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
+    assert prop(cur, 'NEW_FORM') is None
+    assert prop(cur, 'CTL.GO_MM_ITEMS#11') == 'FALSE' and prop(cur, 'CTL.GO_MM_USERS#11') == 'FALSE'
+    assert prop(cur, 'CTL.GO_MM_POS#11') is None and prop(cur, 'CTL.GO_MM_RESERVATIONS#11') is None
+    assert prop(cur, 'MENU SALES_MENU.INVOICES#11') == 'FALSE' and prop(cur, 'MENU SALES_MENU.POS#11') is None
+    assert prop(cur, 'MENU FILE_MENU.USERS#11') == 'FALSE'
+    run(cur, 'ui.init;')                                                      # the administrator
+    assert prop(cur, 'CTL.GO_MM_ITEMS#11') is None and prop(cur, 'MENU FILE_MENU.USERS#11') is None
+    compile_ui(cur, 'MM_POS')
+    run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
+    assert prop(cur, 'NEW_FORM') is None                                     # the till: a cashier's
+    compile_ui(cur, 'MM_USERS')
+    run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
+    assert prop(cur, 'NEW_FORM') == 'MM_MAIN'                                # the users: administrators only
+
+
+@needs_db
+def test_users_form(cur):
+    compile_ui(cur, 'MM_USERS')
+    run(cur, 'ui.init;')
+    assert prop(cur, 'NEW_FORM') is None and item(cur, 'CTL.U_ROLE') == 'CASHIER'
+    new = LOGIN['admin'].replace('tstfa', 'tstfn')
+    msg = fails(cur, "ui.press('CTL.NEWUSER');", CTL__U_NAME=new, CTL__U_ROLE='CASHIER', CTL__U_PW=PW,
+                CTL__U_PW2=PW + 'x')
+    assert 'διαφέρουν' in msg and item(cur, 'CTL.U_PW') is None
+    run(cur, "ui.press('CTL.NEWUSER');", CTL__U_NAME=new, CTL__U_FULL='Νέος', CTL__U_ROLE='cashier',
+        CTL__U_PW=PW, CTL__U_PW2=PW)
+    assert 'φτιάχτηκε' in msgs(cur) and item(cur, 'CTL.U_PW') is None and item(cur, 'CTL.U_PW2') is None
+
+    def one():
+        cur.execute('select role, active from mm_user where username = :u', u=new)
+        return cur.fetchone()
+    assert one() == ('CASHIER', 'Y')
+    run(cur, "ui.press('CTL.SETROLE');", USR__USERNAME=new, CTL__U_ROLE='MANAGER')
+    run(cur, "ui.press('CTL.TOGGLEACT');", USR__USERNAME=new, USR__ACTIVE='Y')
+    assert one() == ('MANAGER', 'N')
+    run(cur, "ui.press('CTL.TOGGLEACT');", USR__USERNAME=new, USR__ACTIVE='N')
+    run(cur, "ui.press('CTL.TOGGLEPIN');", USR__USERNAME=new)
+    run(cur, "ui.post_query('USR');", USR__USERNAME=new)
+    assert item(cur, 'USR.PIN_OK') == 'Y'
+    run(cur, "ui.press('CTL.TOGGLEPIN');", USR__USERNAME=new)
+    run(cur, "ui.post_query('USR');", USR__USERNAME=new)
+    assert item(cur, 'USR.PIN_OK') == 'N'
+    run(cur, "ui.press('CTL.SETPW');", USR__USERNAME=new, CTL__U_PW='Allos-kodikos-9', CTL__U_PW2='Allos-kodikos-9')
+    assert 'Νέος κωδικός' in msgs(cur)
+    run(cur, "ui.press('CTL.UNLOCK');", USR__USERNAME=new)
+    run(cur, "ui.press('CTL.SETPW');", USR__USERNAME=new, CTL__U_PW='short', CTL__U_PW2='short')
+    assert 'MM-175' in msgs(cur)

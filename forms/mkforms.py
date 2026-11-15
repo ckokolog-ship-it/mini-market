@@ -154,7 +154,6 @@ FORMS['MM_CARDS'] = dict(
     ctl=[('NEW_SERIAL', 'text', 10, 200, 200, 'Νέο serial', {'len': 40}),
          ('NEW_PIN', 'secret', 216, 200, 140, 'PIN', {'len': 20}),
          ('LOAD', 'button', 362, 198, 120, 'Φόρτωσε', {}),
-         ('USERNAME', 'text', 560, 200, 120, 'Χρήστης', {'len': 60, 'upper': True}),
          ('PIN', 'button', 686, 198, 120, 'Δείξε PIN', {})],
     find_title='Κάρτες κινητής',
     find=("select id, code, name from mm_item where serial_tracked = 'Y' order by code",
@@ -557,26 +556,77 @@ FORMS['MM_REPORTS'] = dict(
          ('RPT_MIN', 'button', 20, 144, 300, 'Ελάχιστο απόθεμα (σήμερα)', {}),
          ('GO_MM_LEDGER', 'button', 20, 192, 300, 'Καρτέλες (είδους, πελάτη, προμηθευτή)', {})])
 
+# the login (step 7a): name and password (MM_AUTH, as the REST service); the token to GLOBAL.MM_TOKEN,
+# then the first menu. Every other form checks it when it opens (ui.session_ok, FORM_ROLES).
+FORMS['MM_LOGIN'] = dict(
+    title='Σύνδεση',
+    blocks=[],
+    ctl=[('L_USER', 'text', 40, 40, 220, 'Όνομα χρήστη', {'len': 30, 'lower': True}),
+         ('L_PW', 'secret', 40, 90, 220, 'Κωδικός (Enter)', {'len': 200, 'enter': True}),
+         ('LOGIN', 'button', 40, 130, 220, 'Σύνδεση', {}),
+         ('EXIT', 'button', 40, 166, 220, 'Έξοδος', {})])
+
+# the users of the shop (ADMIN): the list; a new one, a new password, the role, active, unlock, the PINs
+FORMS['MM_USERS'] = dict(
+    title='Χρήστες',
+    blocks=[
+        dict(name='USR', table='MM_USER', order='username', top=80, rows=10, read_only=True,
+             cols=[C('ID', '', 0, num=True, hidden=True),
+                   C('USERNAME', 'Χρήστης', 120, len=30),
+                   C('FULL_NAME', 'Ονοματεπώνυμο', 200, len=100),
+                   C('ROLE', 'Ρόλος', 80, len=10),
+                   C('ACTIVE', 'Ενεργός', 54, len=1),
+                   C('FAILED', 'Λάθη', 40, num=True),
+                   C('LOCKED_UNTIL', 'Κλειδωμένος έως', 100, date=True),
+                   C('PIN_OK', 'PIN', 40, len=1, db=False, display=True)])],
+    ctl=[('U_NAME', 'text', 10, 340, 120, 'Νέος χρήστης', {'len': 30, 'lower': True}),
+         ('U_FULL', 'text', 136, 340, 200, 'Ονοματεπώνυμο', {'len': 100}),
+         ('U_ROLE', 'text', 342, 340, 90, 'Ρόλος (λίστα)', {'len': 10, 'upper': True, 'init': 'CASHIER', 'lov': 'LOV_ROLE'}),
+         ('U_PW', 'secret', 438, 340, 130, 'Κωδικός', {'len': 200}),
+         ('U_PW2', 'secret', 574, 340, 130, 'Ξανά ο κωδικός', {'len': 200}),
+         ('NEWUSER', 'button', 10, 380, 190, 'Νέος χρήστης', {}),
+         ('SETPW', 'button', 206, 380, 190, 'Νέος κωδικός (επιλεγμένου)', {}),
+         ('SETROLE', 'button', 402, 380, 190, 'Ρόλος (επιλεγμένου)', {}),
+         ('TOGGLEACT', 'button', 10, 414, 190, 'Ενεργός / ανενεργός', {}),
+         ('UNLOCK', 'button', 206, 414, 190, 'Ξεκλείδωμα', {}),
+         ('TOGGLEPIN', 'button', 402, 414, 190, 'Βλέπει PIN: ναι / όχι', {})],
+    lovs=[('LOV_ROLE', 'Ρόλοι', ' union all '.join(
+              "select '%s' code, mm_text.t('%s') descr, %d o from dual" % (c, WORDS.key(d), i)
+              for i, (c, d) in enumerate((('CASHIER', 'Ταμίας'), ('MANAGER', 'Προϊστάμενος'), ('ADMIN', 'Διαχειριστής')))) + ' order by 3',
+           [('CODE', 80, 'Ρόλος', 'CTL.U_ROLE'), ('DESCR', 140, 'Περιγραφή', None), ('O', 0, '#', None)])])
+
+# the role each form needs (ui.session_ok): None the login itself
+FORM_ROLES = {'MM_LOGIN': None, 'MM_MAIN': 'CASHIER', 'MM_POS': 'CASHIER', 'MM_RESERVATIONS': 'CASHIER',
+              'MM_ITEMS': 'MANAGER', 'MM_CUSTOMERS': 'MANAGER', 'MM_SUPPLIERS': 'MANAGER', 'MM_CARDS': 'MANAGER',
+              'MM_KITS': 'MANAGER', 'MM_PROMOS': 'MANAGER', 'MM_VARIANTS': 'MANAGER', 'MM_INVOICES': 'MANAGER',
+              'MM_PAYMENTS': 'MANAGER', 'MM_LEDGER': 'MANAGER', 'MM_REPORTS': 'MANAGER', 'MM_USERS': 'ADMIN'}
+
 # the menu: a button for each form (CALL_FORM: closing it comes back here), and the exit
 MENU_FORMS = [('MM_ITEMS', 'Είδη'), ('MM_CUSTOMERS', 'Πελάτες'), ('MM_SUPPLIERS', 'Προμηθευτές'),
               ('MM_CARDS', 'Κάρτες κινητής'), ('MM_RESERVATIONS', 'Κρατήσεις'), ('MM_KITS', 'Καλάθια και σετ'),
               ('MM_PROMOS', 'Προσφορές'), ('MM_VARIANTS', 'Ρούχα και παπούτσια'), ('MM_INVOICES', 'Τιμολόγια'),
               ('MM_PAYMENTS', 'Εισπράξεις και πληρωμές'), ('MM_LEDGER', 'Καρτέλες'), ('MM_REPORTS', 'Αναφορές'),
-              ('MM_POS', 'Ταμείο λιανικής')]
+              ('MM_POS', 'Ταμείο λιανικής'), ('MM_USERS', 'Χρήστες')]
 FORMS['MM_MAIN'] = dict(
     title='Mini market',
     blocks=[],
     ctl=[('GO_' + f, 'button', 20 + (i % 2) * 230, 20 + (i // 2) * 44, 220, t, {})
          for i, (f, t) in enumerate(MENU_FORMS)] +
-        [('EXIT', 'button', 135, 20 + (len(MENU_FORMS) + 1) // 2 * 44 + 16, 220, 'Έξοδος', {})])
+        [('LOGOUT', 'button', 20, 20 + (len(MENU_FORMS) + 1) // 2 * 44 + 16, 220, 'Αποσύνδεση', {}),
+         ('EXIT', 'button', 250, 20 + (len(MENU_FORMS) + 1) // 2 * 44 + 16, 220, 'Έξοδος', {})])
 
 
 # the bar of pull-down menus of all the forms (the menu module MM_MENU, in place of DEFAULT&SMARTBAR):
 # (menu, label, [(item, label, PL/SQL)]); a form opens in the place of the one on the screen (NEW_FORM:
 # unsaved changes are asked first). Its Greek: ui.init of each form (SET_MENU_ITEM_PROPERTY).
 MENU_MODULE = 'MM_MENU'
+# the logout from the bar (the PL/SQL of a menu does not see the package UI of the form)
+LOGOUT_CODE = ("BEGIN mm_auth.logout(NAME_IN('GLOBAL.MM_TOKEN')); FORMS_DDL('COMMIT'); "
+               "EXCEPTION WHEN OTHERS THEN NULL; END; COPY('', 'GLOBAL.MM_TOKEN'); NEW_FORM('MM_LOGIN');")
 MENU_BAR = [
     ('FILE', 'Αρχείο', [('MAIN', 'Αρχικό μενού', "new_form('MM_MAIN');"),
+                        ('USERS', 'Χρήστες', "new_form('MM_USERS');"),
+                        ('LOGOUT', 'Αποσύνδεση', LOGOUT_CODE),
                         ('EXIT', 'Έξοδος', "do_key('EXIT_FORM');")]),
     ('REC', 'Εγγραφές', [('SAVE', 'Αποθήκευση (F10)', "do_key('COMMIT_FORM');"),
                          ('ENTERQ', 'Αναζήτηση (F7)', "do_key('ENTER_QUERY');"),
@@ -689,8 +739,32 @@ def program(name, f, texts):
                         "c_detail CONSTANT VARCHAR2(30) := '%s';" % f.get('detail', ''))
     body = body.replace("c_detail2 CONSTANT VARCHAR2(30) := ''; -- DETAIL2",
                         "c_detail2 CONSTANT VARCHAR2(30) := '%s';" % f.get('detail2', ''))
+    body = body.replace("c_role CONSTANT VARCHAR2(10) := ''; -- ROLE",
+                        "c_role CONSTANT VARCHAR2(10) := '%s';" % (FORM_ROLES.get(name) or ''))
     body = body.replace('NULL; -- TEXTS', ('\n' + ' ' * 4).join(texts))
+    body = body.replace('NULL; -- ROLES', ('\n' + ' ' * 4).join(role_lines(name, f)))
     return spec, body
+
+
+def role_lines(name, f):
+    """after the login: the buttons of the first menu and the items of the bar that open a form the
+    role may not open, off (the form itself would refuse it too: ui.session_ok)"""
+    out = []
+    for c in f.get('ctl', []):
+        if c[0].startswith('GO_'):
+            r = FORM_ROLES.get(c[0][3:])
+            if r and r != 'CASHIER':
+                out.append("IF NOT can('%s') THEN SET_ITEM_PROPERTY('CTL.%s', ENABLED, PROPERTY_FALSE); END IF;"
+                           % (r, c[0]))
+    if FORM_ROLES.get(name):
+        for m, _, items in MENU_BAR:
+            for i, _, code in items:
+                g = re.match(r"new_form\('(\w+)'\);$", code)
+                r = FORM_ROLES.get(g.group(1)) if g else None
+                if r and r != 'CASHIER':
+                    out.append("IF NOT can('%s') THEN SET_MENU_ITEM_PROPERTY('%s_MENU.%s', ENABLED, PROPERTY_FALSE); END IF;"
+                               % (r, m, i))
+    return out or ['NULL;']
 
 
 def block_items(blk, cols, top, say, x0=10):
@@ -797,6 +871,8 @@ def ctl_item(c, say):
         a['Justification'] = 'Right'
     if o.get('upper'):
         a['CaseRestriction'] = 'Upper'
+    if o.get('lower'):
+        a['CaseRestriction'] = 'Lower'
     if 'init' in o:
         a['InitializeValue'] = o['init']
     if o.get('lov'):
@@ -856,7 +932,7 @@ def build(name, f):
     detail = blocks[1]['name'] if len(blocks) > 1 else ''
     detail2 = blocks[2]['name'] if len(blocks) > 2 else ''
     spec, body = program(name, dict(block=master['name'], where=master.get('where', ''), detail=detail,
-                                    detail2=detail2), texts)
+                                    detail2=detail2, ctl=f.get('ctl', [])), texts)
     out = ['<?xml version="1.0" encoding="UTF-8"?>',
            '<Module version="141200000" xmlns="http://xmlns.oracle.com/Forms">',
            '  <FormModule Name="%s" Title=%s ConsoleWindow="%s" MenuModule="%s">'
