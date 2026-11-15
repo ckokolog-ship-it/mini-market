@@ -115,6 +115,12 @@ def cleanup(c):
     c.execute("delete from mm_reservation where name like 'Test %'")
     c.execute(f'update mm_doc set ref_doc_id = null where ref_doc_id in ({TEST_DOCS})')
     c.execute(f'update mm_doc set invoice_id = null where invoice_id in ({TEST_DOCS})')
+    # an item of the shop on a document of the tests (an order of the pages with the bread too): its
+    # stock back as its moves are taken away (row by row: reservable)
+    c.execute(f'select item_id, sum(qty) from mm_stock_move where doc_id in ({TEST_DOCS}) '
+              f'and item_id not in ({TEST_ITEMS}) group by item_id')
+    for item, qty in c.fetchall():
+        c.execute('update mm_item set stock = stock - :q where id = :i', q=qty, i=item)
     c.execute(f'delete from mm_stock_move where item_id in ({TEST_ITEMS}) or doc_id in ({TEST_DOCS})')
     c.execute(f'delete from mm_count_line where item_id in ({TEST_ITEMS})')
     c.execute("delete from mm_count where name like 'TST %'")

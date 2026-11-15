@@ -364,6 +364,12 @@ begin
           || 'constraint mm_doc_type_vsign_ck check (vat_sign in (-1, 0, 1))');
   add_col('MM_DOC_TYPE', 'REF_TYPE', 'ref_type varchar2(3)');
   add_col('MM_DOC', 'INVOICE_ID', 'invoice_id number constraint mm_doc_invoice_fk references mm_doc');
+  -- the orders (a reservation from the pages): who wrote it, when it was ready (picked), what of each
+  -- line was picked
+  add_col('MM_RESERVATION', 'CREATED_BY', 'created_by varchar2(30)');
+  add_col('MM_RESERVATION', 'READY_AT', 'ready_at date');
+  add_col('MM_RESERVATION_LINE', 'PICKED', 'picked number(12,3) default 0 not null '
+          || 'constraint mm_res_line_picked_ck check (picked >= 0)');
   for c in (select data_length n from user_tab_cols where table_name = 'MM_CASH_MOVE' and column_name = 'KIND') loop
     if c.n < 10 then
       execute immediate 'alter table mm_cash_move modify (kind varchar2(10))';

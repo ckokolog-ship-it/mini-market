@@ -318,3 +318,68 @@ def test_the_till(api, env, users):
     c = s['closed']
     assert (c['docs'], c['total'], c['cash'], c['card']) == (2, 9.04, 6.78, 2.26) and s['z'] is None
     assert sum(v['total'] for v in c['vat_rows']) == 9.04
+
+
+def test_orders_to_the_till(api, env, users):
+    """an order written by a cashier (a phone), items by scan (one more of it, a quantity set, out),
+    picked, ready; at the till all of it into the receipt at once, paid: done. Another one for a
+    customer on credit: a delivery note (a manager)"""
+    db, ids = env
+    test_core.close_open_z(db, ids['reg'])
+    a, b = 'TST%sA' % ids['tag'], 'TST%sB' % ids['tag']
+    o = post(api, '/api/orders', {'name': 'Test παραγγελία', 'phone': '6912345678', 'notes': 'στις 6'}, token='CASHIER')
+    oid = o['id']
+    assert (o['status'], o['created_by'], o['lines'], o['ready_at']) == ('O', users['CASHIER'], [], None)
+    assert o['pickup_date'] == datetime.date.today().isoformat()
+    assert post(api, '/api/orders', {'name': 'Test x', 'phone': 'abc'}, token='CASHIER', status=400)['error'] == 'MM-145'
+    path = '/api/orders/%d' % oid
+    post(api, path + '/lines', {'code': b}, token='CASHIER')
+    o = post(api, path + '/lines', {'code': b}, token='CASHIER')                   # one more of it
+    o = post(api, path + '/lines', {'code': a.lower(), 'qty': 2, 'mode': 'SET'}, token='CASHIER')
+    assert [(x['code'], x['qty']) for x in o['lines']] == [(a, 2), (b, 2)] and o['total'] == 29.32
+    assert post(api, path + '/lines', {'code': 'TSTNOTHING'}, token='CASHIER', status=404)['error'] == 'not_found'
+    assert any(x['id'] == oid for x in get(api, '/api/orders', token='CASHIER')['rows'])
+    o = post(api, path + '/pick', {'item_id': ids['a'], 'qty': 2}, token='CASHIER')
+    assert [x['picked'] for x in o['lines']] == [2, 0]
+    assert post(api, path + '/pick', {'item_id': ids['b'], 'qty': 9}, token='CASHIER', status=400)['error'] == 'MM-186'
+    o = post(api, path + '/ready', {'ready': True}, token='CASHIER')
+    assert o['ready_at'] and [x['picked'] for x in o['lines']] == [2, 2]
+    o = post(api, path + '/lines', {'code': b, 'qty': 3, 'mode': 'SET'}, token='CASHIER')   # changed: not ready
+    assert o['ready_at'] is None
+    # at the till: the Z closed, then a receipt open with lines: not; then all of it at once
+    pos = '/api/pos/tst'
+    assert post(api, pos + '/order', {'id': oid}, token='CASHIER', status=409)['error'] == 'z_closed'
+    post(api, pos + '/open', {'cash': 0}, token='CASHIER')
+    post(api, pos + '/scan', {'code': b}, token='CASHIER')
+    assert post(api, pos + '/order', {'id': oid}, token='CASHIER', status=409)['error'] == 'receipt_open'
+    post(api, pos + '/void', token='CASHIER')
+    s = post(api, pos + '/order', {'id': oid}, token='CASHIER')
+    r = s['receipt']
+    assert r['order_id'] == oid and sorted((x['code'], x['qty']) for x in r['lines']) == [(a, 2), (b, 3)]
+    assert r['total'] == 31.58 and r['due'] == 31.58
+    assert post(api, path + '/lines', {'code': b}, token='CASHIER', status=400)['error'] == 'MM-146'   # at the till now
+    s = post(api, pos + '/pay', {'payment': 'CASH', 'given': 40}, token='CASHIER')
+    assert s['paid']['change'] == 8.42
+    o = get(api, path, token='CASHIER')
+    assert o['status'] == 'D' and o['doc_text'].startswith('ALP ')
+    assert all(x['id'] != oid for x in get(api, '/api/orders', token='CASHIER')['rows'])          # open only
+    assert any(x['id'] == oid for x in get(api, '/api/orders?status=all', token='CASHIER')['rows'])
+    # a deposit: the till takes only the rest
+    o2 = post(api, '/api/orders', {'name': 'Test προκαταβολή', 'phone': '6912345678'}, token='CASHIER')
+    post(api, '/api/orders/%d/lines' % o2['id'], {'code': b}, token='CASHIER')
+    db.proc('take_deposit', o2['id'], ids['reg'], 1)
+    db.commit()
+    s = post(api, pos + '/order', {'id': o2['id']}, token='CASHIER')
+    assert (s['receipt']['total'], s['receipt']['due']) == (2.26, 1.26)
+    s = post(api, pos + '/pay', {'payment': 'CASH', 'given': 2}, token='CASHIER')
+    assert (s['paid']['due'], s['paid']['change']) == (1.26, 0.74)
+    post(api, pos + '/close', token='CASHIER')
+    # a customer on credit: a delivery note, by a manager; cancelled orders
+    o3 = post(api, '/api/orders', {'name': 'Test χονδρική', 'phone': '2610000000', 'customer_id': ids['customer']})
+    post(api, '/api/orders/%d/lines' % o3['id'], {'code': b, 'qty': 6})
+    assert post(api, '/api/orders/%d/note' % o3['id'], token='CASHIER', status=403)['error'] == 'forbidden'
+    o3 = post(api, '/api/orders/%d/note' % o3['id'])
+    assert o3['status'] == 'D' and o3['doc_text'].startswith('DAP ') and o3['customer']
+    o4 = post(api, '/api/orders', {'name': 'Test ακύρωση', 'phone': '6912345678'}, token='CASHIER')
+    assert post(api, '/api/orders/%d/cancel' % o4['id'], token='CASHIER')['status'] == 'C'
+    assert get(api, '/api/orders/999999999', 404, token='CASHIER')['error'] == 'not_found'

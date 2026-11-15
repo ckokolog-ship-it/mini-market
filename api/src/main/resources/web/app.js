@@ -10,6 +10,7 @@ const main = () => $('#main');
 const RANK = { CASHIER: 1, MANAGER: 2, ADMIN: 3 };
 const PAGES = [
   ['#/pos', 'Ταμείο', 'CASHIER'],
+  ['#/orders', 'Παραγγελίες', 'CASHIER'],
   ['#/items', 'Είδη', 'CASHIER'],
   ['#/labels', 'Ετικέτες', 'CASHIER'],
   ['#/partners/customers', 'Πελάτες', 'MANAGER'],
@@ -573,7 +574,7 @@ async function labelsPage() {
 // scan: Enter of a scanner), its lines, paid by cash (what was given: the change) or card --------------
 let posReg = null;
 try { posReg = localStorage.getItem('mm.register'); } catch (e) { posReg = null; }
-async function posPage() {
+async function posPage(params) {
   let regs;
   try { regs = (await api('pos')).rows; } catch (e) { fail(e); return; }
   if (!regs.length) { show(el('h1', {}, 'Ταμείο'), el('p', { class: 'muted' }, 'Κανένα ταμείο.')); return; }
@@ -591,6 +592,8 @@ async function posPage() {
   const code = el('input', { name: 'code', autocomplete: 'off', placeholder: 'barcode, κωδικός ή serial' });
   const n = el('input', { name: 'qty', type: 'number', step: 'any', min: '0', value: '1', class: 'w6' });
   const total = el('p', { class: 'big total-due' });
+  const orderText = el('span', { class: 'muted order-text' });
+  const orders = el('div');
   const lines = el('div');
   const given = el('input', { name: 'given', type: 'number', step: '0.01', min: '0', class: 'w8' });
   const change = el('p', { class: 'big' });
@@ -634,7 +637,10 @@ async function posPage() {
     scan.hidden = !z;
     pay.hidden = !st.receipt;
     const r = st.receipt;
-    total.textContent = 'Σύνολο: ' + money(r ? r.total : 0);
+    total.textContent = 'Σύνολο: ' + money(r ? r.total : 0)
+      + (r && r.deposit > 0 ? ` · προκαταβολή ${money(r.deposit)} · πληρωτέο ${money(r.due)}` : '');
+    orderText.textContent = r && r.order_id ? `Παραγγελία ${r.order_id}` : '';
+    orders.replaceChildren();
     lines.replaceChildren(r && r.lines.length ? table([['#'], ['Είδος'], ['Ποσότητα', 'num'], ['Τιμή', 'num'], ['Ποσό', 'num'], ['']],
       r.lines.map((x) => {
         const setQ = (q) => run(`/lines/${x.id}`, { qty: q });
@@ -664,7 +670,28 @@ async function posPage() {
         change.textContent = '';
       } else code.select();
     },
-  }, el('label', {}, 'Σάρωση (Enter)', code), el('label', {}, 'Ποσότητα', n), el('button', { class: 'primary', type: 'submit' }, 'Βάλε'), total);
+  }, el('label', {}, 'Σάρωση (Enter)', code), el('label', {}, 'Ποσότητα', n), el('button', { class: 'primary', type: 'submit' }, 'Βάλε'),
+  el('button', { type: 'button', onclick: () => pickOrder() }, 'Παραγγελία'), orderText, total);
+  // an order into the receipt, all of it: the open ones of today and before, the ready ones first
+  const loadOrder = async (id) => {
+    const r = await run('/order', { id });
+    if (r) toast(`Η παραγγελία ${id} μπήκε στην απόδειξη`);
+  };
+  const pickOrder = async () => {
+    try {
+      const r = await api('orders');
+      const today = isoToday();
+      const rows = r.rows.filter((x) => x.pickup_date <= today && !x.doc_id)
+        .sort((x, y) => (y.ready_at ? 1 : 0) - (x.ready_at ? 1 : 0) || x.id - y.id);
+      orders.replaceChildren(el('div', { class: 'panel' }, el('h2', {}, 'Παραγγελίες για σήμερα'),
+        rows.length ? table([['#'], ['Όνομα'], ['Είδη', 'num'], ['Ποσό', 'num'], ['']], rows.map((x) => el('tr', {
+          class: 'click', onclick: () => loadOrder(x.id),
+        }, el('td', {}, x.id), el('td', { class: 'wrap' }, x.name + (x.customer ? ' · ' + x.customer : '')),
+        num(x.lines, qty), num(x.total), el('td', {}, x.ready_at ? 'έτοιμη' : 'μαζεύεται'))))
+          : el('p', { class: 'muted' }, 'Καμία ανοιχτή παραγγελία για σήμερα.'),
+        el('button', { type: 'button', onclick: () => orders.replaceChildren() }, 'Κλείσε')));
+    } catch (e) { fail(e); }
+  };
   const payWith = async (how) => {
     const body = { payment: how };
     if (how === 'CASH' && given.value !== '') body.given = Number(given.value);
@@ -688,8 +715,157 @@ async function posPage() {
   };
   document.addEventListener('keydown', keys);
   show(el('h1', {}, 'Ταμείο'), el('div', { class: 'panel' }, el('div', { class: 'row' }, el('label', {}, 'Ταμείο', pick), zText), zBox),
-    scan, lines, pay, change, last);
+    scan, orders, lines, pay, change, last);
   await load();
+  if (params && params.get('order') && st && st.z) loadOrder(Number(params.get('order')));
+}
+
+// -- the orders: written on a phone (a call, the shop), picked from the shelves, ready; at the till all
+// of it at once (Ταμείο, «Παραγγελία»); a customer on credit: a delivery note (a manager) ----------
+const ORDER_ST = { O: 'ανοιχτή', D: 'παραδόθηκε', C: 'ακυρώθηκε' };
+async function ordersPage(params) {
+  const all = params.get('all') === '1';
+  const name = el('input', { name: 'name', required: true, autocomplete: 'off' });
+  const phone = el('input', { name: 'phone', type: 'tel', required: true, autocomplete: 'off' });
+  const date = el('input', { name: 'pickup_date', type: 'date', value: isoToday() });
+  const notes = el('input', { name: 'notes', autocomplete: 'off' });
+  const cust = el('select', { name: 'customer_id' }, el('option', { value: '' }, '—'));
+  const out = el('div');
+  if (can('MANAGER')) {
+    api('customers?limit=500').then((r) => r.rows.forEach((x) => cust.append(el('option', { value: x.id }, x.name))))
+      .catch(fail);
+    cust.addEventListener('change', async () => {
+      if (!cust.value) return;
+      try {
+        const x = await api('customers/' + cust.value);
+        if (!name.value) name.value = x.name;
+        if (!phone.value && x.phone) phone.value = x.phone;
+      } catch (e) { fail(e); }
+    });
+  }
+  const form = el('form', {
+    class: 'panel row',
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      try {
+        const o = await api('orders', {
+          name: name.value.trim(), phone: phone.value.trim(), pickup_date: date.value || null,
+          notes: notes.value.trim() || null, customer_id: cust.value ? Number(cust.value) : null,
+        });
+        location.hash = '#/order/' + o.id;
+      } catch (e) { fail(e); }
+    },
+  }, el('label', {}, 'Όνομα', name), el('label', {}, 'Τηλέφωνο', phone), el('label', {}, 'Για', date),
+  can('MANAGER') ? el('label', {}, 'Πελάτης (χονδρική)', cust) : null, el('label', { class: 'grow' }, 'Σημείωση', notes),
+  el('button', { class: 'primary', type: 'submit' }, 'Νέα παραγγελία'));
+  try {
+    const r = await api('orders' + (all ? '?status=all' : ''));
+    out.replaceChildren(r.rows.length ? table([['#'], ['Όνομα'], ['Για'], ['Είδη', 'num'], ['Ποσό', 'num'], ['Κατάσταση'], ['Από', 'hide-phone']],
+      r.rows.map((x) => el('tr', { class: 'click', onclick: () => { location.hash = '#/order/' + x.id; } },
+        el('td', {}, x.id), el('td', { class: 'wrap' }, x.name + (x.customer ? ' · ' + x.customer : '')), el('td', {}, day(x.pickup_date)),
+        num(x.lines, qty), num(x.total),
+        el('td', {}, x.status === 'O' ? (x.doc_id ? 'στο ταμείο' : x.ready_at ? 'έτοιμη' : 'μαζεύεται') : ORDER_ST[x.status]),
+        el('td', { class: 'hide-phone' }, x.created_by || ''))))
+      : el('p', { class: 'muted' }, 'Καμία παραγγελία.'));
+  } catch (e) { fail(e); }
+  show(el('h1', {}, 'Παραγγελίες'), form,
+    el('p', {}, el('a', { href: all ? '#/orders' : '#/orders?all=1' }, all ? 'Μόνο οι ανοιχτές' : 'Και οι παλιές (90 ημερών)')), out);
+  name.focus();
+}
+
+async function orderPage(id) {
+  const code = el('input', { name: 'code', autocomplete: 'off', placeholder: 'barcode, κωδικός ή περιγραφή' });
+  const n = el('input', { name: 'qty', type: 'number', step: 'any', min: '0', value: '1', class: 'w6' });
+  const found = el('div');
+  const head = el('div', { class: 'panel' });
+  const lines = el('div');
+  const actions = el('div', { class: 'row' });
+  const title = el('h1', {}, 'Παραγγελία ' + id);
+  let o = null;
+  const run = async (path, body) => {
+    try {
+      o = path === '' ? await api('orders/' + id) : await api(`orders/${id}/${path}`, body);
+      draw();
+      return o;
+    } catch (e) { fail(e); return null; }
+  };
+  const add = async (c, q, mode = 'ADD') => {
+    const r = await run('lines', { code: c, qty: q, mode });
+    if (r) { code.value = ''; n.value = '1'; found.replaceChildren(); }
+    code.focus();
+    return r;
+  };
+  const draw = () => {
+    const open = o.status === 'O' && !o.doc_id;
+    title.textContent = `Παραγγελία ${o.id}: ${o.name}`;
+    head.replaceChildren(el('dl', { class: 'kv' },
+      [['Τηλέφωνο', o.phone], ['Για', day(o.pickup_date)], ['Πελάτης', o.customer], ['Σημείωση', o.notes],
+        ['Κατάσταση', o.status === 'O' ? (o.doc_id ? `στο ταμείο (${o.doc_text || 'πρόχειρη απόδειξη'})` : o.ready_at ? 'έτοιμη' : 'μαζεύεται') : ORDER_ST[o.status] + (o.doc_text ? ' · ' + o.doc_text : '')],
+        ['Προκαταβολή', o.deposit > 0 ? money(o.deposit) : null], ['Έγραψε', o.created_by], ['Σύνολο', money(o.total)]]
+        .filter(([, v]) => v !== null && v !== undefined && v !== '')
+        .flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
+    scan.hidden = !open;
+    lines.replaceChildren(o.lines.length ? table([['Κωδικός'], ['Είδος'], ['Ποσότητα', 'num'], ['Τιμή', 'num'], ['Ποσό', 'num'], ['Μαζεύτηκε'], ['']],
+      o.lines.map((x) => {
+        const done = x.picked >= x.qty;
+        return el('tr', { class: done ? 'picked' : null }, el('td', {}, x.code),
+          el('td', { class: 'wrap' }, x.name, x.available < 0 ? el('div', { class: 'neg' }, 'δεν φτάνει το απόθεμα') : null),
+          num(x.qty, qty), num(x.price), num(x.total),
+          el('td', {}, el('input', {
+            type: 'checkbox', checked: done, disabled: !open, 'aria-label': 'Μαζεύτηκε ' + x.code,
+            onchange: (ev) => run('pick', { item_id: x.item_id, qty: ev.target.checked ? x.qty : 0 }),
+          })),
+          el('td', { class: 'num' }, open ? [
+            el('button', { type: 'button', 'aria-label': 'Μία λιγότερη ' + x.code, disabled: x.qty <= 1, onclick: () => add(x.code, x.qty - 1, 'SET') }, '−'),
+            el('button', { type: 'button', 'aria-label': 'Μία ακόμα ' + x.code, onclick: () => add(x.code, 1) }, '+'),
+            el('button', { type: 'button', class: 'danger', 'aria-label': 'Βγάλε ' + x.code, onclick: () => add(x.code, 0, 'SET') }, '×')] : null));
+      })) : el('p', { class: 'muted' }, 'Κανένα είδος ακόμα: σάρωσε ή ψάξε.'));
+    const btn = (text, fn, cls) => el('button', { type: 'button', class: cls || null, onclick: fn }, text);
+    actions.replaceChildren(...(open ? [
+      o.ready_at ? btn('Όχι έτοιμη', () => run('ready', { ready: false }))
+        : btn('Έτοιμη (όλα μαζεύτηκαν)', () => run('ready', { ready: true }), 'primary'),
+      btn('Στο ταμείο', () => { location.hash = '#/pos?order=' + o.id; }),
+      can('MANAGER') && o.customer_id ? btn('Δελτίο αποστολής', async () => {
+        if (!confirm('Δελτίο αποστολής (με πίστωση) για όλη την παραγγελία;')) return;
+        if (await run('note', {})) toast('Το δελτίο αποστολής καταχωρήθηκε');
+      }) : null,
+      btn('Ακύρωση παραγγελίας', async () => {
+        if (!confirm('Ακύρωση της παραγγελίας;')) return;
+        await run('cancel', o.deposit > 0 ? { register: posReg } : {});
+      }, 'danger')] : []).filter(Boolean));
+  };
+  const scan = el('form', {
+    class: 'panel row scan',
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      const v = code.value.trim();
+      if (!v) return;
+      // a code or a barcode (a scanner): the item; a word: the one item it finds, else the list
+      try {
+        const r = await api('items?limit=10&q=' + encodeURIComponent(v));
+        const one = r.rows.find((x) => x.code.toUpperCase() === v.toUpperCase() || x.barcode === v)
+          || (r.total === 1 ? r.rows[0] : null);
+        if (one) await add(one.code, Number(n.value || 1));
+        else if (!r.rows.length) toast('Δεν βρέθηκε: ' + v, true);
+        else search();
+      } catch (e) { fail(e); }
+    },
+  }, el('label', {}, 'Σάρωση ή αναζήτηση (Enter)', code), el('label', {}, 'Ποσότητα', n), el('button', { class: 'primary', type: 'submit' }, 'Βάλε'));
+  const search = async () => {
+    const v = code.value.trim();
+    if (v.length < 2) { found.replaceChildren(); return; }
+    try {
+      const r = await api('items?limit=10&q=' + encodeURIComponent(v));
+      found.replaceChildren(r.rows.length ? table([['Κωδικός'], ['Περιγραφή'], ['Τιμή', 'num'], ['Απόθεμα', 'num'], ['']],
+        r.rows.map((x) => el('tr', {}, el('td', {}, x.code), el('td', { class: 'wrap' }, x.name), num(x.price), num(x.stock, qty),
+          el('td', { class: 'num' }, el('button', { type: 'button', onclick: () => add(x.code, Number(n.value || 1)) }, '+'))))) : '');
+    } catch (e) { fail(e); }
+  };
+  let timer;
+  code.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 300); });
+  show(title, head, scan, found, lines, actions, el('p', {}, el('a', { href: '#/orders' }, 'Όλες οι παραγγελίες')));
+  await run('');
+  code.focus();
 }
 
 // -- the pages, by the address (#/...) -------------------------------------------------------------
@@ -711,7 +887,9 @@ function render() {
   const need = (role, fn) => (can(role) ? fn() : show(el('h1', {}, 'Δεν επιτρέπεται'),
     el('p', { class: 'muted' }, 'Η σελίδα αυτή θέλει ρόλο ' + role + '.')));
   switch (p[0]) {
-    case 'pos': return posPage();
+    case 'pos': return posPage(params);
+    case 'orders': return ordersPage(params);
+    case 'order': return orderPage(p[1]);
     case 'labels': return labelsPage();
     case 'item': return itemPage(p[1]);
     case 'partners': return need('MANAGER', () => partnersPage(p[1], params));

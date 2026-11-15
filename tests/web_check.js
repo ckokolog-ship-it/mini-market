@@ -156,6 +156,38 @@ async function waitText(page, sel, text) {
   await waitText(page, 'main', 'Ρέστα: 5,20');
   await waitText(page, 'main', 'Τελευταίες αποδείξεις');
   ok(await page.isHidden('input[name=given]'), 'paid: no receipt open');
+  // an order: written, an item by scan, the bread by a search, picked, ready; to the till, all of it
+  await page.goto(BASE + '/web/#/orders');
+  await page.waitForSelector('input[name=name]');
+  await page.fill('input[name=name]', 'Test web order');
+  await page.fill('input[name=phone]', '6912345678');
+  await page.click('button:has-text("Νέα παραγγελία")');
+  await page.waitForSelector('form.scan input[name=code]');
+  await page.fill('input[name=code]', ITEM);
+  await page.press('input[name=code]', 'Enter');
+  await waitText(page, 'main', '12,40');
+  await page.fill('input[name=code]', 'Ψωμί χωριάτικο');           // a word, one item: straight in
+  await page.press('input[name=code]', 'Enter');
+  await waitText(page, 'main', '14,50');
+  ok(await page.evaluate(() => window.__xss === undefined && !document.querySelector('main img')), 'the order: the name as text');
+  await page.check(`input[aria-label="Μαζεύτηκε ${ITEM}"]`);
+  await page.waitForSelector('tr.picked');
+  ok((await page.$$('tr.picked')).length === 1, 'the order: one line picked');
+  await page.click('button:has-text("Έτοιμη")');
+  await waitText(page, '.kv', 'έτοιμη');
+  ok((await page.$$('tr.picked')).length === 2, 'ready: all of it picked');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/order.png', fullPage: true });
+  await page.click('button:has-text("Στο ταμείο")');
+  await waitText(page, '.order-text', 'Παραγγελία');
+  await waitText(page, '.total-due', '14,50');
+  ok((await page.$$('main tbody tr')).length >= 2, 'the till: the order in the receipt, all of it');
+  await page.keyboard.press('F9');
+  await waitText(page, '#toast', 'καταχωρήθηκε');
+  await page.goto(BASE + '/web/#/orders?all=1');
+  await waitText(page, 'main', 'παραδόθηκε');
+  ok(true, 'the order: delivered');
+  await page.goto(BASE + '/web/#/pos');
+  await waitText(page, 'main', 'Τελευταίες αποδείξεις');
   if (SHOTS) await page.screenshot({ path: SHOTS + '/pos.png', fullPage: true });
   await page.click('button:has-text("Κλείσιμο Ζ")');
   await waitText(page, 'main', 'Κλειστό');
@@ -223,7 +255,7 @@ async function waitText(page, sel, text) {
   await p2.click('button[type=submit]');
   await p2.waitForSelector('#nav a');
   const nav2 = await p2.$$eval('#nav a', (as) => as.map((a) => a.textContent));
-  ok(nav2.join(',') === 'Ταμείο,Είδη,Ετικέτες,Απογραφή', 'the menu of a cashier: ' + nav2.join(','));
+  ok(nav2.join(',') === 'Ταμείο,Παραγγελίες,Είδη,Ετικέτες,Απογραφή', 'the menu of a cashier: ' + nav2.join(','));
   await p2.goto(BASE + '/web/#/reports/sales');
   await p2.waitForSelector('h1:has-text("Δεν επιτρέπεται")');
   ok(true, 'a cashier: no reports');

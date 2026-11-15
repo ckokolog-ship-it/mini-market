@@ -106,7 +106,13 @@ create or replace package mm_core as
   -- reservations (e.g. New Year cakes): a name, a phone, the day of the pickup; their quantities are
   -- reserved (MM_ITEM_AVAIL) until the delivery, a receipt that counts the deposit
   function new_reservation(p_name varchar2, p_phone varchar2, p_pickup_date date,
-                           p_customer_id number default null, p_notes varchar2 default null) return number;
+                           p_customer_id number default null, p_notes varchar2 default null,
+                           p_created_by varchar2 default null) return number;
+  -- an order (a reservation from the pages, of today or later): what of a line was picked (0 .. its
+  -- quantity), the order ready or not; for a customer on credit, a delivery note instead of a receipt
+  procedure pick(p_res_id number, p_item_id number, p_qty number);
+  procedure set_ready(p_res_id number, p_ready varchar2 default 'Y');
+  function deliver_note(p_res_id number) return number;                -- a draft DAP of its lines
   procedure reserve(p_res_id number, p_item_id number, p_qty number, p_price number default null);  -- 0: out
   procedure take_deposit(p_res_id number, p_register_id number, p_amount number,
                          p_payment varchar2 default 'CASH');
@@ -1434,7 +1440,8 @@ create or replace package body mm_core as
   end;
 
   function new_reservation(p_name varchar2, p_phone varchar2, p_pickup_date date,
-                           p_customer_id number default null, p_notes varchar2 default null) return number is
+                           p_customer_id number default null, p_notes varchar2 default null,
+                           p_created_by varchar2 default null) return number is
     v number;
   begin
     if trim(p_name) is null or p_phone is null or not regexp_like(p_phone, '^[0-9+ ]{5,20}$') then
@@ -1443,8 +1450,8 @@ create or replace package body mm_core as
     if p_pickup_date is null or trunc(p_pickup_date) < trunc(sysdate) then
       fail(49, 'Η ημερομηνία παραλαβής δεν μπορεί να είναι στο παρελθόν');
     end if;
-    insert into mm_reservation (name, phone, customer_id, pickup_date, notes)
-    values (trim(p_name), p_phone, p_customer_id, trunc(p_pickup_date), p_notes)
+    insert into mm_reservation (name, phone, customer_id, pickup_date, notes, created_by)
+    values (trim(p_name), p_phone, p_customer_id, trunc(p_pickup_date), p_notes, lower(p_created_by))
     returning id into v;
     return v;
   end;
@@ -1474,10 +1481,69 @@ create or replace package body mm_core as
       merge into mm_reservation_line l
       using (select p_res_id reservation_id, p_item_id item_id from dual) s
       on (l.reservation_id = s.reservation_id and l.item_id = s.item_id)
-      when matched then update set qty = p_qty, price = nvl(p_price, l.price)
+      when matched then update set qty = p_qty, price = nvl(p_price, l.price), picked = least(picked, p_qty)
       when not matched then insert (reservation_id, item_id, qty, price)
         values (p_res_id, p_item_id, p_qty, nvl(p_price, i.price));
     end if;
+  end;
+
+  procedure pick(p_res_id number, p_item_id number, p_qty number) is
+    r mm_reservation%rowtype := open_res(p_res_id);
+    q number;
+  begin
+    begin
+      select qty into q from mm_reservation_line where reservation_id = p_res_id and item_id = p_item_id;
+    exception
+      when no_data_found then fail(86, 'Το είδος δεν είναι στην παραγγελία ' || p_res_id);
+    end;
+    if p_qty is null or p_qty < 0 or p_qty > q then
+      fail(86, 'Μαζεύτηκαν από 0 έως ' || q);
+    end if;
+    update mm_reservation_line set picked = p_qty where reservation_id = p_res_id and item_id = p_item_id;
+  end;
+
+  procedure set_ready(p_res_id number, p_ready varchar2 default 'Y') is
+    r mm_reservation%rowtype := open_res(p_res_id);
+    n number;
+  begin
+    if p_ready = 'Y' then
+      select count(*) into n from mm_reservation_line where reservation_id = p_res_id;
+      if n = 0 then
+        fail(51, 'Η κράτηση δεν έχει είδη');
+      end if;
+      -- ready: all of it picked (what was not picked is picked now: ready is "all here")
+      update mm_reservation_line set picked = qty where reservation_id = p_res_id;
+      update mm_reservation set ready_at = sysdate where id = p_res_id;
+    else
+      update mm_reservation set ready_at = null where id = p_res_id;
+    end if;
+  end;
+
+  -- a customer on credit: a delivery note of the lines (at its own prices: wholesale, without VAT), not
+  -- a receipt; a deposit is for a receipt (MM-187)
+  function deliver_note(p_res_id number) return number is
+    r mm_reservation%rowtype := open_res(p_res_id);
+    d number;
+    l number;
+    n number;
+  begin
+    if r.customer_id is null then
+      fail(87, 'Δελτίο αποστολής μόνο για παραγγελία πελάτη (με ΑΦΜ)');
+    end if;
+    if r.deposit > 0 then
+      fail(87, 'Η παραγγελία έχει προκαταβολή: παράδοση με απόδειξη');
+    end if;
+    select count(*) into n from mm_reservation_line where reservation_id = p_res_id;
+    if n = 0 then
+      fail(51, 'Η κράτηση δεν έχει είδη');
+    end if;
+    d := new_doc('DAP', r.customer_id, null, null, 'CREDIT');
+    for x in (select * from mm_reservation_line where reservation_id = p_res_id order by id) loop
+      l := add_line(d, x.item_id, x.qty);
+    end loop;
+    update mm_doc set notes = 'Παραγγελία ' || p_res_id || ': ' || r.name where id = d;
+    update mm_reservation set doc_id = d where id = p_res_id;
+    return d;
   end;
 
   procedure take_deposit(p_res_id number, p_register_id number, p_amount number,
