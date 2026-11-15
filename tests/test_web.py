@@ -30,9 +30,11 @@ def test_the_pages_in_a_browser(api, env, users):
     if subprocess.run(['node', '-e', "require('playwright')"], capture_output=True).returncode:
         pytest.skip('no Playwright for node')
     db.cur.execute('update mm_item set name = :n where id = :i', n=XSS, i=ids['a'])
+    for k in range(30):                                   # the ledger of the item b: two pages of 25
+        db.proc('adjust_stock', ids['b'], k % 4 + 1, 'TST web %d' % k)
     db.commit()
     e = dict(os.environ, BASE=api, MGR=users['MANAGER'], CASHIER=users['CASHIER'], PW=test_api.PW,
-             ITEM='TST%sA' % ids['tag'], XSS=XSS, SHOTS=os.environ.get('MM_WEB_SHOTS', ''))
+             ITEM='TST%sA' % ids['tag'], ITEM_B=str(ids['b']), XSS=XSS, SHOTS=os.environ.get('MM_WEB_SHOTS', ''))
     r = subprocess.run(['node', os.path.join(HERE, 'web_check.js')], env=e, capture_output=True, text=True, timeout=180)
     print(r.stdout, r.stderr)
     assert r.returncode == 0, r.stdout + r.stderr

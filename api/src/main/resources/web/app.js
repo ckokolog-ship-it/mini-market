@@ -55,6 +55,28 @@ function table(head, rows) {
     el('table', {}, el('thead', {}, el('tr', {}, head.map(([t, c]) => el('th', { class: c || null }, t)))),
       el('tbody', {}, rows)));
 }
+// pages: "< Previous  Page 2 of 7 (312)  Next >" and the rows of a page (25, 50, 100)
+let pageSize = 50;
+try { pageSize = Number(localStorage.getItem('mm.pageSize')) || 50; } catch (e) { pageSize = 50; }
+function pager(total, offset, limit, go) {
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const page = Math.floor(offset / limit) + 1;
+  const size = el('select', {
+    'aria-label': 'Γραμμές ανά σελίδα',
+    onchange: () => {
+      pageSize = Number(size.value);
+      try { localStorage.setItem('mm.pageSize', String(pageSize)); } catch (e) { /* a private window */ }
+      go(0);
+    },
+  }, [25, 50, 100].map((n) => el('option', { value: n, selected: n === limit }, n + ' ανά σελίδα')));
+  return el('div', { class: 'row pager' },
+    el('button', { type: 'button', disabled: page <= 1, onclick: () => go(0) }, '«'),
+    el('button', { type: 'button', disabled: page <= 1, onclick: () => go(offset - limit) }, '‹ Προηγούμενη'),
+    el('span', { class: 'muted' }, `Σελίδα ${page} από ${pages} (${total})`),
+    el('button', { type: 'button', disabled: page >= pages, onclick: () => go(offset + limit) }, 'Επόμενη ›'),
+    el('button', { type: 'button', disabled: page >= pages, onclick: () => go((pages - 1) * limit) }, '»'),
+    size);
+}
 function toast(text, bad) {
   const t = $('#toast');
   t.textContent = text;
@@ -132,26 +154,26 @@ function loginPage() {
 async function itemsPage(params) {
   const q = el('input', { name: 'q', type: 'search', placeholder: 'περιγραφή, κωδικός ή barcode', value: params.get('q') || '' });
   const out = el('div');
-  const go = async () => {
+  const go = async (offset = 0) => {
     try {
-      const r = await api('items?limit=200&q=' + encodeURIComponent(q.value.trim()));
-      out.replaceChildren(table(
+      const r = await api(`items?limit=${pageSize}&offset=${Math.max(0, offset)}&q=` + encodeURIComponent(q.value.trim()));
+      out.replaceChildren(pager(r.total, r.offset, r.limit, go), table(
         [['Κωδικός'], ['Περιγραφή'], ['Κατηγορία', 'hide-phone'], ['Τιμή', 'num'], ['Απόθεμα', 'num'], ['Ελάχ.', 'num hide-phone']],
         r.rows.map((x) => el('tr', { class: 'click', onclick: () => { location.hash = '#/item/' + encodeURIComponent(x.code); } },
           el('td', {}, x.code), el('td', { class: 'wrap' }, x.name), el('td', { class: 'hide-phone' }, x.category),
           num(x.price), el('td', { class: 'num' + (x.stock < x.min_stock ? ' neg' : '') }, qty(x.stock)),
-          el('td', { class: 'num hide-phone' }, qty(x.min_stock))))));
+          el('td', { class: 'num hide-phone' }, qty(x.min_stock))))), r.total > r.limit ? pager(r.total, r.offset, r.limit, go) : null);
       if (!r.rows.length) out.replaceChildren(el('p', { class: 'muted' }, 'Τίποτα.'));
     } catch (e) { fail(e); }
   };
   let timer;
-  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(go, 250); });
+  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => go(0), 250); });
   q.addEventListener('keydown', async (ev) => {
     if (ev.key !== 'Enter') return;
     ev.preventDefault();
     const v = q.value.trim();
     if (/^\d{8,14}$/.test(v)) location.hash = '#/item/' + encodeURIComponent(v);   // a barcode: straight to it
-    else go();
+    else go(0);
   });
   show(el('h1', {}, 'Είδη'), el('div', { class: 'panel row' }, el('label', { style: null }, 'Αναζήτηση', q)), out);
   q.focus();
@@ -183,17 +205,17 @@ async function partnersPage(kind, params) {
   const one = kind === 'customers' ? 'Πελάτες' : 'Προμηθευτές';
   const q = el('input', { type: 'search', placeholder: 'επωνυμία ή ΑΦΜ', value: params.get('q') || '' });
   const out = el('div');
-  const go = async () => {
+  const go = async (offset = 0) => {
     try {
-      const r = await api(kind + '?limit=500&q=' + encodeURIComponent(q.value.trim()));
-      out.replaceChildren(table([['Επωνυμία'], ['ΑΦΜ'], ['Τηλέφωνο', 'hide-phone'], ['Email', 'hide-phone']],
+      const r = await api(`${kind}?limit=${pageSize}&offset=${Math.max(0, offset)}&q=` + encodeURIComponent(q.value.trim()));
+      out.replaceChildren(pager(r.total, r.offset, r.limit, go), table([['Επωνυμία'], ['ΑΦΜ'], ['Τηλέφωνο', 'hide-phone'], ['Email', 'hide-phone']],
         r.rows.map((x) => el('tr', { class: 'click', onclick: () => { location.hash = `#/partner/${kind}/${x.id}`; } },
           el('td', { class: 'wrap' }, x.name), el('td', {}, x.afm || ''), el('td', { class: 'hide-phone' }, x.phone || ''),
           el('td', { class: 'hide-phone' }, x.email || '')))));
     } catch (e) { fail(e); }
   };
   let timer;
-  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(go, 250); });
+  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => go(0), 250); });
   show(el('h1', {}, one), el('div', { class: 'panel row' }, el('label', {}, 'Αναζήτηση', q)), out);
   go();
 }
@@ -219,30 +241,38 @@ async function ledgerPage(what, id, params) {
   const to = el('input', { type: 'date', value: params.get('to') || isoToday() });
   const out = el('div');
   const item = what === 'item';
-  const go = async () => {
+  const go = async (offset = 0) => {
     try {
-      const r = await api(`ledger/${what}/${id}?from=${from.value}&to=${to.value}`);
+      const r = await api(`ledger/${what}/${id}?from=${from.value}&to=${to.value}&limit=${pageSize}&offset=${Math.max(0, offset)}`);
       const f = item ? qty : money;
-      const rows = r.rows.map((x) => x.kind === 'O'
-        ? el('tr', { class: 'carry' }, el('td', {}, day(x.ldate)), el('td'), el('td', { class: 'wrap' }, 'Από μεταφορά'),
-          el('td'), el('td'), num(x.balance, f))
-        : el('tr', {}, el('td', {}, day(x.ldate)), el('td', {}, x.doc_text || ''),
-          el('td', { class: 'wrap' }, item && x.partner ? x.partner + ' - ' + x.descr : x.descr),
-          num(x.debit, f), num(x.credit, f), num(x.balance, f)));
-      rows.push(el('tr', { class: 'total' }, el('td'), el('td'), el('td', {}, 'Σύνολα περιόδου'), num(r.debit, f), num(r.credit, f), el('td')));
-      rows.push(el('tr', { class: 'total' }, el('td'), el('td'), el('td', {}, item ? 'Τελικό απόθεμα' : 'Γενικό υπόλοιπο'),
-        el('td'), el('td'), num(r.close, f)));
-      out.replaceChildren(el('p', { class: 'muted' }, `${day(r.from)} - ${day(r.to)} · ${r.rows.length - 1} κινήσεις`),
+      const lastPage = r.offset + r.limit >= r.total;
+      const carry = (label, c) => el('tr', { class: 'carry' }, el('td'), el('td'), el('td', { class: 'wrap' }, label),
+        num(c.debit, f), num(c.credit, f), num(c.balance, f));
+      const rows = [carry('Από μεταφορά', r.carry_in)];
+      r.rows.forEach((x) => rows.push(el('tr', {}, el('td', {}, day(x.ldate)), el('td', {}, x.doc_text || ''),
+        el('td', { class: 'wrap' }, item && x.partner ? x.partner + ' - ' + x.descr : x.descr),
+        num(x.debit, f), num(x.credit, f), num(x.balance, f))));
+      if (!lastPage) {
+        rows.push(carry('Σε μεταφορά', r.carry_out));
+      } else {
+        rows.push(el('tr', { class: 'total' }, el('td'), el('td'), el('td', {}, 'Σύνολα περιόδου'), num(r.debit, f), num(r.credit, f), el('td')));
+        rows.push(el('tr', { class: 'total' }, el('td'), el('td'), el('td', {}, 'Από προηγούμενη περίοδο'), el('td'), el('td'), num(r.open, f)));
+        rows.push(el('tr', { class: 'total' }, el('td'), el('td'), el('td', {}, item ? 'Τελικό απόθεμα' : 'Γενικό υπόλοιπο'),
+          el('td'), el('td'), num(r.close, f)));
+      }
+      out.replaceChildren(el('p', { class: 'muted' }, `${day(r.from)} - ${day(r.to)} · ${r.total} κινήσεις`),
+        pager(r.total, r.offset, r.limit, go),
         table([['Ημερομηνία'], ['Παραστατικό'], ['Περιγραφή'], [item ? 'Εισαγωγή' : 'Χρέωση', 'num'],
-          [item ? 'Εξαγωγή' : 'Πίστωση', 'num'], [item ? 'Απόθεμα' : 'Υπόλοιπο', 'num']], rows));
+          [item ? 'Εξαγωγή' : 'Πίστωση', 'num'], [item ? 'Απόθεμα' : 'Υπόλοιπο', 'num']], rows),
+        r.total > r.limit ? pager(r.total, r.offset, r.limit, go) : null);
       title.textContent = r.title;
     } catch (e) { fail(e); }
   };
   const title = el('h1', {}, 'Καρτέλα');
-  show(title, el('form', { class: 'panel row', onsubmit: (ev) => { ev.preventDefault(); go(); } },
+  show(title, el('form', { class: 'panel row', onsubmit: (ev) => { ev.preventDefault(); go(0); } },
     el('label', {}, 'Από', from), el('label', {}, 'Έως', to), el('button', { class: 'primary', type: 'submit' }, 'Εμφάνιση'),
     el('button', { type: 'button', onclick: () => history.back() }, 'Πίσω')), out);
-  go();
+  go(0);
 }
 
 // -- the reports -----------------------------------------------------------------------------------
@@ -288,10 +318,29 @@ function byMonth(rows, keyOf, cells, sums, label) {
 }
 function salesTable(rows) {
   const sums = ['alp_docs', 'alp_total', 'tpy_total', 'ppy_total', 'total'];
-  return table([['Ημέρα'], ['Αποδείξεις', 'num'], ['Λιανική', 'num'], ['Τιμολόγια', 'num'], ['Πιστωτικά', 'num'], ['Σύνολο', 'num']],
-    byMonth(rows, (x) => x.day.slice(5, 7) + '/' + x.day.slice(0, 4),
+  const months = [...new Set(rows.map((x) => x.day.slice(0, 7)))];          // a page for each month
+  const box = el('div');
+  const head = [['Ημέρα'], ['Αποδείξεις', 'num'], ['Λιανική', 'num'], ['Τιμολόγια', 'num'], ['Πιστωτικά', 'num'], ['Σύνολο', 'num']];
+  const cells = (s) => [num(s.alp_docs, qty), num(s.alp_total), num(s.tpy_total), num(s.ppy_total), num(s.total)];
+  const all = Object.fromEntries(sums.map((k) => [k, rows.reduce((a, x) => a + (x[k] || 0), 0)]));
+  const showMonth = (k) => {
+    const m = months[k];
+    const label = (x) => x.slice(5, 7) + '/' + x.slice(0, 4);
+    const nav = months.length > 1 && el('div', { class: 'row pager' },
+      el('button', { type: 'button', disabled: k <= 0, onclick: () => showMonth(k - 1) }, '‹ Προηγούμενος μήνας'),
+      el('select', { 'aria-label': 'Μήνας', onchange: (ev) => showMonth(Number(ev.target.value)) },
+        months.map((x, i) => el('option', { value: i, selected: i === k }, label(x)))),
+      el('button', { type: 'button', disabled: k >= months.length - 1, onclick: () => showMonth(k + 1) }, 'Επόμενος μήνας ›'));
+    const body = byMonth(rows.filter((x) => x.day.startsWith(m)), () => label(m),
       (x) => [el('td', {}, day(x.day)), num(x.alp_docs, qty), num(x.alp_total), num(x.tpy_total), num(x.ppy_total), num(x.total)],
-      sums, (s) => [num(s.alp_docs, qty), num(s.alp_total), num(s.tpy_total), num(s.ppy_total), num(s.total)]));
+      sums, cells);
+    body.pop();                                       // (the month is the page: its total, not a grand one)
+    body.push(el('tr', { class: 'total' }, el('td', {}, 'Σύνολο περιόδου'), ...cells(all)));
+    box.replaceChildren(nav || '', table(head, body));
+  };
+  if (!months.length) return el('p', { class: 'muted' }, 'Καμία πώληση στο διάστημα.');
+  showMonth(months.length - 1);                       // the last month first
+  return box;
 }
 function vatTable(rows) {
   const sums = ['s_net', 's_vat', 'p_net', 'p_vat', 'payable'];

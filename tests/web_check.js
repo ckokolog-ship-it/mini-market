@@ -2,7 +2,7 @@
 // tests/test_web.py: BASE, MGR / CASHIER (users), PW, ITEM (an item code), XSS (its name), SHOTS (a folder).
 const { chromium } = require('playwright');
 
-const { BASE, MGR, CASHIER, PW, ITEM, XSS, SHOTS } = process.env;
+const { BASE, MGR, CASHIER, PW, ITEM, ITEM_B, XSS, SHOTS } = process.env;
 let failed = 0;
 function ok(cond, what) {
   console.log((cond ? 'ok   ' : 'FAIL ') + what);
@@ -87,8 +87,30 @@ async function waitText(page, sel, text) {
   ok((await page.textContent('tbody')).includes('Γενικό υπόλοιπο'), 'a ledger: the balance at the end');
   if (SHOTS) await page.screenshot({ path: SHOTS + '/ledger.png', fullPage: true });
 
+  // pages: 25 a page; the items in pages; the ledger of the item b (30 moves) in two
+  await page.goto(BASE + '/web/#/items');
+  await waitText(page, 'main', 'Σελίδα 1 από');
+  await page.selectOption('.pager select', '25');
+  await waitText(page, '.pager', 'Σελίδα 1 από');
+  const firstCode = await page.textContent('tbody tr td');
+  await page.click('.pager button:has-text("Επόμενη")');
+  await waitText(page, '.pager', 'Σελίδα 2 από');
+  ok((await page.textContent('tbody tr td')) !== firstCode, 'the items: the next page, other rows');
+  await page.goto(BASE + '/web/#/ledger/item/' + ITEM_B + '?from=1900-01-01');
+  await waitText(page, '.pager', 'Σελίδα 1 από 2');
+  const carryOut = await page.$$eval('tr.carry', (t) => t.map((r) => r.textContent));
+  ok(carryOut.length === 2 && carryOut[1].startsWith('Σε μεταφορά'), 'a page of the ledger: from and to the carry-over');
+  await page.click('.pager button:has-text("Επόμενη")');
+  await waitText(page, '.pager', 'Σελίδα 2 από 2');
+  const carryIn = await page.textContent('tr.carry');
+  ok(carryIn.replace('Από μεταφορά', '') === carryOut[1].replace('Σε μεταφορά', ''), 'the next page starts where the last ended');
+  ok((await page.textContent('tbody')).includes('Τελικό απόθεμα'), 'the last page: the totals');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/ledger_page2.png', fullPage: true });
+  await page.selectOption('.pager select', '50');
+  await waitText(page, '.pager', 'Σελίδα 1 από 1');
+
   // the reports
-  for (const [path, word] of [['sales?from=1900-01-01', 'Γενικό σύνολο'], ['vat?from=1900-01-01', 'Προς απόδοση'],
+  for (const [path, word] of [['sales?from=1900-01-01', 'Σύνολο περιόδου'], ['vat?from=1900-01-01', 'Προς απόδοση'],
     ['min-stock', 'ελάχιστο']]) {
     await page.goto(BASE + '/web/#/reports/' + path);
     await page.waitForFunction((w) => document.querySelector('main').textContent.includes(w), word);

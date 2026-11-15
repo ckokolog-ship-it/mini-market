@@ -231,3 +231,38 @@ def test_only_get_and_no_tricks(api):
         assert r.status == status, (method, path, r.status)
         r.read()
         c.close()
+
+
+def test_pages(api, env, users):
+    """a list a page at a time, with its total; a ledger a page at a time, its carry-over from page to
+    page (the "to" of one is the "from" of the next), the pages together are the whole of it"""
+    db, ids = env
+    r = get(api, '/api/items?limit=5&offset=0')
+    assert r['total'] >= len(r['rows']) == 5 and r['offset'] == 0
+    r2 = get(api, '/api/items?limit=5&offset=5')
+    assert r2['total'] == r['total'] and not {x['id'] for x in r['rows']} & {x['id'] for x in r2['rows']}
+    assert get(api, '/api/customers?limit=2')['total'] >= 1
+    for k in range(23):                                                  # 23 moves of the item b
+        db.proc('adjust_stock', ids['b'], k % 3 + 1 if k % 4 else -1, 'TST page %d' % k)
+    db.commit()
+    whole = get(api, '/api/ledger/item/%d?from=1900-01-01' % ids['b'])
+    moves = whole['rows'][1:]
+    pages, offset = [], 0
+    while True:
+        p = get(api, '/api/ledger/item/%d?from=1900-01-01&limit=10&offset=%d' % (ids['b'], offset))
+        assert p['total'] == len(moves) and p['limit'] == 10 and p['offset'] == offset
+        pages.append(p)
+        offset += 10
+        if offset >= p['total']:
+            break
+    assert [x['seq'] for p in pages for x in p['rows']] == [x['seq'] for x in moves]
+    assert pages[0]['carry_in'] == {'debit': 0, 'credit': 0, 'balance': whole['open']}
+    for a, b in zip(pages, pages[1:]):
+        assert a['carry_out'] == b['carry_in']
+        assert a['carry_out']['balance'] == a['rows'][-1]['balance']
+    last = pages[-1]['carry_out']
+    assert (last['debit'], last['credit'], last['balance']) == (whole['debit'], whole['credit'], whole['close'])
+    # past the end: the last page; a page of nothing: the carry-over only
+    assert get(api, '/api/ledger/item/%d?from=1900-01-01&limit=10&offset=9999' % ids['b'])['offset'] == (len(moves) - 1) // 10 * 10
+    none = get(api, '/api/ledger/item/%d?from=1990-01-01&to=1990-12-31&limit=10' % ids['b'])
+    assert none['total'] == 0 and none['rows'] == [] and none['carry_in'] == none['carry_out']
