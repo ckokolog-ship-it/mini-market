@@ -602,8 +602,9 @@ def test_toolbar(cur):
 
 @needs_db
 def test_invoices_form(cur, env):
-    """a wholesale invoice: new, a line at the wholesale price, cards with their serials, post,
-    a credit note (draft, then deleted), cancel"""
+    """a delivery note: new, a line at the wholesale price, cards with their serials, post; its
+    invoice (Από δελτίο), one more note into it, post; goods back of an invoice with cards: no;
+    cancel; goods back of one without: a return note, its credit note, deleted"""
     db, ids = env
     cat = db.one('select min(id) from mm_category')[0]
     db.cur.execute("update mm_item set wholesale_price = 1.5 where id = :i", i=ids['b'])
@@ -616,10 +617,11 @@ def test_invoices_form(cur, env):
     compile_ui(cur, 'MM_INVOICES')
     run(cur, 'ui.init;')
     today = __import__('datetime').date.today().strftime('%d/%m/%Y')
+    last = 'select max(id) from mm_doc where customer_id = :c'
     assert item(cur, 'CTL.D_DATE') == today
-    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='TPY', CTL__CUST_ID=str(ids['customer']),
+    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='DAP', CTL__CUST_ID=str(ids['customer']),
         CTL__D_PAY='CREDIT', CTL__D_DATE=today)
-    d = db.one('select max(id) from mm_doc where customer_id = :c', c=ids['customer'])[0]
+    d = db.one(last, c=ids['customer'])[0]
     cur.execute('begin :v := fstub.queries; end;', v=(q := cur.var(str)))
     assert f'DOC:id = {d};' in q.getvalue()
     run(cur, "ui.press('CTL.ADDLINE');", DOC__ID=str(d), CTL__L_ITEM_ID=str(ids['b']), CTL__L_QTY='2')
@@ -633,22 +635,47 @@ def test_invoices_form(cur, env):
     assert item(cur, 'DOC.PARTNER_TEXT') == db.one('select name from mm_customer where id = :c', c=ids['customer'])[0]
     run(cur, "ui.post_query('DL');", DL__ITEM_ID=str(ids['b']))
     assert item(cur, 'DL.ITEM_TEXT').startswith(f"TST{ids['tag']}B ")
-    run(cur, "ui.press('CTL.CREDIT');", DOC__ID=str(d))
-    assert 'MM-129' in msgs(cur)                                              # cards: no credit note
-    run(cur, "ui.press('CTL.CANCELDOC');", DOC__ID=str(d))
-    assert db.one('select status from mm_doc where id = :d', d=d)[0] == 'C'
-    # an invoice without cards: its credit note, a draft, deleted
-    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='TPY', CTL__CUST_ID=str(ids['customer']), CTL__D_DATE=today)
-    d2 = db.one('select max(id) from mm_doc where customer_id = :c', c=ids['customer'])[0]
+    # a second note; the invoice of the first (a new draft), the second into it, posted
+    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='DAP', CTL__CUST_ID=str(ids['customer']), CTL__D_DATE=today)
+    d2 = db.one(last, c=ids['customer'])[0]
     run(cur, "ui.press('CTL.ADDLINE');", DOC__ID=str(d2), CTL__L_ITEM_ID=str(ids['b']), CTL__L_QTY='1',
         CTL__L_PRICE='3', CTL__L_DISC='10')
     assert float(db.one('select price from mm_doc_line where doc_id = :d', d=d2)[0]) == 3
     run(cur, "ui.press('CTL.POSTDOC');", DOC__ID=str(d2))
-    run(cur, "ui.press('CTL.CREDIT');", DOC__ID=str(d2))
-    c = db.one("select id from mm_doc where ref_doc_id = :d", d=d2)[0]
+    run(cur, "ui.press('CTL.FROMNOTE');", CTL__N_NOTE_ID=str(d), CTL__D_DATE=today)
+    inv = db.one(last, c=ids['customer'])[0]
+    assert db.one('select doc_type, status from mm_doc where id = :i', i=inv) == ('TPY', 'D')
+    run(cur, "ui.press('CTL.FROMNOTE');", DOC__ID=str(inv), CTL__N_NOTE_ID=str(d2))
+    assert 'δελτίο' in msgs(cur)
+    assert db.one(last, c=ids['customer'])[0] == inv                         # into it: no new one
+    assert db.one('select count(*) from mm_doc_line where doc_id = :i', i=inv)[0] == 3
+    run(cur, "ui.press('CTL.POSTDOC');", DOC__ID=str(inv))
+    assert db.one('select status from mm_doc where id = :i', i=inv)[0] == 'P'
+    run(cur, "ui.post_query('DOC');", DOC__INVOICE_ID=str(inv))
+    assert item(cur, 'DOC.INVOICE_TEXT').startswith('TPY ')
+    run(cur, "ui.press('CTL.CREDIT');", DOC__ID=str(inv))
+    assert 'MM-129' in msgs(cur)                                              # cards: no goods back
+    run(cur, "ui.press('CTL.CANCELDOC');", DOC__ID=str(d))
+    assert 'MM-185' in msgs(cur)                                              # the note: its invoice first
+    run(cur, "ui.press('CTL.CANCELDOC');", DOC__ID=str(inv))
+    assert db.one('select status from mm_doc where id = :d', d=inv)[0] == 'C'
+    run(cur, "ui.press('CTL.CANCELDOC');", DOC__ID=str(d))
+    assert db.one('select status from mm_doc where id = :d', d=d)[0] == 'C'
+    # an invoice of the second note alone; its goods back: a return note, posted; its credit note
+    run(cur, "ui.press('CTL.FROMNOTE');", CTL__N_NOTE_ID=str(d2), CTL__D_DATE=today)
+    inv = db.one(last, c=ids['customer'])[0]
+    run(cur, "ui.press('CTL.POSTDOC');", DOC__ID=str(inv))
+    run(cur, "ui.press('CTL.CREDIT');", DOC__ID=str(inv))
+    assert 'επιστροφής' in msgs(cur)
+    r = db.one("select id from mm_doc where ref_doc_id = :d", d=inv)[0]
+    assert db.one('select doc_type, status from mm_doc where id = :c', c=r) == ('DEP', 'D')
+    run(cur, "ui.press('CTL.POSTDOC');", DOC__ID=str(r))
+    run(cur, "ui.press('CTL.FROMNOTE');", CTL__N_NOTE_ID=str(r), CTL__D_DATE=today)
+    c = db.one(last, c=ids['customer'])[0]
     assert db.one('select doc_type, status from mm_doc where id = :c', c=c) == ('PPY', 'D')
     run(cur, "ui.press('CTL.DELDOC');", DOC__ID=str(c))
     assert db.one('select count(*) from mm_doc where id = :c', c=c)[0] == 0
+    assert db.one('select invoice_id from mm_doc where id = :r', r=r)[0] is None   # the note free again
     db.cur.execute("update mm_item set wholesale_price = null where id = :i", i=ids['b'])
     db.commit()
 
@@ -658,7 +685,7 @@ def test_lists_and_defaults(cur):
     """a double click opens the list of an item that has one; the defaults of CTL from ui.init"""
     compile_ui(cur, 'MM_INVOICES')
     run(cur, 'ui.init;')
-    assert item(cur, 'CTL.D_TYPE') == 'TPY' and item(cur, 'CTL.D_PAY') == 'CREDIT' and item(cur, 'CTL.L_QTY') == '1'
+    assert item(cur, 'CTL.D_TYPE') == 'DAP' and item(cur, 'CTL.D_PAY') == 'CREDIT' and item(cur, 'CTL.L_QTY') == '1'
     run(cur, "fstub.props('CTL.CUST_TEXT#9') := 'LOV_CUST'; ui.dblclick('CTL.CUST_TEXT');")
     assert prop(cur, 'DO_KEY') == 'LIST_VALUES'
     run(cur, "ui.dblclick('CTL.NEWDOC');")                                   # no list: nothing
@@ -681,7 +708,7 @@ def test_invoice_serials(cur, env):
     compile_ui(cur, 'MM_INVOICES')
     today = __import__('datetime').date.today().strftime('%d/%m/%Y')
     # a sale: one card automatically, then a scanned one into the same line, then one back
-    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='TPY', CTL__CUST_ID=str(ids['customer']), CTL__D_DATE=today)
+    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='TDA', CTL__CUST_ID=str(ids['customer']), CTL__D_DATE=today)
     d = db.one('select max(id) from mm_doc where customer_id = :c', c=ids['customer'])[0]
     run(cur, "ui.press('CTL.ADDLINE');", DOC__ID=str(d), CTL__L_ITEM_ID=str(card), CTL__L_QTY='1')
     line = db.one('select id from mm_doc_line where doc_id = :d', d=d)[0]
@@ -698,7 +725,7 @@ def test_invoice_serials(cur, env):
                 ":q := fstub.queries; end;", l=str(line), q=(q := cur.var(str)))
     assert q.getvalue() == 'DS:;'
     # a purchase: two cards with their PINs, posted
-    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='TAG', CTL__SUPP_ID=str(ids['supplier']), CTL__D_DATE=today)
+    run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='DPA', CTL__SUPP_ID=str(ids['supplier']), CTL__D_DATE=today)
     p = db.one('select max(id) from mm_doc where supplier_id = :s', s=ids['supplier'])[0]
     run(cur, "ui.press('CTL.ADDLINE');", DOC__ID=str(p), CTL__L_ITEM_ID=str(card), CTL__L_QTY='2', CTL__L_PRICE='9')
     pl = db.one('select id from mm_doc_line where doc_id = :d', d=p)[0]

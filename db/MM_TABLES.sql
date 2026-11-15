@@ -354,6 +354,16 @@ begin
   add_col('MM_DOC', 'DEPOSIT', 'deposit number(12,2) default 0 not null constraint mm_doc_deposit_ck check (deposit >= 0)');
   add_col('MM_CASH_MOVE', 'RESERVATION_ID', 'reservation_id number constraint mm_cash_move_res_fk references mm_reservation');
   add_col('MM_Z', 'DEPOSITS', 'deposits number(12,2) default 0 not null');
+  -- what a kind of document does (MM_BASE.sql): to the stock (STOCK_SIGN, above), to the balance of the
+  -- customer or the supplier (PARTNER_SIGN: + an invoice, - a credit note, 0 a delivery note), to the
+  -- VAT (VAT_SIGN: + an invoice or a receipt, - a credit note, 0 a delivery note); REF_TYPE: the kind of
+  -- delivery note an invoice is made from (MM_CORE.INVOICE_FROM, ADD_NOTE). A delivery note, its invoice.
+  add_col('MM_DOC_TYPE', 'PARTNER_SIGN', 'partner_sign number(1) default 0 not null '
+          || 'constraint mm_doc_type_psign_ck check (partner_sign in (-1, 0, 1))');
+  add_col('MM_DOC_TYPE', 'VAT_SIGN', 'vat_sign number(1) default 0 not null '
+          || 'constraint mm_doc_type_vsign_ck check (vat_sign in (-1, 0, 1))');
+  add_col('MM_DOC_TYPE', 'REF_TYPE', 'ref_type varchar2(3)');
+  add_col('MM_DOC', 'INVOICE_ID', 'invoice_id number constraint mm_doc_invoice_fk references mm_doc');
   for c in (select data_length n from user_tab_cols where table_name = 'MM_CASH_MOVE' and column_name = 'KIND') loop
     if c.n < 10 then
       execute immediate 'alter table mm_cash_move modify (kind varchar2(10))';
@@ -699,18 +709,22 @@ create table if not exists mm_partner_month (
   constraint mm_partner_month_pk primary key (kind, partner_id, month)
 );
 
--- what a customer or a supplier owes, move by move, as their ledger (MM_LEDGER.PARTNER_ROWS): a
--- document out (an invoice of a sale, a credit note of a purchase) debit, the other ones credit; a
--- document paid at once (cash, card) its money too, the other way; a receipt credit, a payment debit
+-- what a customer or a supplier owes, move by move, as their ledger (MM_LEDGER.PARTNER_ROWS): the
+-- documents with a PARTNER_SIGN (invoices +, credit notes -; delivery notes none): a customer's +
+-- debit, a supplier's + credit; one paid at once (cash, card) its money too, the other way; a receipt
+-- credit, a payment debit
 create or replace view mm_partner_event as
 select case t.side when 'S' then 'C' else 'S' end kind, nvl(d.customer_id, d.supplier_id) partner_id,
        d.doc_date ldate,
-       case when t.stock_sign = -1 then d.total else 0 end
-         + case when d.payment in ('CASH', 'CARD') and t.stock_sign <> -1 then d.total else 0 end debit,
-       case when t.stock_sign <> -1 then d.total else 0 end
-         + case when d.payment in ('CASH', 'CARD') and t.stock_sign = -1 then d.total else 0 end credit
+       -- the debit of a customer is what raises its balance (+), of a supplier what lowers it (-)
+       case when t.partner_sign = case t.side when 'S' then 1 else -1 end then d.total else 0 end
+         + case when d.payment in ('CASH', 'CARD') and t.partner_sign = case t.side when 'S' then -1 else 1 end
+                then d.total else 0 end debit,
+       case when t.partner_sign = case t.side when 'S' then -1 else 1 end then d.total else 0 end
+         + case when d.payment in ('CASH', 'CARD') and t.partner_sign = case t.side when 'S' then 1 else -1 end
+                then d.total else 0 end credit
 from mm_doc d join mm_doc_type t on t.code = d.doc_type
-where d.status = 'P'
+where d.status = 'P' and t.partner_sign <> 0
   and ((t.side = 'S' and d.customer_id is not null) or (t.side = 'P' and d.supplier_id is not null))
 union all
 select case p.kind when 'R' then 'C' else 'S' end, nvl(p.customer_id, p.supplier_id), p.pay_date,

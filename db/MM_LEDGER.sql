@@ -150,20 +150,20 @@ create or replace package body mm_ledger as
     select sign_ * nvl(sum(debit - credit), 0) into bal from mm_partner_month
     where kind = p_kind and partner_id = p_id and month < trunc(p_from, 'MM');
     r.seq := 0;
-    -- the documents (a sale out or a purchase back: debit), the money of those paid at once, the
+    -- the documents (an invoice of a sale or a credit of a purchase: debit; the notes are not here), the money of those paid at once, the
     -- receipts (credit) and the payments (debit)
     for e in (select d.doc_date ldate, d.created_at at_, d.id doc_id, d.doc_type || ' ' || d.doc_no doc_text,
-                     t.name descr, case when t.stock_sign = -1 then d.total end debit,
-                     case when t.stock_sign <> -1 then d.total end credit, 1 o
+                     t.name descr, case when t.partner_sign = case t.side when 'S' then 1 else -1 end then d.total end debit,
+                     case when not t.partner_sign = case t.side when 'S' then 1 else -1 end then d.total end credit, 1 o
               from mm_doc d join mm_doc_type t on t.code = d.doc_type
-              where d.status = 'P' and t.side = side and d.doc_date >= trunc(p_from, 'MM')
+              where d.status = 'P' and t.side = side and t.partner_sign <> 0 and d.doc_date >= trunc(p_from, 'MM')
                 and ((p_kind = 'C' and d.customer_id = p_id) or (p_kind = 'S' and d.supplier_id = p_id))
               union all
               select d.doc_date, d.created_at, d.id, d.doc_type || ' ' || d.doc_no,
                      'Εξόφληση με το παραστατικό (' || case d.payment when 'CASH' then 'μετρητά' else 'κάρτα' end || ')',
-                     case when t.stock_sign <> -1 then d.total end, case when t.stock_sign = -1 then d.total end, 2
+                     case when not t.partner_sign = case t.side when 'S' then 1 else -1 end then d.total end, case when t.partner_sign = case t.side when 'S' then 1 else -1 end then d.total end, 2
               from mm_doc d join mm_doc_type t on t.code = d.doc_type
-              where d.status = 'P' and t.side = side and d.payment in ('CASH', 'CARD') and d.doc_date >= trunc(p_from, 'MM')
+              where d.status = 'P' and t.side = side and t.partner_sign <> 0 and d.payment in ('CASH', 'CARD') and d.doc_date >= trunc(p_from, 'MM')
                 and ((p_kind = 'C' and d.customer_id = p_id) or (p_kind = 'S' and d.supplier_id = p_id))
               union all
               select p.pay_date, p.created_at, null, case p.kind when 'R' then 'Είσπραξη' else 'Πληρωμή' end,

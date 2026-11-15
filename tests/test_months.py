@@ -47,7 +47,7 @@ def partner_month(db, kind, pid, m):
 def test_documents_and_payments(env):
     db, ids = env
     s = ids['supplier']
-    d = db.fn('new_doc', int, 'TAG', p_supplier_id=s, p_payment='CREDIT', p_doc_date=D(2002, 3, 10))
+    d = db.fn('new_doc', int, 'TAD', p_supplier_id=s, p_payment='CREDIT', p_doc_date=D(2002, 3, 10))
     db.fn('add_line', int, d, ids['a'], 4)
     assert partner_month(db, 'S', s, D(2002, 3, 1)) == (0, 0)              # a draft: nothing yet
     db.fn('post_doc', int, d)
@@ -68,7 +68,7 @@ def test_documents_and_payments(env):
     assert partner_month(db, 'S', s, D(2002, 5, 1)) == (0, total)
     # a sale paid at once: debit and credit, the balance the same
     c = ids['customer']
-    v = db.fn('new_doc', int, 'TPY', p_customer_id=c, p_payment='CASH', p_doc_date=D(2002, 6, 1))
+    v = db.fn('new_doc', int, 'TDA', p_customer_id=c, p_payment='CASH', p_doc_date=D(2002, 6, 1))
     db.fn('add_line', int, v, ids['b'], 1)
     db.fn('post_doc', int, v)
     db.commit()

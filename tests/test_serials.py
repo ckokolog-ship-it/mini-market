@@ -84,11 +84,11 @@ def test_pin_encrypted_and_shown_only_to_allowed(card):
 def test_purchase_with_serials(card):
     db, ids = card
     s0 = db.stock(ids['card'])
-    d = db.fn('new_doc', int, 'TAG', p_supplier_id=ids['supplier'], p_payment='CREDIT')
+    d = db.fn('new_doc', int, 'TAD', p_supplier_id=ids['supplier'], p_payment='CREDIT')
     line = db.fn('add_line', int, d, ids['card'], 2)
     db.fn('add_serial', int, line, f"PU-{ids['tag']}-1", '11112222')
     db.fails(128, 'post_doc', d, rtype=int)                                        # 2 pieces, 1 serial
-    d = db.fn('new_doc', int, 'TAG', p_supplier_id=ids['supplier'], p_payment='CREDIT')
+    d = db.fn('new_doc', int, 'TAD', p_supplier_id=ids['supplier'], p_payment='CREDIT')
     line = db.fn('add_line', int, d, ids['card'], 2)
     for k in (1, 2):
         db.fn('add_serial', int, line, f"PU-{ids['tag']}-{k}", '11112222')
@@ -136,7 +136,7 @@ def test_sale_takes_the_oldest_and_cancel_gives_back(card):
     assert db.stock(ids['card']) == s0 and consistent(db, ids)
     db.fails(144, 'receipt_pin', a, rtype=str)
     # an invoice with cards: no credit note (cancel it instead)
-    t = db.fn('new_doc', int, 'TPY', p_customer_id=ids['customer'], p_payment='CREDIT')
+    t = db.fn('new_doc', int, 'TDA', p_customer_id=ids['customer'], p_payment='CREDIT')
     db.fn('sell_serial', int, t, ids['card'])
     db.fn('post_doc', int, t)
     db.commit()
@@ -213,10 +213,10 @@ def test_invoice_with_many_cards_and_their_serials(card):
     db.cur.execute('update mm_item set max_per_sale = 1 where id = :i', i=ids['card'])
     db.commit()
     try:
-        d = db.fn('new_doc', int, 'TPY', p_customer_id=ids['customer'], p_payment='CREDIT')
+        d = db.fn('new_doc', int, 'TDA', p_customer_id=ids['customer'], p_payment='CREDIT')
         avail = db.one("select count(*) from mm_serial where item_id = :i and status = 'A'", i=ids['card'])[0]
         db.fails(140, 'sell_serials', d, ids['card'], avail + 1, rtype=int)      # all or none
-        d = db.fn('new_doc', int, 'TPY', p_customer_id=ids['customer'], p_payment='CREDIT')
+        d = db.fn('new_doc', int, 'TDA', p_customer_id=ids['customer'], p_payment='CREDIT')
         assert db.fn('sell_serials', int, d, ids['card'], 3) == 3
         db.fn('post_doc', int, d)
         db.commit()

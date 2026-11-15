@@ -341,14 +341,16 @@ FORMS['MM_VARIANTS'] = dict(
 
 
 
-# invoicing (wholesale): invoices of sale and of purchase and their credit notes (master), their
-# lines (detail); new, a line (the cards of mobile phones: with their serials), delete a line, post,
-# cancel, a credit note, delete a draft
+# invoicing (wholesale): the documents of sale and of purchase but the retail receipts (master), their
+# lines (detail): the delivery notes (the stock), their invoices (the balance) and the TDA / TAD (both);
+# new, a line (the cards of mobile phones: with their serials), delete a line, post, cancel, delete a
+# draft; an invoice from a note (or one more note into a draft invoice); goods back of an invoice (a
+# return note, then its credit note from it)
 FORMS['MM_INVOICES'] = dict(
     title='Τιμολόγια',
     blocks=[
         dict(name='DOC', table='MM_DOC', order='doc_date desc, id desc', top=80, rows=6, read_only=True,
-             where="doc_type in ('TPY', 'PPY', 'TAG', 'PAG')",
+             where="doc_type <> 'ALP'",
              cols=[C('ID', '', 0, num=True, hidden=True),
                    C('DOC_TYPE', 'Είδος', 50, len=3),
                    C('DOC_NO', 'Αριθμός', 70, num=True),
@@ -360,7 +362,9 @@ FORMS['MM_INVOICES'] = dict(
                    C('PAYMENT', 'Πληρωμή', 70, len=6),
                    C('NET', 'Καθαρό', 80, num=True, mask='99G990D00'),
                    C('VAT', 'ΦΠΑ', 70, num=True, mask='99G990D00'),
-                   C('TOTAL', 'Σύνολο', 80, num=True, mask='99G990D00')]),
+                   C('TOTAL', 'Σύνολο', 80, num=True, mask='99G990D00'),
+                   C('INVOICE_ID', '', 0, num=True, hidden=True),
+                   C('INVOICE_TEXT', 'Στο τιμολόγιο', 110, len=30, db=False, display=True)]),
         dict(name='DL', table='MM_DOC_LINE', order='line_no', top=330, rows=8, read_only=True,
              where='doc_id = :DOC.ID',
              cols=[C('ID', '', 0, num=True, hidden=True),
@@ -378,7 +382,7 @@ FORMS['MM_INVOICES'] = dict(
              cols=[C('ID', '', 0, num=True, hidden=True),
                    C('SERIAL', 'Serial της γραμμής', 220, len=40),
                    C('STATUS', 'Κατ.', 40, len=1)])],
-    ctl=[('D_TYPE', 'text', 10, 260, 60, 'Είδος (λίστα)', {'len': 3, 'upper': True, 'init': 'TPY', 'lov': 'LOV_DTYPE'}),
+    ctl=[('D_TYPE', 'text', 10, 260, 60, 'Είδος (λίστα)', {'len': 3, 'upper': True, 'init': 'DAP', 'lov': 'LOV_DTYPE'}),
          ('CUST_TEXT', 'text', 76, 260, 200, 'Πελάτης (λίστα)', {'len': 100, 'lov': 'LOV_CUST'}),
          ('CUST_ID', 'hidden', 0, 0, 0, '', {'num': True}),
          ('SUPP_TEXT', 'text', 282, 260, 200, 'ή προμηθευτής (λίστα)', {'len': 100, 'lov': 'LOV_SUPP'}),
@@ -388,8 +392,11 @@ FORMS['MM_INVOICES'] = dict(
          ('NEWDOC', 'button', 660, 258, 120, 'Νέο', {}),
          ('POSTDOC', 'button', 830, 80, 160, 'Καταχώριση', {}),
          ('CANCELDOC', 'button', 830, 112, 160, 'Ακύρωση', {}),
-         ('CREDIT', 'button', 830, 144, 160, 'Πιστωτικό', {}),
+         ('CREDIT', 'button', 830, 144, 160, 'Επιστροφή', {}),
          ('DELDOC', 'button', 830, 176, 160, 'Σβήσε πρόχειρο', {}),
+         ('N_NOTE_TEXT', 'text', 1000, 96, 220, 'Δελτίο χωρίς τιμολόγιο (λίστα)', {'len': 100, 'lov': 'LOV_NOTE'}),
+         ('N_NOTE_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('FROMNOTE', 'button', 1000, 130, 220, 'Από δελτίο', {}),
          ('L_ITEM_TEXT', 'text', 910, 330, 220, 'Είδος (λίστα)', {'len': 200, 'lov': 'LOV_ITEMI'}),
          ('L_ITEM_ID', 'hidden', 0, 0, 0, '', {'num': True}),
          ('L_QTY', 'text', 910, 376, 60, 'Ποσότητα', {'num': True, 'init': '1'}),
@@ -404,16 +411,25 @@ FORMS['MM_INVOICES'] = dict(
     find_title='Τιμολόγια',
     find=("select d.id, d.doc_type || ' ' || d.doc_no || ' ' || to_char(d.doc_date, 'dd/mm/yyyy') text, "
           "nvl(c.name, s.name) partner from mm_doc d left join mm_customer c on c.id = d.customer_id "
-          "left join mm_supplier s on s.id = d.supplier_id where d.doc_type in ('TPY', 'PPY', 'TAG', 'PAG') "
+          "left join mm_supplier s on s.id = d.supplier_id where d.doc_type <> 'ALP' "
           "order by d.doc_date desc, d.id desc",
           [('ID', 0, 'Κωδ.', 'FIND_ID'), ('TEXT', 180, 'Παραστατικό', 'FIND_TEXT'), ('PARTNER', 220, 'Πελάτης / προμηθευτής', None)]),
     lovs=[('LOV_DTYPE', 'Είδος παραστατικού', "select code, name from mm_doc_type "
-                                             "where code in ('TPY', 'PPY', 'TAG', 'PAG') order by code",
+                                             "where code <> 'ALP' order by side desc, code",
            [('CODE', 50, 'Είδος', 'CTL.D_TYPE'), ('NAME', 220, 'Περιγραφή', None)]),
           ('LOV_CUST', 'Πελάτες', "select id, name from mm_customer where active = 'Y' order by name",
            [('ID', 0, 'Κωδ.', 'CTL.CUST_ID'), ('NAME', 260, 'Πελάτης', 'CTL.CUST_TEXT')]),
           ('LOV_SUPP', 'Προμηθευτές', "select id, name from mm_supplier where active = 'Y' order by name",
            [('ID', 0, 'Κωδ.', 'CTL.SUPP_ID'), ('NAME', 260, 'Προμηθευτής', 'CTL.SUPP_TEXT')]),
+          # the posted notes not yet in an invoice (of the kinds an invoice is made of)
+          ('LOV_NOTE', 'Δελτία χωρίς τιμολόγιο',
+           "select d.id, d.doc_type || ' ' || d.doc_no || ' ' || to_char(d.doc_date, 'dd/mm/yyyy') text, "
+           "nvl(c.name, s.name) partner, d.total from mm_doc d left join mm_customer c on c.id = d.customer_id "
+           "left join mm_supplier s on s.id = d.supplier_id where d.status = 'P' and d.invoice_id is null "
+           "and d.doc_type in (select ref_type from mm_doc_type where ref_type is not null) "
+           "order by nvl(c.name, s.name), d.doc_date, d.id",
+           [('ID', 0, 'Κωδ.', 'CTL.N_NOTE_ID'), ('TEXT', 160, 'Δελτίο', 'CTL.N_NOTE_TEXT'),
+            ('PARTNER', 220, 'Πελάτης / προμηθευτής', None), ('TOTAL', 80, 'Σύνολο', None)]),
           ('LOV_PAY', 'Πληρωμή', ' union all '.join(
               "select '%s' code, mm_text.t('%s') descr from dual" % (c, WORDS.key(d))
               for c, d in (('CREDIT', 'Πίστωση'), ('CASH', 'Μετρητά'), ('CARD', 'Κάρτα'))),

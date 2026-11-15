@@ -58,7 +58,7 @@ def doc(db, ids, kind, partner, payment, day, lines):
 def item(env):
     """item b: 10 in on 10/1/2001, 3 out on 5/2/2001 (the moves moved to those days)"""
     db, ids = env
-    d, _ = doc(db, ids, 'TAG', 'supplier', 'CREDIT', D(1, 10), [('b', 10)])
+    d, _ = doc(db, ids, 'TAD', 'supplier', 'CREDIT', D(1, 10), [('b', 10)])
     db.cur.execute('update mm_stock_move set move_at = :t where doc_id = :d', t=D(1, 10) + datetime.timedelta(hours=8), d=d)
     close_open_z(db, ids['reg'])
     db.fn('open_z', int, ids['reg'])
@@ -85,13 +85,14 @@ def test_item_ledger(item):
 def test_customer_ledger(item):
     db, ids = item
     c = ids['customer']
-    i1, t1 = doc(db, ids, 'TPY', 'customer', 'CREDIT', D(4, 10), [('a', 2), ('b', 1)])
-    _, t2 = doc(db, ids, 'TPY', 'customer', 'CASH', D(4, 25), [('a', 1)])          # paid at once
+    i1, t1 = doc(db, ids, 'TDA', 'customer', 'CREDIT', D(4, 10), [('a', 2), ('b', 1)])
+    _, t2 = doc(db, ids, 'TDA', 'customer', 'CASH', D(4, 25), [('a', 1)])          # paid at once
     r = db.fn('receive', int, c, 5, 'BANK', D(4, 10))       # the same day as the invoice: after it
     x = db.fn('receive', int, c, 1, 'BANK', D(4, 12))
     db.proc('cancel_payment', x)                              # cancelled: not in the ledger
-    cn = db.fn('credit_note', int, i1)
-    db.cur.execute('update mm_doc set doc_date = :d where id = :c', d=D(4, 30), c=cn)
+    back = db.fn('credit_note', int, i1)                      # the goods back: a note, not in the ledger
+    db.fn('post_doc', int, back)
+    cn = db.fn('invoice_from', int, back, D(4, 30))           # its credit note
     db.fn('post_doc', int, cn)
     db.commit()
     t3 = float(db.one('select total from mm_doc where id = :c', c=cn)[0])
@@ -109,10 +110,10 @@ def test_customer_ledger(item):
 def test_supplier_ledger(item):
     db, ids = item
     s = ids['supplier']
-    _, t0 = doc(db, ids, 'TAG', 'supplier', 'CREDIT', D(6, 1), [('a', 4)])
+    _, t0 = doc(db, ids, 'TAD', 'supplier', 'CREDIT', D(6, 1), [('a', 4)])
     db.fn('pay', int, s, 10, 'BANK', D(6, 2))
     db.commit()
-    # the TAG of the fixture (10/1) before the period: the carry-over is what we owe for it
+    # the TAD of the fixture (10/1) before the period: the carry-over is what we owe for it
     _, before = db.one("select count(*), sum(total) from mm_doc where supplier_id = :s and doc_date < :f "
                        "and status = 'P'", s=s, f=D(6, 1))
     before = float(before)

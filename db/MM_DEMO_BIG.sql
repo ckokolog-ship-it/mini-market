@@ -7,10 +7,12 @@
 -- Everything goes through MM_CORE, as at the till and in the office, so the stock, the numbers,
 -- the VAT and the Z add up (MM_CHECK.sql at the end): a second cash register, T2, with a Z every
 -- day (Sunday few receipts), the retail receipts (cash or card, a card of mobile now and then, a
--- cancelled one), an invoice on credit to a customer every other day (now and then a credit note),
--- the purchases from the suppliers every Monday (what was sold), the cards of mobile on the 1st
--- of the month, and every Friday the receipts from the customers and the payments to the
--- suppliers (the dairy and the press are late the last three weeks: their items go under the minimum
+-- cancelled one), a delivery note on credit to a customer every other day (now and then an invoice
+-- that is also its delivery note, TDA), every Friday the invoices of the notes of the week (one of
+-- many notes) and now and then goods back of an older one (a return note, then its credit note),
+-- the purchases from the suppliers every Monday (what was sold: a delivery note and its invoice, or
+-- a TAD), the cards of mobile on the 1st of the month, and every Friday the receipts from the
+-- customers and the payments to the suppliers (the dairy and the press are late the last three weeks: their items go under the minimum
 -- stock). Each row gets the date and the hour of its day.
 -- Once: if the register T2 exists, nothing is done. The same random numbers every time
 -- (dbms_random.seed), so two databases get the same year.
@@ -39,7 +41,7 @@ declare
   whole t_ids;          -- the items of the invoices to the shops
   card t_ids;           -- the cards of mobile
   cust t_ids;           -- the customers
-  tpy t_ids;            -- the invoices of the year (for the credit notes)
+  tpy t_ids;            -- the invoices of the year (for the goods back)
   ntpy pls_integer := 0;
   reg number;
   pins boolean;
@@ -92,7 +94,8 @@ declare
     q number;
     lines pls_integer := 0;
   begin
-    doc := mm_core.new_doc('TAG', p_supplier_id => p_supplier, p_payment => 'CREDIT', p_doc_date => d);
+    doc := mm_core.new_doc(case when chance(0.3) then 'TAD' else 'DPA' end, p_supplier_id => p_supplier,
+                           p_payment => 'CREDIT', p_doc_date => d);
     for i in (select i.id, i.unit, i.serial_tracked, i.stock + 0 stock,
                      case when c.name in ('Ποτά', 'Σνακ', 'Καφές και ροφήματα', 'Γαλακτοκομικά', 'Είδη καθαριότητας')
                           then 48 else 0 end shops,
@@ -138,21 +141,21 @@ declare
       mm_core.delete_doc(doc);
     else
       v := mm_core.post_doc(doc);
+      select count(*) into v from mm_doc where id = doc and doc_type = 'DPA';
+      if v > 0 then                                   -- the invoice of the note, the same day
+        doc := mm_core.invoice_from(doc, d);
+        v := mm_core.post_doc(doc);
+      end if;
     end if;
   end;
 
   -- the open balance of a customer (+ he owes) or of a supplier (+ we owe)
   function balance(p_customer number, p_supplier number) return number is
     b number;
-    p number;
   begin
-    select nvl(sum(case when d.doc_type in ('TPY', 'TAG') then d.total else -d.total end), 0) into b
-    from mm_doc d
-    where d.status = 'P' and d.doc_type in ('TPY', 'PPY', 'TAG', 'PAG')
-      and (d.customer_id = p_customer or d.supplier_id = p_supplier);
-    select nvl(sum(amount), 0) into p from mm_payment
-    where status = 'P' and (customer_id = p_customer or supplier_id = p_supplier);
-    return b - p;
+    select nvl(sum(debit - credit), 0) into b from mm_partner_event
+    where (kind = 'C' and partner_id = p_customer) or (kind = 'S' and partner_id = p_supplier);
+    return case when p_customer is not null then b else -b end;
   end;
 begin
   select count(*) into n from mm_register where code = 'T2';
@@ -294,17 +297,40 @@ begin
     end loop;
     v := mm_core.close_z(reg);
 
-    -- every other day an invoice on credit to a shop; now and then a credit note of an older one
-    if mod(day_, 2) = 0 then
-      doc := mm_core.new_doc('TPY', p_customer_id => pick(cust), p_payment => 'CREDIT', p_doc_date => d);
+    -- every other day a delivery note on credit to a shop (now and then a TDA: the invoice too); the
+    -- last day a note too, for the invoice of the next Friday («Από δελτίο» has one to show)
+    if mod(day_, 2) = 0 or day_ = c_days then
+      doc := mm_core.new_doc(case when chance(0.25) and day_ < c_days then 'TDA' else 'DAP' end, p_customer_id => pick(cust),
+                             p_payment => 'CREDIT', p_doc_date => d);
       for j in 1 .. trunc(dbms_random.value(3, 9)) loop
         ln := mm_core.add_line(doc, pick(whole), 6 * trunc(dbms_random.value(1, 9)));
       end loop;
       v := mm_core.post_doc(doc);
-      ntpy := ntpy + 1;
-      tpy(ntpy) := doc;
-      if ntpy > 3 and chance(0.1) then
-        -- goods back: the first line of an invoice, a third of it
+      select count(*) into v from mm_doc where id = doc and doc_type = 'TDA';
+      if v > 0 then
+        ntpy := ntpy + 1;
+        tpy(ntpy) := doc;
+      end if;
+    end if;
+
+    -- Friday: the invoices of the notes until yesterday, one for each customer; now and then goods
+    -- back of an older invoice: a return note of a third of its first line, then its credit note
+    if dy = 'FRI' then
+      for c in (select customer_id, min(id) first_ from mm_doc
+                where doc_type = 'DAP' and status = 'P' and invoice_id is null and doc_date < d
+                group by customer_id order by customer_id) loop
+        doc := mm_core.invoice_from(c.first_, d);
+        for x in (select id from mm_doc
+                  where doc_type = 'DAP' and status = 'P' and invoice_id is null and customer_id = c.customer_id
+                    and doc_date < d
+                  order by id) loop
+          mm_core.add_note(doc, x.id);
+        end loop;
+        v := mm_core.post_doc(doc);
+        ntpy := ntpy + 1;
+        tpy(ntpy) := doc;
+      end loop;
+      if ntpy > 3 and chance(0.4) then
         doc := mm_core.credit_note(tpy(trunc(dbms_random.value(ntpy - 3, ntpy))));
         update mm_doc set doc_date = d where id = doc;
         for l in (select id, qty, price, discount, line_no from mm_doc_line where doc_id = doc order by line_no) loop
@@ -314,6 +340,8 @@ begin
             mm_core.delete_line(l.id);
           end if;
         end loop;
+        v := mm_core.post_doc(doc);
+        doc := mm_core.invoice_from(doc, d);
         v := mm_core.post_doc(doc);
       end if;
     end if;
@@ -340,7 +368,7 @@ begin
     update mm_z set opened_at = d + 8 / 24, closed_at = d + 21 / 24 where id = z;
     update mm_doc x
     set created_at = case
-          when doc_type in ('TAG', 'PAG') then d + 8 / 24
+          when doc_type in (select code from mm_doc_type where side = 'P') then d + 8 / 24
           when doc_type = 'ALP' then d + (8 + 13 * (select count(*) from mm_doc y
                                                     where y.id > m_doc and y.id <= x.id and y.doc_type = 'ALP')
                                               / (ndocs + 1)) / 24

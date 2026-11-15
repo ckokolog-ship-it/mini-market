@@ -1,7 +1,7 @@
 -- MM_REPORT.sql -- what the reports of sales, VAT and minimum stock read (reports/mkreports.py), and
 -- their Greek words (the XML of a report is ASCII). Run by INSTALL.sql.
 --
---   MM_SALES_DAY      the sales of each day: receipts (their number and total), invoices, credit notes
+--   MM_SALES_DAY      the sales of each day: receipts (their number and total), invoices (and TDA), credit notes
 --   MM_VAT_DAY        each day and VAT rate: net and VAT of the sales and of the purchases (a credit
 --                     note takes off)
 --   MM_MIN_STOCK      the items under their minimum stock, with what is missing and the supplier of
@@ -12,23 +12,24 @@ create or replace view mm_sales_day as
 select d.doc_date day,
        count(case when d.doc_type = 'ALP' then 1 end) alp_docs,
        nvl(sum(case when d.doc_type = 'ALP' then d.total end), 0) alp_total,
-       nvl(sum(case when d.doc_type = 'TPY' then d.total end), 0) tpy_total,
+       nvl(sum(case when d.doc_type in ('TPY', 'TDA') then d.total end), 0) tpy_total,
        nvl(sum(case when d.doc_type = 'PPY' then d.total end), 0) ppy_total,
-       nvl(sum(case when d.doc_type = 'PPY' then -d.total else d.total end), 0) total
+       nvl(sum(t.vat_sign * d.total), 0) total
 from mm_doc d
-where d.status = 'P' and d.doc_type in ('ALP', 'TPY', 'PPY')
+join mm_doc_type t on t.code = d.doc_type
+where d.status = 'P' and t.side = 'S' and t.vat_sign <> 0
 group by d.doc_date;
 
 create or replace view mm_vat_day as
 select d.doc_date day, l.vat_code, l.vat_rate,
-       sum(case when t.side = 'S' then -t.stock_sign * l.net else 0 end) s_net,
-       sum(case when t.side = 'S' then -t.stock_sign * l.vat else 0 end) s_vat,
-       sum(case when t.side = 'P' then t.stock_sign * l.net else 0 end) p_net,
-       sum(case when t.side = 'P' then t.stock_sign * l.vat else 0 end) p_vat
+       sum(case when t.side = 'S' then t.vat_sign * l.net else 0 end) s_net,
+       sum(case when t.side = 'S' then t.vat_sign * l.vat else 0 end) s_vat,
+       sum(case when t.side = 'P' then t.vat_sign * l.net else 0 end) p_net,
+       sum(case when t.side = 'P' then t.vat_sign * l.vat else 0 end) p_vat
 from mm_doc d
 join mm_doc_type t on t.code = d.doc_type
 join mm_doc_line l on l.doc_id = d.id
-where d.status = 'P'
+where d.status = 'P' and t.vat_sign <> 0      -- the notes: no VAT (their invoice has it)
 group by d.doc_date, l.vat_code, l.vat_rate;
 
 create or replace view mm_min_stock as
@@ -36,7 +37,7 @@ select c.name category, i.code, i.name, i.unit, i.stock + 0 stock, i.min_stock,
        i.min_stock - (i.stock + 0) missing,
        (select max(s.name) keep (dense_rank last order by d.doc_date, d.id)
         from mm_doc d join mm_doc_line l on l.doc_id = d.id join mm_supplier s on s.id = d.supplier_id
-        where l.item_id = i.id and d.doc_type = 'TAG' and d.status = 'P') supplier
+        where l.item_id = i.id and d.doc_type in ('DPA', 'TAD') and d.status = 'P') supplier
 from mm_item i
 join mm_category c on c.id = i.category_id
 where i.active = 'Y' and i.is_model = 'N' and i.kit = 'N' and i.stock + 0 < i.min_stock;

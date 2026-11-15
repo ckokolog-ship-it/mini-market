@@ -76,9 +76,14 @@ def test_tables(cur):
 def test_vat_and_doc_types(cur):
     cur.execute('select code, rate from mm_vat order by code')
     assert cur.fetchall() == [('A', 24), ('B', 13), ('C', 6)]
-    cur.execute('select code, side, stock_sign from mm_doc_type order by code')
-    assert cur.fetchall() == [('ALP', 'S', -1), ('PAG', 'P', -1), ('PPY', 'S', 1),
-                              ('TAG', 'P', 1), ('TPY', 'S', -1)]
+    cur.execute('select code, side, stock_sign, partner_sign, vat_sign, ref_type from mm_doc_type order by code')
+    assert cur.fetchall() == [
+        ('ALP', 'S', -1, 0, 1, None),
+        ('DAP', 'S', -1, 0, 0, None), ('DEA', 'P', -1, 0, 0, None), ('DEP', 'S', 1, 0, 0, None),
+        ('DPA', 'P', 1, 0, 0, None),
+        ('PAG', 'P', 0, -1, -1, 'DEA'), ('PPY', 'S', 0, -1, -1, 'DEP'),
+        ('TAD', 'P', 1, 1, 1, None), ('TAG', 'P', 0, 1, 1, 'DPA'), ('TDA', 'S', -1, 1, 1, None),
+        ('TPY', 'S', 0, 1, 1, 'DAP')]
 
 
 def test_demo_rows(cur):
