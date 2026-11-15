@@ -23,8 +23,10 @@ import java.util.Map;
  *   POST /api/pos/{register}/scan {code, qty}  an item by barcode or code (a card of mobile: one, the
  *                                              oldest), or a card by its serial
  *   POST /api/pos/{register}/lines/{id} {qty}  the quantity of a line (0: the line out)
- *   POST /api/pos/{register}/void              the draft out
- *   POST /api/pos/{register}/pay {payment CASH|CARD, given}   posted: its number, total and change
+ *   POST /api/pos/{register}/void              the draft out (an order in it: open again)
+ *   POST /api/pos/{register}/order {id}        an order (Orders), all of its lines, into the receipt
+ *   POST /api/pos/{register}/pay {payment CASH|CARD, given}   posted: its number, total, what was due
+ *                                              (less a deposit of its order) and the change
  * </pre>
  */
 final class Pos {
@@ -150,6 +152,32 @@ final class Pos {
                 }
                 return state(c, reg);
             }
+            case "order" -> {
+                if (p.length != 3) {
+                    break;
+                }
+                if (openZ(c, reg) == null) {
+                    throw new Http.Fail(409, "z_closed", "Το ταμείο δεν έχει ανοιχτό Ζ: «Άνοιγμα Ζ»");
+                }
+                Long d = draft(c, reg);
+                if (d != null) {
+                    Object n = Db.rows(c, "select count(*) n from mm_doc_line where doc_id = ?", d).get(0).get("n");
+                    if (((BigDecimal) n).signum() > 0) {
+                        throw new Http.Fail(409, "receipt_open", "Υπάρχει ανοιχτή απόδειξη: πλήρωσέ την ή ακύρωσέ την πρώτα");
+                    }
+                    try (CallableStatement cs = c.prepareCall("begin mm_core.delete_doc(?); end;")) {
+                        cs.setLong(1, d);
+                        cs.execute();
+                    }
+                }
+                try (CallableStatement cs = c.prepareCall("begin ? := mm_core.deliver(?, ?); end;")) {
+                    cs.registerOutParameter(1, Types.NUMERIC);
+                    cs.setLong(2, Http.id(String.valueOf(in.get("id")).replaceAll("\\.0$", "")));
+                    cs.setLong(3, reg);
+                    cs.execute();
+                }
+                return state(c, reg);
+            }
             case "pay" -> {
                 if (p.length != 3) {
                     break;
@@ -267,22 +295,25 @@ final class Pos {
             cs.execute();
             no = cs.getLong(1);
         }
-        BigDecimal total = (BigDecimal) Db.rows(c, "select total from mm_doc where id = ?", d).get(0).get("total");
+        Map<String, Object> doc = Db.rows(c, "select total, deposit from mm_doc where id = ?", d).get(0);
+        BigDecimal total = (BigDecimal) doc.get("total");
+        BigDecimal due = total.subtract((BigDecimal) doc.get("deposit"));
         BigDecimal given = Http.decimal(in, "given", null);
         BigDecimal change = null;
         if ("CASH".equals(how) && given != null) {
-            if (given.compareTo(total) < 0) {
+            if (given.compareTo(due) < 0) {
                 // (the caller rolls back: nothing posted)
                 throw new Http.Fail(400, "not_enough", "Δόθηκαν " + given.toPlainString() + ", η απόδειξη είναι "
-                        + total.toPlainString());
+                        + due.toPlainString());
             }
-            change = given.subtract(total);
+            change = given.subtract(due);
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", d);
         out.put("doc_no", no);
         out.put("payment", how);
         out.put("total", total);
+        out.put("due", due);
         out.put("given", given);
         out.put("change", change);
         return out;
@@ -308,7 +339,10 @@ final class Pos {
         if (d == null) {
             out.put("receipt", null);
         } else {
-            Map<String, Object> r = Db.rows(c, "select id, net, vat, total from mm_doc where id = ?", d).get(0);
+            Map<String, Object> r = Db.rows(c, """
+                    select d.id, d.net, d.vat, d.total, d.deposit, d.total - d.deposit due,
+                           (select max(x.id) from mm_reservation x where x.doc_id = d.id) order_id
+                    from mm_doc d where d.id = ?""", d).get(0);
             r.put("lines", Db.rows(c, """
                     select l.id, l.line_no, i.code, i.name, i.unit, i.serial_tracked, l.qty, l.price, l.discount,
                            l.total,

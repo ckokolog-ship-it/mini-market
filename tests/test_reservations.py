@@ -163,3 +163,47 @@ def test_no_cards_in_a_reservation(z):
     item = db.one('select id from mm_item where code = :c', c=f"TST{ids['tag']}R")[0]
     r = db.fn('new_reservation', int, 'Test x', '6912345678', PICKUP)
     db.fails(152, 'reserve', r, item, 1)
+
+
+def test_an_order_picked_ready_then_a_delivery_note(z):
+    """an order (a reservation of today, from the pages): who wrote it, picked line by line, ready; a
+    change makes it not ready; for a customer on credit, a delivery note (the stock out, posted: done)"""
+    db, ids, _ = z
+    r = db.fn('new_reservation', int, 'Test order', '6912345678', datetime.date.today(), ids['customer'], None, 'TSTUser')
+    db.proc('reserve', r, ids['b'], 3)
+    db.proc('reserve', r, ids['a'], 1)
+    db.commit()
+    assert db.one('select created_by, ready_at from mm_reservation where id = :r', r=r) == ('tstuser', None)
+    db.proc('pick', r, ids['b'], 2)
+    db.commit()
+    assert float(db.one('select picked from mm_reservation_line where reservation_id = :r and item_id = :i',
+                        r=r, i=ids['b'])[0]) == 2
+    db.fails(186, 'pick', r, ids['b'], 4)                       # more than ordered
+    db.fails(186, 'pick', r, 999999999, 1)                      # not in it
+    db.proc('reserve', r, ids['b'], 1)                          # less: picked no more than it
+    assert float(db.one('select picked from mm_reservation_line where reservation_id = :r and item_id = :i',
+                        r=r, i=ids['b'])[0]) == 1
+    db.proc('set_ready', r, 'Y')
+    db.commit()
+    assert db.one('select ready_at from mm_reservation where id = :r', r=r)[0] is not None
+    assert db.one('select count(*) from mm_reservation_line where reservation_id = :r and picked < qty', r=r)[0] == 0
+    db.proc('set_ready', r, 'N')
+    assert db.one('select ready_at from mm_reservation where id = :r', r=r)[0] is None
+    # no customer, or a deposit: no delivery note
+    db.commit()
+    x = db.fn('new_reservation', int, 'Test x', '6912345678', datetime.date.today())
+    db.proc('reserve', x, ids['b'], 1)
+    db.fails(187, 'deliver_note', x, rtype=int)
+    stock = avail(db, ids['b'])[0]
+    d = db.fn('deliver_note', int, r)
+    t, cust, pay = db.one('select doc_type, customer_id, payment from mm_doc where id = :d', d=d)
+    assert (t, cust, pay) == ('DAP', ids['customer'], 'CREDIT')
+    assert db.one('select count(*) from mm_doc_line where doc_id = :d', d=d)[0] == 2
+    db.fn('post_doc', int, d)
+    db.commit()
+    assert db.one('select status, doc_id from mm_reservation where id = :r', r=r) == ('D', d)
+    assert avail(db, ids['b'])[0] == stock - 1
+    y = db.fn('new_reservation', int, 'Test y', '6912345678', datetime.date.today(), ids['customer'])
+    db.proc('reserve', y, ids['b'], 1)
+    db.proc('take_deposit', y, ids['reg'], 1)
+    db.fails(187, 'deliver_note', y, rtype=int)

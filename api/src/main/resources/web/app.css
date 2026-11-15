@@ -103,3 +103,8 @@ label.check { flex-direction: row; align-items: center; gap: 6px; padding-bottom
   .sheet { margin: 0; box-shadow: none; break-after: page; }
   .sheet:last-child { break-after: auto; }
 }
+
+/* the orders: a line picked */
+tr.picked td { color: var(--muted); }
+tr.picked td:nth-child(2) { text-decoration: line-through; }
+.order-text { align-self: center; }

@@ -36,6 +36,7 @@ import java.util.Optional;
  *   POST /api/counts/{id}/scan {code, qty, mode ADD|SET, device}   a scan of a phone
  *   POST /api/counts/{id}/post   .../cancel     the count to the stock, or dropped (MANAGER)
  *   /api/pos/...                               the till: see Pos
+ *   /api/orders/...                            the orders: see Orders
  * </pre>
  */
 final class Api {
@@ -173,6 +174,9 @@ final class Api {
         if ("pos".equals(p[0])) {
             return Pos.post(c, p, in);
         }
+        if ("orders".equals(p[0])) {
+            return Orders.post(c, u, p, in);
+        }
         if ("counts".equals(p[0])) {
             if (n == 1) {
                 need(u, "MANAGER");
@@ -252,6 +256,9 @@ final class Api {
             }
             case "pos" -> {
                 return Pos.get(c, p);
+            }
+            case "orders" -> {
+                return Orders.get(c, p, q);
             }
             case "counts" -> {
                 if (n == 1) {
