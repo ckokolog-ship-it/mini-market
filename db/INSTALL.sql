@@ -39,13 +39,14 @@ prompt == the tables
 @MM_TABLES.sql
 prompt == the VAT and the kinds of documents
 @MM_BASE.sql
-prompt == the packages MM_PIN (the PINs of the cards), MM_CORE, MM_LEDGER (the ledgers), MM_REPORT (sales, VAT, minimum stock), MM_AUTH (the users), and MM_TEXT (the Greek of the forms)
+prompt == the packages MM_PIN (the PINs of the cards), MM_CORE, MM_LEDGER (the ledgers), MM_REPORT (sales, VAT, minimum stock), MM_AUTH (the users), MM_MONTHS (the totals of the months), and MM_TEXT (the Greek of the forms)
 whenever sqlerror continue
 @MM_PIN.sql
 @MM_CORE.sql
 @MM_LEDGER.sql
 @MM_REPORT.sql
 @MM_AUTH.sql
+@MM_MONTHS.sql
 @MM_TEXT.sql
 whenever sqlerror exit failure rollback
 -- MM_PIN needs DBMS_CRYPTO (GRANT_CRYPTO.sql, as SYS): without it only the PINs do not work
@@ -67,9 +68,10 @@ set serveroutput off
 declare
   n number;
 begin
-  select count(*) into n from user_errors where name in ('MM_CORE', 'MM_LEDGER', 'MM_REPORT', 'MM_TEXT');
+  select count(*) into n from user_errors where name in ('MM_CORE', 'MM_LEDGER', 'MM_REPORT', 'MM_MONTHS', 'MM_TEXT',
+                                                     'MM_STOCK_MOVE_MONTH', 'MM_DOC_MONTH', 'MM_PAYMENT_MONTH');
   if n > 0 then
-    raise_application_error(-20002, 'MM_CORE/MM_LEDGER/MM_REPORT/MM_TEXT: ' || n || ' errors (show errors package body mm_core)');
+    raise_application_error(-20002, 'MM_CORE/MM_LEDGER/MM_REPORT/MM_MONTHS/MM_TEXT: ' || n || ' errors (show errors package body mm_core)');
   end if;
 end;
 /
@@ -81,6 +83,12 @@ set define off
 -- compiled now, so that nothing is left invalid
 begin
   dbms_utility.compile_schema(schema => user, compile_all => false);
+end;
+/
+prompt == the totals of the months again from all the moves (MM_MONTHS: the moves of before them too)
+begin
+  mm_months.rebuild;
+  commit;
 end;
 /
 prompt == what is in the database

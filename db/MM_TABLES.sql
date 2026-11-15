@@ -612,55 +612,7 @@ join mm_doc_line l on l.id = s.out_line_id
 join mm_doc d on d.id = l.doc_id
 join mm_item i on i.id = s.item_id;
 
--- the check of the whole database (MM_CHECK.sql, and the tests): a row here is something that does
--- not add up. Empty: the stock is the sum of its moves, every document the sum of its lines, every
--- closed Z the sum of its documents and of its money, every receipt paid once in the register,
--- the cards in stock are their serials, the next numbers are after the last ones.
-create or replace view mm_check as
-select 'STOCK' what, i.id, i.code || ': ' || (i.stock + 0) || ' <> ' || nvl(m.qty, 0) detail
-from mm_item i
-left join (select item_id, sum(qty) qty from mm_stock_move group by item_id) m on m.item_id = i.id
-where i.stock + 0 <> nvl(m.qty, 0)
-union all
-select 'DOC', d.id, d.doc_type || ' ' || d.doc_no || ': ' || d.total || ' <> ' || nvl(l.total, 0)
-from mm_doc d
-left join (select doc_id, sum(net) net, sum(vat) vat, sum(total) total from mm_doc_line group by doc_id) l
-  on l.doc_id = d.id
-where d.net <> nvl(l.net, 0) or d.vat <> nvl(l.vat, 0) or d.total <> nvl(l.total, 0)
-union all
-select 'Z', z.id, 'Z ' || z.z_no || ': ' || z.total || ' <> ' || nvl(s.total, 0)
-from mm_z z
-left join (select d.z_id, count(*) docs, sum(-t.stock_sign * d.total) total
-           from mm_doc d join mm_doc_type t on t.code = d.doc_type
-           where d.status = 'P' group by d.z_id) s on s.z_id = z.id
-where z.status = 'C' and (z.total <> nvl(s.total, 0) or z.docs <> nvl(s.docs, 0))
-union all
-select 'Z_VAT', z.id, 'Z ' || z.z_no || ': ' || z.total || ' <> ' || nvl(v.total, 0)
-from mm_z z
-left join (select z_id, sum(total) total from mm_z_vat group by z_id) v on v.z_id = z.id
-where z.status = 'C' and z.total <> nvl(v.total, 0)
-union all
-select 'Z_CASH', z.id, 'Z ' || z.z_no || ': ' || (z.cash + z.card) || ' <> ' || nvl(c.amount, 0)
-from mm_z z
-left join (select z_id, sum(amount) amount from mm_cash_move
-           where kind in ('SALE', 'REFUND', 'DEPOSIT') group by z_id) c on c.z_id = z.id
-where z.status = 'C' and z.cash + z.card <> nvl(c.amount, 0)
-union all
-select 'CASH', d.id, d.doc_type || ' ' || d.doc_no || ': ' || nvl(c.amount, 0)
-from mm_doc d
-join mm_doc_type t on t.code = d.doc_type
-left join (select doc_id, sum(amount) amount from mm_cash_move
-           where kind in ('SALE', 'REFUND') group by doc_id) c on c.doc_id = d.id
-where d.register_id is not null and d.payment in ('CASH', 'CARD') and d.status in ('P', 'C')
-  and nvl(c.amount, 0) <> case when d.status = 'C' then 0
-                               else -t.stock_sign * (d.total - d.deposit) end
-union all
-select 'SERIAL', item_id, code || ': ' || stock || ' <> ' || available from mm_serial_check
-union all
-select 'NEXT_NO', null, t.code || ': ' || t.next_no || ' <= ' || m.no
-from mm_doc_type t
-join (select doc_type, max(doc_no) no from mm_doc group by doc_type) m on m.doc_type = t.code
-where t.next_no <= m.no;
+
 
 -- the ledger on the screen (the form MM_LEDGER): MM_LEDGER.FILL puts the rows of one item, customer
 -- or supplier here, for the session only (a global temporary table: each user sees his own)
@@ -724,3 +676,116 @@ create table if not exists mm_auth_log (
   event       varchar2(10)  not null,
   client      varchar2(60)
 );
+
+-- the totals of each month (MM_MONTHS.sql: kept by triggers): the ledgers take what was before a
+-- period from them, not from every move since the first one.
+-- MM_ITEM_MONTH: the stock in and out of an item in a month (from MM_STOCK_MOVE). Reservable, as
+-- MM_ITEM.STOCK: two tills that sell the same item do not wait for each other.
+create table if not exists mm_item_month (
+  item_id     number        not null constraint mm_item_month_item_fk references mm_item,
+  month       date          not null constraint mm_item_month_day_ck check (month = trunc(month, 'MM')),
+  qty_in      number(14,3)  reservable default 0 not null,
+  qty_out     number(14,3)  reservable default 0 not null,
+  constraint mm_item_month_pk primary key (item_id, month)
+);
+-- MM_PARTNER_MONTH: the debit and the credit of a customer (C) or a supplier (S) in a month (from the
+-- posted documents and the receipts and payments: MM_PARTNER_EVENT)
+create table if not exists mm_partner_month (
+  kind        varchar2(1)   not null constraint mm_partner_month_kind_ck check (kind in ('C', 'S')),
+  partner_id  number        not null,
+  month       date          not null constraint mm_partner_month_day_ck check (month = trunc(month, 'MM')),
+  debit       number(14,2)  default 0 not null,
+  credit      number(14,2)  default 0 not null,
+  constraint mm_partner_month_pk primary key (kind, partner_id, month)
+);
+
+-- what a customer or a supplier owes, move by move, as their ledger (MM_LEDGER.PARTNER_ROWS): a
+-- document out (an invoice of a sale, a credit note of a purchase) debit, the other ones credit; a
+-- document paid at once (cash, card) its money too, the other way; a receipt credit, a payment debit
+create or replace view mm_partner_event as
+select case t.side when 'S' then 'C' else 'S' end kind, nvl(d.customer_id, d.supplier_id) partner_id,
+       d.doc_date ldate,
+       case when t.stock_sign = -1 then d.total else 0 end
+         + case when d.payment in ('CASH', 'CARD') and t.stock_sign <> -1 then d.total else 0 end debit,
+       case when t.stock_sign <> -1 then d.total else 0 end
+         + case when d.payment in ('CASH', 'CARD') and t.stock_sign = -1 then d.total else 0 end credit
+from mm_doc d join mm_doc_type t on t.code = d.doc_type
+where d.status = 'P'
+  and ((t.side = 'S' and d.customer_id is not null) or (t.side = 'P' and d.supplier_id is not null))
+union all
+select case p.kind when 'R' then 'C' else 'S' end, nvl(p.customer_id, p.supplier_id), p.pay_date,
+       case when p.kind = 'P' then p.amount else 0 end, case when p.kind = 'R' then p.amount else 0 end
+from mm_payment p
+where p.status = 'P';
+
+-- the check of the whole database (MM_CHECK.sql, and the tests): a row here is something that does
+-- not add up. Empty: the stock is the sum of its moves, every document the sum of its lines, every
+-- closed Z the sum of its documents and of its money, every receipt paid once in the register,
+-- the cards in stock are their serials, the next numbers are after the last ones, the totals
+-- of the months (MM_MONTHS) are their moves.
+create or replace view mm_check as
+select 'STOCK' what, i.id, i.code || ': ' || (i.stock + 0) || ' <> ' || nvl(m.qty, 0) detail
+from mm_item i
+left join (select item_id, sum(qty) qty from mm_stock_move group by item_id) m on m.item_id = i.id
+where i.stock + 0 <> nvl(m.qty, 0)
+union all
+select 'DOC', d.id, d.doc_type || ' ' || d.doc_no || ': ' || d.total || ' <> ' || nvl(l.total, 0)
+from mm_doc d
+left join (select doc_id, sum(net) net, sum(vat) vat, sum(total) total from mm_doc_line group by doc_id) l
+  on l.doc_id = d.id
+where d.net <> nvl(l.net, 0) or d.vat <> nvl(l.vat, 0) or d.total <> nvl(l.total, 0)
+union all
+select 'Z', z.id, 'Z ' || z.z_no || ': ' || z.total || ' <> ' || nvl(s.total, 0)
+from mm_z z
+left join (select d.z_id, count(*) docs, sum(-t.stock_sign * d.total) total
+           from mm_doc d join mm_doc_type t on t.code = d.doc_type
+           where d.status = 'P' group by d.z_id) s on s.z_id = z.id
+where z.status = 'C' and (z.total <> nvl(s.total, 0) or z.docs <> nvl(s.docs, 0))
+union all
+select 'Z_VAT', z.id, 'Z ' || z.z_no || ': ' || z.total || ' <> ' || nvl(v.total, 0)
+from mm_z z
+left join (select z_id, sum(total) total from mm_z_vat group by z_id) v on v.z_id = z.id
+where z.status = 'C' and z.total <> nvl(v.total, 0)
+union all
+select 'Z_CASH', z.id, 'Z ' || z.z_no || ': ' || (z.cash + z.card) || ' <> ' || nvl(c.amount, 0)
+from mm_z z
+left join (select z_id, sum(amount) amount from mm_cash_move
+           where kind in ('SALE', 'REFUND', 'DEPOSIT') group by z_id) c on c.z_id = z.id
+where z.status = 'C' and z.cash + z.card <> nvl(c.amount, 0)
+union all
+select 'CASH', d.id, d.doc_type || ' ' || d.doc_no || ': ' || nvl(c.amount, 0)
+from mm_doc d
+join mm_doc_type t on t.code = d.doc_type
+left join (select doc_id, sum(amount) amount from mm_cash_move
+           where kind in ('SALE', 'REFUND') group by doc_id) c on c.doc_id = d.id
+where d.register_id is not null and d.payment in ('CASH', 'CARD') and d.status in ('P', 'C')
+  and nvl(c.amount, 0) <> case when d.status = 'C' then 0
+                               else -t.stock_sign * (d.total - d.deposit) end
+union all
+select 'SERIAL', item_id, code || ': ' || stock || ' <> ' || available from mm_serial_check
+union all
+select 'NEXT_NO', null, t.code || ': ' || t.next_no || ' <= ' || m.no
+from mm_doc_type t
+join (select doc_type, max(doc_no) no from mm_doc group by doc_type) m on m.doc_type = t.code
+where t.next_no <= m.no
+union all
+-- the totals of the months (MM_MONTHS) are their moves
+select 'ITEM_MONTH', nvl(a.item_id, b.item_id),
+       to_char(nvl(a.month, b.month), 'MM/YYYY') || ': ' || nvl(a.qty_in, 0) || '/' || nvl(a.qty_out, 0)
+       || ' <> ' || nvl(b.qty_in, 0) || '/' || nvl(b.qty_out, 0)
+from (select item_id, month, qty_in + 0 qty_in, qty_out + 0 qty_out from mm_item_month
+      where qty_in + 0 <> 0 or qty_out + 0 <> 0) a
+full join (select item_id, trunc(move_at, 'MM') month, sum(case when qty > 0 then qty else 0 end) qty_in,
+                  sum(case when qty < 0 then -qty else 0 end) qty_out
+           from mm_stock_move group by item_id, trunc(move_at, 'MM')) b
+  on b.item_id = a.item_id and b.month = a.month
+where nvl(a.qty_in, 0) <> nvl(b.qty_in, 0) or nvl(a.qty_out, 0) <> nvl(b.qty_out, 0)
+union all
+select 'PARTNER_MONTH', nvl(a.partner_id, b.partner_id),
+       nvl(a.kind, b.kind) || ' ' || to_char(nvl(a.month, b.month), 'MM/YYYY') || ': ' || nvl(a.debit, 0) || '/'
+       || nvl(a.credit, 0) || ' <> ' || nvl(b.debit, 0) || '/' || nvl(b.credit, 0)
+from (select * from mm_partner_month where debit <> 0 or credit <> 0) a
+full join (select kind, partner_id, trunc(ldate, 'MM') month, sum(debit) debit, sum(credit) credit
+           from mm_partner_event group by kind, partner_id, trunc(ldate, 'MM')) b
+  on b.kind = a.kind and b.partner_id = a.partner_id and b.month = a.month
+where nvl(a.debit, 0) <> nvl(b.debit, 0) or nvl(a.credit, 0) <> nvl(b.credit, 0);

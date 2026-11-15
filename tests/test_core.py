@@ -122,6 +122,15 @@ def cleanup(c):
     c.execute(f'delete from mm_doc where id in ({TEST_DOCS})')
     c.execute("delete from mm_z where register_id in (select id from mm_register where code = 'TST')")
     c.execute("delete from mm_register where code = 'TST'")
+    # the totals of the months of the test items (row by row: MM_MONTHS.REBUILD), of its partners. A
+    # row of MM_ITEM_MONTH changed by the trigger of the moves above (reservable) is deleted only after
+    # that is committed (else ORA-55754)
+    c.connection.commit()
+    c.execute(f'begin for r in (select item_id, month from mm_item_month where item_id in ({TEST_ITEMS})) loop '
+              'delete from mm_item_month where item_id = r.item_id and month = r.month; end loop; end;')
+    c.execute("delete from mm_partner_month where (kind = 'C' and partner_id in "
+              "(select id from mm_customer where name like 'Test %')) or (kind = 'S' and partner_id in "
+              "(select id from mm_supplier where name like 'Test %'))")
     c.execute(f'delete from mm_item where id in ({TEST_ITEMS})')
     c.execute("delete from mm_customer where name like 'Test %'")
     c.execute("delete from mm_supplier where name like 'Test %'")

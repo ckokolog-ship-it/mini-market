@@ -6,7 +6,9 @@
 --   select * from table(mm_ledger.partner_rows('C', :customer_id, :from, :to))
 --   mm_ledger.fill('I' / 'C' / 'S', id, from, to, open, debit, credit, close)  (the form MM_LEDGER:
 --                                                      the rows in MM_LEDGER_ROW, the totals out)
--- The first row (KIND O) is the carry-over, the others (M) the moves.
+-- The first row (KIND O) is the carry-over, the others (M) the moves. The carry-over: the totals of the
+-- months before the month of the period (MM_ITEM_MONTH, MM_PARTNER_MONTH: MM_MONTHS.sql) and the moves
+-- of that month before its first day: a ledger of years ago as quick as one of today.
 --   An item:     DEBIT in, CREDIT out, BALANCE the stock (every move of MM_STOCK_MOVE, by its hour).
 --   A customer:  DEBIT the invoices, CREDIT the credit notes and the receipts; BALANCE what he owes.
 --   A supplier:  CREDIT the invoices, DEBIT the credit notes and the payments; BALANCE what we owe.
@@ -84,8 +86,12 @@ create or replace package body mm_ledger as
     bal number;
   begin
     check_period(p_item_id, p_from, p_to);
-    select nvl(sum(qty), 0) into bal from mm_stock_move
-    where item_id = p_item_id and move_at < trunc(p_from);
+    -- what was before: the totals of the months before the month of p_from (MM_ITEM_MONTH), and the
+    -- moves of its days before p_from
+    select nvl(sum(qty_in - qty_out), 0) into bal from mm_item_month
+    where item_id = p_item_id and month < trunc(p_from, 'MM');
+    select bal + nvl(sum(qty), 0) into bal from mm_stock_move
+    where item_id = p_item_id and move_at >= trunc(p_from, 'MM') and move_at < trunc(p_from);
     r.seq := 0;
     r.kind := 'O';
     r.ldate := trunc(p_from);
@@ -124,7 +130,7 @@ create or replace package body mm_ledger as
 
   function partner_rows(p_kind varchar2, p_id number, p_from date, p_to date) return t_rows pipelined is
     r t_row;
-    bal number := 0;
+    bal number;
     side varchar2(1) := case p_kind when 'C' then 'S' when 'S' then 'P' end;
     sign_ number := case p_kind when 'C' then 1 else -1 end;    -- the balance: debit - credit, or credit - debit
     opened boolean := false;
@@ -139,6 +145,10 @@ create or replace package body mm_ledger as
     else
       select max(name) into pname from mm_supplier where id = p_id;
     end if;
+    -- what was before the month of p_from: its totals (MM_PARTNER_MONTH); the events of its days
+    -- before p_from in the loop
+    select sign_ * nvl(sum(debit - credit), 0) into bal from mm_partner_month
+    where kind = p_kind and partner_id = p_id and month < trunc(p_from, 'MM');
     r.seq := 0;
     -- the documents (a sale out or a purchase back: debit), the money of those paid at once, the
     -- receipts (credit) and the payments (debit)
@@ -146,21 +156,21 @@ create or replace package body mm_ledger as
                      t.name descr, case when t.stock_sign = -1 then d.total end debit,
                      case when t.stock_sign <> -1 then d.total end credit, 1 o
               from mm_doc d join mm_doc_type t on t.code = d.doc_type
-              where d.status = 'P' and t.side = side
+              where d.status = 'P' and t.side = side and d.doc_date >= trunc(p_from, 'MM')
                 and ((p_kind = 'C' and d.customer_id = p_id) or (p_kind = 'S' and d.supplier_id = p_id))
               union all
               select d.doc_date, d.created_at, d.id, d.doc_type || ' ' || d.doc_no,
                      'Εξόφληση με το παραστατικό (' || case d.payment when 'CASH' then 'μετρητά' else 'κάρτα' end || ')',
                      case when t.stock_sign <> -1 then d.total end, case when t.stock_sign = -1 then d.total end, 2
               from mm_doc d join mm_doc_type t on t.code = d.doc_type
-              where d.status = 'P' and t.side = side and d.payment in ('CASH', 'CARD')
+              where d.status = 'P' and t.side = side and d.payment in ('CASH', 'CARD') and d.doc_date >= trunc(p_from, 'MM')
                 and ((p_kind = 'C' and d.customer_id = p_id) or (p_kind = 'S' and d.supplier_id = p_id))
               union all
               select p.pay_date, p.created_at, null, case p.kind when 'R' then 'Είσπραξη' else 'Πληρωμή' end,
                      case p.method when 'CASH' then 'Μετρητά' when 'CARD' then 'Κάρτα' else 'Έμβασμα' end || case when p.notes is not null then ': ' || p.notes end,
                      case when p.kind = 'P' then p.amount end, case when p.kind = 'R' then p.amount end, 3
               from mm_payment p
-              where p.status = 'P'
+              where p.status = 'P' and p.pay_date >= trunc(p_from, 'MM')
                 and ((p_kind = 'C' and p.kind = 'R' and p.customer_id = p_id)
                   or (p_kind = 'S' and p.kind = 'P' and p.supplier_id = p_id))
               order by 1, 8, 2, 3) loop        -- a day: its documents first, then the money
