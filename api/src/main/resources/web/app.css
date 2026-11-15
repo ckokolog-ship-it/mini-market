@@ -69,3 +69,5 @@ tr.click:hover td { background: var(--row); }
   .hide-phone { display: none; }
   .scan input[name=code] { width: 100%; }
 }
+.scan .total-due { margin: 0 0 0 auto; }
+.w6 { width: 6em; } .w8 { width: 8em; } .w11 { width: 11em; }

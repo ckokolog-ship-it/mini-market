@@ -1,12 +1,13 @@
-// app.js -- the pages of the mini market (step 8): a login, then the items, the customers and the
-// suppliers, the ledgers, the reports and the counts of the stock, through /api/ with the token of the
+// app.js -- the pages of the mini market (step 8): a login, then the till, the items, the customers
+// and the suppliers, the ledgers, the reports and the counts of the stock, through /api/ with the token of the
 // login (sessionStorage: gone with the tab). Every value goes in as text (textContent), never as HTML.
-// The pages by role: CASHIER the items and the counts; MANAGER all the rest; as the REST service.
+// The pages by role: CASHIER the till, the items and the counts; MANAGER all the rest; as the REST service.
 
 const $ = (sel) => document.querySelector(sel);
 const main = () => $('#main');
 const RANK = { CASHIER: 1, MANAGER: 2, ADMIN: 3 };
 const PAGES = [
+  ['#/pos', 'Ταμείο', 'CASHIER'],
   ['#/items', 'Είδη', 'CASHIER'],
   ['#/partners/customers', 'Πελάτες', 'MANAGER'],
   ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER'],
@@ -443,6 +444,129 @@ async function countPage(id) {
   code.focus();
 }
 
+// -- the till (as the form MM_POS): a register, its Z, the receipt of the register (made at the first
+// scan: Enter of a scanner), its lines, paid by cash (what was given: the change) or card --------------
+let posReg = null;
+try { posReg = localStorage.getItem('mm.register'); } catch (e) { posReg = null; }
+async function posPage() {
+  let regs;
+  try { regs = (await api('pos')).rows; } catch (e) { fail(e); return; }
+  if (!regs.length) { show(el('h1', {}, 'Ταμείο'), el('p', { class: 'muted' }, 'Κανένα ταμείο.')); return; }
+  if (!regs.some((r) => r.code === posReg)) posReg = regs[0].code;
+  const pick = el('select', {
+    'aria-label': 'Ταμείο',
+    onchange: () => {
+      posReg = pick.value;
+      try { localStorage.setItem('mm.register', posReg); } catch (e) { /* a private window */ }
+      load();
+    },
+  }, regs.map((r) => el('option', { value: r.code, selected: r.code === posReg }, `${r.code} ${r.name}`)));
+  const zText = el('span', { class: 'muted' });
+  const zBox = el('div', { class: 'row' });
+  const code = el('input', { name: 'code', autocomplete: 'off', placeholder: 'barcode, κωδικός ή serial' });
+  const n = el('input', { name: 'qty', type: 'number', step: 'any', min: '0', value: '1', class: 'w6' });
+  const total = el('p', { class: 'big total-due' });
+  const lines = el('div');
+  const given = el('input', { name: 'given', type: 'number', step: '0.01', min: '0', class: 'w8' });
+  const change = el('p', { class: 'big' });
+  const last = el('div');
+  let st = null;
+  const run = async (path, body) => {
+    try {
+      st = await api(`pos/${encodeURIComponent(posReg)}${path}`, body);
+      draw();
+      return st;
+    } catch (e) {
+      fail(e);
+      return null;
+    } finally { code.focus(); }
+  };
+  const load = () => run('');
+  const draw = () => {
+    const z = st.z;
+    zText.textContent = z ? `Ζ ${z.z_no}, ανοιχτό από ${day(z.opened_at)} · ${z.docs} αποδείξεις · μετρητά ${money(z.cash)}, κάρτα ${money(z.card)} · στο συρτάρι ${money(z.drawer)}`
+      : 'Κλειστό: «Άνοιγμα Ζ» για να ξεκινήσεις';
+    if (z) {
+      const amount = el('input', { type: 'number', step: '0.01', placeholder: '+ μπαίνουν, − βγαίνουν', class: 'w11' });
+      const note = el('input', { placeholder: 'αιτιολογία' });
+      zBox.replaceChildren(
+        el('label', {}, 'Κίνηση συρταριού', amount), el('label', {}, 'Αιτιολογία', note),
+        el('button', { type: 'button', onclick: () => run('/cash', { amount: Number(amount.value), note: note.value.trim() }) }, 'Καταχώριση κίνησης'),
+        el('button', {
+          type: 'button',
+          class: 'danger',
+          onclick: async () => {
+            if (!confirm(`Κλείσιμο του Ζ ${z.z_no};`)) return;
+            const r = await run('/close', {});
+            if (r && r.closed) toast(`Ζ ${r.closed.z_no} έκλεισε: σύνολο ${money(r.closed.total)}, μετρητά ${money(r.closed.cash)}, κάρτα ${money(r.closed.card)}`);
+          },
+        }, 'Κλείσιμο Ζ'));
+    } else {
+      const cash = el('input', { type: 'number', step: '0.01', min: '0', value: '0', class: 'w8' });
+      zBox.replaceChildren(el('label', {}, 'Αρχικό ταμείο', cash),
+        el('button', { type: 'button', class: 'primary', onclick: () => run('/open', { cash: Number(cash.value || 0) }) }, 'Άνοιγμα Ζ'));
+    }
+    scan.hidden = !z;
+    pay.hidden = !st.receipt;
+    const r = st.receipt;
+    total.textContent = 'Σύνολο: ' + money(r ? r.total : 0);
+    lines.replaceChildren(r && r.lines.length ? table([['#'], ['Είδος'], ['Ποσότητα', 'num'], ['Τιμή', 'num'], ['Ποσό', 'num'], ['']],
+      r.lines.map((x) => {
+        const setQ = (q) => run(`/lines/${x.id}`, { qty: q });
+        return el('tr', {}, el('td', {}, x.line_no),
+          el('td', { class: 'wrap' }, `${x.code} ${x.name}`, x.serials ? el('div', { class: 'muted' }, x.serials) : null),
+          num(x.qty, qty), num(x.price), num(x.total),
+          el('td', { class: 'num' },
+            x.serial_tracked === 'Y' ? null : el('button', { type: 'button', 'aria-label': 'Μία λιγότερη', disabled: x.qty <= 1, onclick: () => setQ(x.qty - 1) }, '−'),
+            x.serial_tracked === 'Y' ? null : el('button', { type: 'button', 'aria-label': 'Μία ακόμα', onclick: () => setQ(x.qty + 1) }, '+'),
+            el('button', { type: 'button', class: 'danger', 'aria-label': 'Σβήσε τη γραμμή', onclick: () => setQ(0) }, '×')));
+      })) : el('p', { class: 'muted' }, z ? 'Σάρωσε το πρώτο είδος.' : ''));
+    last.replaceChildren(st.last.length ? el('div', {}, el('h2', {}, 'Τελευταίες αποδείξεις'),
+      table([['Αριθμός'], ['Ώρα'], ['Πληρωμή'], ['Ποσό', 'num']], st.last.map((x) => el('tr', {},
+        el('td', {}, 'ΑΛΠ ' + x.doc_no + (x.status === 'C' ? ' (ακυρώθηκε)' : '')), el('td', {}, day(x.created_at)),
+        el('td', {}, x.payment === 'CARD' ? 'κάρτα' : 'μετρητά'), num(x.total))))) : '');
+  };
+  const scan = el('form', {
+    class: 'panel row scan',
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      const v = code.value.trim();
+      if (!v) return;
+      const r = await run('/scan', { code: v, qty: Number(n.value || 1) });
+      if (r) {
+        code.value = '';
+        n.value = '1';
+        change.textContent = '';
+      } else code.select();
+    },
+  }, el('label', {}, 'Σάρωση (Enter)', code), el('label', {}, 'Ποσότητα', n), el('button', { class: 'primary', type: 'submit' }, 'Βάλε'), total);
+  const payWith = async (how) => {
+    const body = { payment: how };
+    if (how === 'CASH' && given.value !== '') body.given = Number(given.value);
+    const r = await run('/pay', body);
+    if (r && r.paid) {
+      given.value = '';
+      change.textContent = r.paid.change !== null ? 'Ρέστα: ' + money(r.paid.change) : '';
+      toast(`Απόδειξη ${r.paid.doc_no} καταχωρήθηκε: ${money(r.paid.total)}`);
+    }
+  };
+  const pay = el('div', { class: 'panel row' },
+    el('label', {}, 'Δόθηκαν', given),
+    el('button', { type: 'button', class: 'primary', onclick: () => payWith('CASH') }, 'Μετρητά (F9)'),
+    el('button', { type: 'button', onclick: () => payWith('CARD') }, 'Κάρτα (F8)'),
+    el('button', { type: 'button', class: 'danger', onclick: () => { if (confirm('Ακύρωση της απόδειξης;')) run('/void', {}); } }, 'Ακύρωση απόδειξης'));
+  const keys = (ev) => {
+    if (!document.body.contains(pay)) { document.removeEventListener('keydown', keys); return; }
+    if (pay.hidden) return;
+    if (ev.key === 'F9') { ev.preventDefault(); payWith('CASH'); }
+    if (ev.key === 'F8') { ev.preventDefault(); payWith('CARD'); }
+  };
+  document.addEventListener('keydown', keys);
+  show(el('h1', {}, 'Ταμείο'), el('div', { class: 'panel' }, el('div', { class: 'row' }, el('label', {}, 'Ταμείο', pick), zText), zBox),
+    scan, lines, pay, change, last);
+  await load();
+}
+
 // -- the pages, by the address (#/...) -------------------------------------------------------------
 function navBar() {
   $('#top').hidden = false;
@@ -462,6 +586,7 @@ function render() {
   const need = (role, fn) => (can(role) ? fn() : show(el('h1', {}, 'Δεν επιτρέπεται'),
     el('p', { class: 'muted' }, 'Η σελίδα αυτή θέλει ρόλο ' + role + '.')));
   switch (p[0]) {
+    case 'pos': return posPage();
     case 'item': return itemPage(p[1]);
     case 'partners': return need('MANAGER', () => partnersPage(p[1], params));
     case 'partner': return need('MANAGER', () => partnerPage(p[1], p[2]));
