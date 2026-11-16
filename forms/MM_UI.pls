@@ -370,7 +370,8 @@ PACKAGE BODY ui IS
       forms_ddl('COMMIT');                                     -- the log of who saw it
       copy(pin, 'SER.PIN_SHOW');
     ELSIF p_item = 'CTL.NEWRES' THEN
-      v := mm_core.new_reservation(name_in('CTL.R_NAME'), name_in('CTL.R_PHONE'), date_in('CTL.R_DATE'));
+      v := mm_core.new_reservation(name_in('CTL.R_NAME'), name_in('CTL.R_PHONE'), date_in('CTL.R_DATE'),
+                                   NULL, NULL, g_user);                 -- who wrote it: who logged in
       forms_ddl('COMMIT');
       copy('', 'CTL.R_NAME');
       copy('', 'CTL.R_PHONE');
@@ -380,6 +381,34 @@ PACKAGE BODY ui IS
       mm_core.reserve(num('RES.ID'), num('CTL.ITEM_ID'), nvl(num('CTL.QTY'), 1));
       forms_ddl('COMMIT');
       again('RL');
+    -- an order (a reservation, from the pages too): the line on the screen picked (all of it) or not,
+    -- all of it ready or not, for a customer on credit a delivery note instead of a receipt
+    ELSIF p_item = 'CTL.PICK' THEN
+      v := num('RL.ID');
+      SELECT qty, picked INTO n, s FROM mm_reservation_line WHERE id = v;
+      IF s >= n THEN
+        n := 0;
+      END IF;
+      mm_core.pick(num('RES.ID'), num('RL.ITEM_ID'), n);
+      forms_ddl('COMMIT');
+      again('RL');
+    ELSIF p_item = 'CTL.READY' THEN
+      v := num('RES.ID');
+      SELECT CASE WHEN ready_at IS NULL THEN 'Y' ELSE 'N' END INTO tr FROM mm_reservation WHERE id = v;
+      mm_core.set_ready(num('RES.ID'), tr);
+      forms_ddl('COMMIT');
+      again(c_block);
+      IF tr = 'Y' THEN
+        message('Έτοιμη: όλα μαζεύτηκαν');
+      ELSE
+        message('Η κράτηση δεν είναι πια έτοιμη');
+      END IF;
+    ELSIF p_item = 'CTL.NOTE' THEN
+      v := mm_core.deliver_note(num('RES.ID'));
+      n := mm_core.post_doc(v);
+      forms_ddl('COMMIT');
+      again(c_block);
+      message('Παραδόθηκε: δελτίο αποστολής ' || to_char(n));
     ELSIF p_item = 'CTL.DEPOSIT' THEN
       mm_core.take_deposit(num('RES.ID'), register_id, num('CTL.AMOUNT'), upper(nvl(name_in('CTL.PAY'), 'CASH')));
       forms_ddl('COMMIT');
@@ -899,6 +928,12 @@ PACKAGE BODY ui IS
       id_ := num('PL.ITEM_ID');
       SELECT code || ' ' || name INTO n FROM mm_item WHERE id = id_;
       copy(n, 'PL.ITEM_TEXT');
+    ELSIF p_block = 'RES' THEN
+      n := NULL;
+      IF name_in('RES.READY_AT') IS NOT NULL THEN
+        n := 'ναι';
+      END IF;
+      copy(n, 'RES.READY_TEXT');
     ELSIF p_block = 'RL' THEN
       id_ := num('RL.ITEM_ID');
       SELECT code || ' ' || name INTO n FROM mm_item WHERE id = id_;
