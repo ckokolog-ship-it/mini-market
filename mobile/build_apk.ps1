@@ -12,6 +12,10 @@ $repo = Split-Path -Parent $PSScriptRoot
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw 'docker not found: install Docker Desktop and start it'
 }
+docker info *> $null
+if ($LASTEXITCODE -ne 0) {
+    throw 'Docker is not running: open Docker Desktop, wait for "Engine running", then this again'
+}
 $have = docker images -q mm-apk-builder
 if ($Rebuild -or -not $have) {
     Write-Host '== the builder of the APK (the first time: 10-20 minutes)'
