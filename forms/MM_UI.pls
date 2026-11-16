@@ -754,6 +754,8 @@ PACKAGE BODY ui IS
       open_report('MM_VAT', period_params);
     ELSIF p_item = 'CTL.RPT_MIN' THEN
       open_report('MM_MIN_STOCK', NULL);
+    ELSIF p_item IN ('CTL.RPT_TRIAL_I', 'CTL.RPT_TRIAL_C', 'CTL.RPT_TRIAL_S') THEN
+      open_report('MM_TRIAL_' || substr(p_item, -1), period_params);
     ELSIF p_item = 'CTL.DELDOC' THEN
       mm_core.delete_doc(num('DOC.ID'));
       forms_ddl('COMMIT');

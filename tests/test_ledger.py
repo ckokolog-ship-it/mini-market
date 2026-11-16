@@ -134,3 +134,34 @@ def test_ledger_rules(env):
         fill(db, 'X', ids['customer'], D(1, 1), D(1, 2))
     db.conn.rollback()
     assert 'MM-173' in str(e.value)
+
+
+def trial(db, what, f, t, all_='Y'):
+    db.cur.execute('select id, open_bal, debit, credit, close_bal from table(mm_ledger.trial_rows(:w, :f, :t, :a))',
+                   w=what, f=f, t=t, a=all_)
+    return {i: tuple(round(float(v), 2) for v in x) for i, *x in db.cur}
+
+
+def test_trial_balance_is_the_ledgers(item):
+    """the trial balances (ισοζύγια): every item, customer and supplier the totals of its own ledger
+    (fill), for periods that start and end inside a month, across months, and over all the data"""
+    db, ids = item
+    doc(db, ids, 'TDA', 'customer', 'CREDIT', D(7, 20), [('b', 2)])          # a customer in July
+    doc(db, ids, 'TAD', 'supplier', 'CASH', D(8, 3), [('b', 4)])            # a supplier paid at once (August)
+    today = datetime.datetime.combine(datetime.date.today(), datetime.time())
+    periods = [(D(1, 5), D(2, 10)), (D(1, 1), D(1, 31)), (D(2, 6), D(6, 30)), (D(7, 20), D(7, 20)), (D(7, 21), D(8, 3)),
+               (datetime.datetime(2000, 1, 1), today), (today - datetime.timedelta(days=40), today)]
+    for what in 'ICS':
+        for f, t in periods:
+            tb = trial(db, what, f, t)
+            assert tb, (what, f)
+            for pid, x in tb.items():
+                assert x == fill(db, what, pid, f, t), (what, pid, f, t)
+            some = trial(db, what, f, t, 'N')                                  # only those with something
+            assert set(some) == {i for i, x in tb.items() if any(x)}
+    assert trial(db, 'I', D(1, 5), D(2, 10))[ids['b']] == (0, 10, 3, 7)
+    for args, code in ((('X', D(1, 1), D(1, 2)), 'MM-173'), (('C', D(2, 1), D(1, 1)), 'MM-172')):
+        with pytest.raises(oracledb.DatabaseError) as e:
+            trial(db, *args)
+        db.conn.rollback()
+        assert code in str(e.value)

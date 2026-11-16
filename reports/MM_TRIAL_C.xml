@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<report name="mm_trial_c" DTDVersion="9.0.2.0.10" unitOfMeasurement="inch">
+  <data>
+    <userParameter name="P_FROM" datatype="character" width="10"/>
+    <userParameter name="P_TO" datatype="character" width="10"/>
+    <dataSource name="Q_ROWS">
+      <select>
+      <![CDATA[select mm_report.label('CUSTOMERS') grp, t.code afm, t.name partner, t.open_bal, t.debit, t.credit, t.close_bal
+from table(mm_ledger.trial_rows('C', to_date(:P_FROM, 'DD/MM/YYYY'), to_date(:P_TO, 'DD/MM/YYYY'))) t]]>
+      </select>
+      <group name="G_BRK">
+        <dataItem name="GRP" datatype="vchar2" columnOrder="11" width="40" defaultLabel="Grp">
+          <dataDescriptor expression="grp" descriptiveExpression="GRP" order="1" width="40"/>
+        </dataItem>
+      </group>
+      <group name="G_ROWS">
+        <dataItem name="AFM" datatype="vchar2" columnOrder="12" width="40" defaultLabel="Afm">
+          <dataDescriptor expression="afm" descriptiveExpression="AFM" order="2" width="40"/>
+        </dataItem>
+        <dataItem name="PARTNER" datatype="vchar2" columnOrder="13" width="200" defaultLabel="Partner">
+          <dataDescriptor expression="partner" descriptiveExpression="PARTNER" order="3" width="200"/>
+        </dataItem>
+        <dataItem name="OPEN_BAL" datatype="number" columnOrder="14" width="22" defaultLabel="Open_Bal">
+          <dataDescriptor expression="open_bal" descriptiveExpression="OPEN_BAL" order="4" width="22"/>
+        </dataItem>
+        <dataItem name="DEBIT" datatype="number" columnOrder="15" width="22" defaultLabel="Debit">
+          <dataDescriptor expression="debit" descriptiveExpression="DEBIT" order="5" width="22"/>
+        </dataItem>
+        <dataItem name="CREDIT" datatype="number" columnOrder="16" width="22" defaultLabel="Credit">
+          <dataDescriptor expression="credit" descriptiveExpression="CREDIT" order="6" width="22"/>
+        </dataItem>
+        <dataItem name="CLOSE_BAL" datatype="number" columnOrder="17" width="22" defaultLabel="Close_Bal">
+          <dataDescriptor expression="close_bal" descriptiveExpression="CLOSE_BAL" order="7" width="22"/>
+        </dataItem>
+      </group>
+    </dataSource>
+    <summary name="CS_G_OPEN_BAL" source="OPEN_BAL" function="sum" width="22" precision="14" scale="2" reset="report" compute="report"/>
+    <summary name="CS_G_DEBIT" source="DEBIT" function="sum" width="22" precision="14" scale="2" reset="report" compute="report"/>
+    <summary name="CS_G_CREDIT" source="CREDIT" function="sum" width="22" precision="14" scale="2" reset="report" compute="report"/>
+    <summary name="CS_G_CLOSE_BAL" source="CLOSE_BAL" function="sum" width="22" precision="14" scale="2" reset="report" compute="report"/>
+    <formula name="CF_TITLE" source="cf_titleformula" datatype="character" width="200"/>
+    <formula name="CF_PERIOD" source="cf_periodformula" datatype="character" width="200"/>
+    <formula name="CF_PAGE" source="cf_pageformula" datatype="character" width="200"/>
+    <formula name="CF_GRAND" source="cf_grandformula" datatype="character" width="200"/>
+    <formula name="CF_AFM" source="cf_afmformula" datatype="character" width="200"/>
+    <formula name="CF_PARTNER" source="cf_partnerformula" datatype="character" width="200"/>
+    <formula name="CF_OPEN_BAL" source="cf_open_balformula" datatype="character" width="200"/>
+    <formula name="CF_DEBIT" source="cf_debitformula" datatype="character" width="200"/>
+    <formula name="CF_CREDIT" source="cf_creditformula" datatype="character" width="200"/>
+    <formula name="CF_CLOSE_BAL" source="cf_close_balformula" datatype="character" width="200"/>
+  </data>
+  <layout>
+  <section name="main" width="8.27000" height="11.69000">
+    <body width="7.47000" height="9.55000">
+      <location x="0.40000" y="1.15000"/>
+      <frame name="M_ALL">
+        <geometryInfo x="0.00000" y="0.00000" width="7.30000" height="1.53000"/>
+        <generalLayout verticalElasticity="variable"/>
+        <repeatingFrame name="R_BRK" source="G_BRK" printDirection="down" minWidowRecords="1" columnMode="no">
+          <geometryInfo x="0.00000" y="0.00000" width="7.30000" height="0.78200"/>
+          <generalLayout verticalElasticity="expand"/>
+          <field name="F_BRK" source="GRP" minWidowLines="1" spacing="0" alignment="start">
+            <font face="Arial" size="9" bold="yes"/>
+            <geometryInfo x="0.00000" y="0.00000" width="3.00000" height="0.17000"/>
+          </field>
+          <repeatingFrame name="R_ROWS" source="G_ROWS" printDirection="down" minWidowRecords="1" columnMode="no">
+            <geometryInfo x="0.00000" y="0.22100" width="7.30000" height="0.17000"/>
+            <generalLayout verticalElasticity="expand"/>
+              <field name="F_AFM" source="AFM" minWidowLines="1" spacing="0" alignment="start">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="0.00000" y="0.22100" width="0.80000" height="0.17000"/>
+              </field>
+              <field name="F_PARTNER" source="PARTNER" minWidowLines="1" spacing="0" alignment="start">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="0.85000" y="0.22100" width="2.45000" height="0.17000"/>
+              </field>
+              <field name="F_OPEN_BAL" source="OPEN_BAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="3.35000" y="0.22100" width="0.95000" height="0.17000"/>
+              </field>
+              <field name="F_DEBIT" source="DEBIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="4.35000" y="0.22100" width="0.95000" height="0.17000"/>
+              </field>
+              <field name="F_CREDIT" source="CREDIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="5.35000" y="0.22100" width="0.95000" height="0.17000"/>
+              </field>
+              <field name="F_CLOSE_BAL" source="CLOSE_BAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+                <font face="Arial" size="8"/>
+                <geometryInfo x="6.30000" y="0.22100" width="1.00000" height="0.17000"/>
+              </field>
+          </repeatingFrame>
+        </repeatingFrame>
+        <frame name="M_GRAND">
+          <geometryInfo x="0.00000" y="0.88400" width="7.30000" height="0.27200"/>
+          <field name="F_G_L" source="CF_GRAND" minWidowLines="1" spacing="0" alignment="start">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="0.00000" y="0.91800" width="3.30000" height="0.17000"/>
+          </field>
+          <field name="F_G_OPEN_BAL" source="CS_G_OPEN_BAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="3.35000" y="0.91800" width="0.95000" height="0.17000"/>
+          </field>
+          <field name="F_G_DEBIT" source="CS_G_DEBIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="4.35000" y="0.91800" width="0.95000" height="0.17000"/>
+          </field>
+          <field name="F_G_CREDIT" source="CS_G_CREDIT" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="5.35000" y="0.91800" width="0.95000" height="0.17000"/>
+          </field>
+          <field name="F_G_CLOSE_BAL" source="CS_G_CLOSE_BAL" minWidowLines="1" spacing="0" alignment="end" formatMask="NNNGNNNGNN0D00">
+            <font face="Arial" size="8" bold="yes"/>
+            <geometryInfo x="6.30000" y="0.91800" width="1.00000" height="0.17000"/>
+          </field>
+        </frame>
+      </frame>
+    </body>
+    <margin>
+        <field name="F_TITLE" source="CF_TITLE" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="12" bold="yes"/>
+          <geometryInfo x="0.40000" y="0.30000" width="5.60000" height="0.24000"/>
+        </field>
+        <field name="F_PERIOD" source="CF_PERIOD" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="0.40000" y="0.58000" width="5.00000" height="0.20000"/>
+        </field>
+        <field name="F_L_PAGE" source="CF_PAGE" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="6.30000" y="0.30000" width="0.60000" height="0.20000"/>
+        </field>
+        <field name="F_PAGE" source="PageNumber" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="9"/>
+          <geometryInfo x="6.95000" y="0.30000" width="0.60000" height="0.20000"/>
+        </field>
+        <field name="F_H_AFM" source="CF_AFM" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="0.40000" y="0.88000" width="0.80000" height="0.17000"/>
+        </field>
+        <field name="F_H_PARTNER" source="CF_PARTNER" minWidowLines="1" spacing="0" alignment="start">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="1.25000" y="0.88000" width="2.45000" height="0.17000"/>
+        </field>
+        <field name="F_H_OPEN_BAL" source="CF_OPEN_BAL" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="3.75000" y="0.88000" width="0.95000" height="0.17000"/>
+        </field>
+        <field name="F_H_DEBIT" source="CF_DEBIT" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="4.75000" y="0.88000" width="0.95000" height="0.17000"/>
+        </field>
+        <field name="F_H_CREDIT" source="CF_CREDIT" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="5.75000" y="0.88000" width="0.95000" height="0.17000"/>
+        </field>
+        <field name="F_H_CLOSE_BAL" source="CF_CLOSE_BAL" minWidowLines="1" spacing="0" alignment="end">
+          <font face="Arial" size="8" bold="yes"/>
+          <geometryInfo x="6.70000" y="0.88000" width="1.00000" height="0.17000"/>
+        </field>
+    </margin>
+  </section>
+  </layout>
+  <programUnits>
+    <function name="cf_titleformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_titleformula return Char is
+begin
+  return mm_report.title('TRIAL_C');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_periodformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_periodformula return Char is
+begin
+  return mm_report.period(:P_FROM, :P_TO);
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_pageformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_pageformula return Char is
+begin
+  return mm_report.label('PAGE');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_grandformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_grandformula return Char is
+begin
+  return mm_report.label('GRAND');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_afmformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_afmformula return Char is
+begin
+  return mm_report.label('AFM');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_partnerformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_partnerformula return Char is
+begin
+  return mm_report.label('PARTNER');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_open_balformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_open_balformula return Char is
+begin
+  return mm_report.label('OPEN_BAL');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_debitformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_debitformula return Char is
+begin
+  return mm_report.label('DEBIT');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_creditformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_creditformula return Char is
+begin
+  return mm_report.label('CREDIT');
+end;]]>
+      </textSource>
+    </function>
+    <function name="cf_close_balformula" returnType="character">
+      <textSource>
+      <![CDATA[function cf_close_balformula return Char is
+begin
+  return mm_report.label('CLOSE_BAL');
+end;]]>
+      </textSource>
+    </function>
+  </programUnits>
+  <reportPrivate defaultReportType="groupAbove" versionFlags2="0" templateName=""/>
+</report>

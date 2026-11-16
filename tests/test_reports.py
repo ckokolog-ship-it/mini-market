@@ -156,3 +156,27 @@ def test_sales_vat_and_min_stock(env):
     for name, t in mkreports.TABLES.items():
         for w in [c[0] for c in t['cols']] + list(t['words']) + ['PAGE']:
             assert any(ord(c) > 127 for c in db.cur.callfunc('mm_report.label', str, [w])), (name, w)
+
+
+@needs_db
+def test_trial_balances(env):
+    """the trial balances (ισοζύγια) as the Reports Server runs them: a row each with something, the
+    same as mm_ledger.trial_rows; the items by category, the partners in one group"""
+    db, ids = env
+    import datetime
+    today = datetime.date.today().strftime('%d/%m/%Y')
+    for k, key in (('I', 'CODE'), ('C', 'PARTNER'), ('S', 'PARTNER')):
+        rows = run_query(db, 'MM_TRIAL_' + k, P_FROM='01/01/2000', P_TO=today)
+        db.cur.execute("select count(*) from table(mm_ledger.trial_rows(:k, date '2000-01-01', trunc(sysdate)))", k=k)
+        assert len(rows) == db.cur.fetchone()[0] > 0, k
+        assert all(r[key] for r in rows)
+    items = run_query(db, 'MM_TRIAL_I', P_FROM='01/01/2000', P_TO=today)
+    cats = [r['CATEGORY'] for r in items]
+    assert cats == sorted(cats, key=lambda c: cats.index(c)) and len(set(cats)) > 1   # one block a category
+    for r in items:                                            # up to today: the stock of each item
+        stock = db.one('select mm_report.qty(stock) from mm_item where code = :c', c=r['CODE'])[0]
+        assert r['END_Q'] == stock, r['CODE']
+    cust = run_query(db, 'MM_TRIAL_C', P_FROM='01/01/2000', P_TO=today)
+    assert {r['GRP'] for r in cust} == {'Πελάτες'}
+    for r in cust:                                             # the balance: the carry-over and the period
+        assert round(r['OPEN_BAL'] + r['DEBIT'] - r['CREDIT'], 2) == round(r['CLOSE_BAL'], 2)

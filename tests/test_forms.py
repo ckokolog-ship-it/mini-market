@@ -854,6 +854,10 @@ def test_reports_form(cur):
     assert 'report=MM_VAT.rdf' in prop(cur, 'SHOW_DOCUMENT')
     run(cur, "ui.press('CTL.RPT_MIN');")
     assert prop(cur, 'SHOW_DOCUMENT').endswith('report=MM_MIN_STOCK.rdf&destype=cache&desformat=PDF _blank')
+    for k in 'ICS':                                       # the trial balances, for the period
+        run(cur, "ui.press('CTL.RPT_TRIAL_%s');" % k, CTL__R_FROM='01/02/2026', CTL__R_TO='28/02/2026')
+        assert prop(cur, 'SHOW_DOCUMENT').endswith('report=MM_TRIAL_%s.rdf&destype=cache&desformat=PDF'
+                                                   '&P_FROM=01/02/2026&P_TO=28/02/2026 _blank' % k)
     msg = fails(cur, "ui.press('CTL.RPT_SALES');", CTL__R_FROM='01/03/2026', CTL__R_TO='01/02/2026')
     assert '«από»' in msg
     run(cur, "ui.press('CTL.GO_MM_LEDGER');")

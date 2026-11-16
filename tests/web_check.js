@@ -120,6 +120,26 @@ async function waitText(page, sel, text) {
     ok(true, 'the report ' + path.split('?')[0]);
   }
   if (SHOTS) await page.screenshot({ path: SHOTS + '/vat.png' });
+  // the trial balances: a row each; the customers with their totals; an item opens its ledger for the
+  // same period, with the same stock at the end
+  await page.goto(BASE + '/web/#/reports/trial-customers?from=2000-01-01');
+  await waitText(page, 'main', 'Σύνολα');
+  ok((await page.$$('main tbody tr.click')).length >= 1, 'the trial balance of the customers: its rows and totals');
+  await page.goto(BASE + '/web/#/reports/trial-suppliers?from=2000-01-01');
+  await waitText(page, 'main', 'Σύνολα');
+  const CODE_B = ITEM.replace(/A$/, 'B');                            // the item b: 30 moves of its stock
+  await page.goto(BASE + '/web/#/reports/trial-items?from=2000-01-01');
+  await waitText(page, 'main', CODE_B);
+  ok(!(await page.textContent('main tbody')).includes(ITEM), 'the trial balance: an item with nothing not there');
+  ok(await page.evaluate(() => window.__xss === undefined && !document.querySelector('main img')), 'the trial balance: the names as text');
+  const tb = await page.$$eval('main tbody tr', (trs, code) => trs.filter((tr) => tr.cells[0].textContent === code)
+    .map((tr) => tr.cells[tr.cells.length - 1].textContent), CODE_B);
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/trial_items.png', fullPage: true });
+  await page.click(`main tbody tr:has(td:text-is("${CODE_B}"))`);
+  await waitText(page, 'tbody', 'Τελικό απόθεμα');
+  const end = await page.$$eval('tbody tr.total', (trs) => trs.map((tr) => tr.textContent).find((t) => t.includes('Τελικό απόθεμα')));
+  ok(tb.length === 1 && end.replace('Τελικό απόθεμα', '').trim() === tb[0].trim(),
+    `the trial balance -> the ledger of the item, the same stock: ${tb[0]} / ${end}`);
 
   // a count: started, two scans, posted
   await page.goto(BASE + '/web/#/counts');
