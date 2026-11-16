@@ -714,9 +714,10 @@ async function posPage(params) {
             el('button', { type: 'button', class: 'danger', 'aria-label': 'Σβήσε τη γραμμή', onclick: () => setQ(0) }, '×')));
       })) : el('p', { class: 'muted' }, z ? 'Σάρωσε το πρώτο είδος.' : ''));
     last.replaceChildren(st.last.length ? el('div', {}, el('h2', {}, 'Τελευταίες αποδείξεις'),
-      table([['Αριθμός'], ['Ώρα'], ['Πληρωμή'], ['Ποσό', 'num']], st.last.map((x) => el('tr', {},
+      table([['Αριθμός'], ['Ώρα'], ['Πληρωμή'], ['Ποσό', 'num'], ['']], st.last.map((x) => el('tr', {},
         el('td', {}, 'ΑΛΠ ' + x.doc_no + (x.status === 'C' ? ' (ακυρώθηκε)' : '')), el('td', {}, day(x.created_at)),
-        el('td', {}, x.payment === 'CARD' ? 'κάρτα' : 'μετρητά'), num(x.total))))) : '');
+        el('td', {}, x.payment === 'CARD' ? 'κάρτα' : 'μετρητά'), num(x.total),
+        el('td', { class: 'num' }, el('button', { type: 'button', 'aria-label': 'Εκτύπωση ΑΛΠ ' + x.doc_no, onclick: () => printReceipt(posReg, x.id) }, '🖨')))))) : '');
   };
   const scan = el('form', {
     class: 'panel row scan',
@@ -759,8 +760,12 @@ async function posPage(params) {
     const r = await run('/pay', body);
     if (r && r.paid) {
       given.value = '';
-      change.textContent = r.paid.change !== null ? 'Ρέστα: ' + money(r.paid.change) : '';
-      toast(`Απόδειξη ${r.paid.doc_no} καταχωρήθηκε: ${money(r.paid.total)}`);
+      const p = r.paid;
+      const print = () => printReceipt(posReg, p.id, { given: p.given, change: p.change });
+      change.replaceChildren(p.change !== null ? 'Ρέστα: ' + money(p.change) + ' ' : '',
+        el('button', { type: 'button', class: 'print-btn', onclick: print }, 'Εκτύπωση απόδειξης'));
+      toast(`Απόδειξη ${p.doc_no} καταχωρήθηκε: ${money(p.total)}`);
+      if (autoPrint.checked) print();
     }
   };
   const pay = el('div', { class: 'panel row' },
@@ -775,8 +780,33 @@ async function posPage(params) {
     if (ev.key === 'F8') { ev.preventDefault(); payWith('CARD'); }
   };
   document.addEventListener('keydown', keys);
+  // the print: by hand after each receipt, or by itself (kept in this browser); the header and the footer
+  // of the receipts (a manager)
+  const autoPrint = el('input', { type: 'checkbox', name: 'autoprint', checked: !!store('mm.autoprint', false) });
+  autoPrint.addEventListener('change', () => keep('mm.autoprint', autoPrint.checked));
+  const setup = can('MANAGER') ? el('details', { class: 'receipt-setup' }, el('summary', {}, 'Επικεφαλίδα και υποσέλιδο της απόδειξης')) : null;
+  if (setup) {
+    const head = el('textarea', { name: 'header', rows: 4, maxlength: 400, placeholder: 'π.χ. MINI MARKET Ο ΓΙΑΝΝΗΣ\nΑγ. Νικολάου 10, Πάτρα\nΑΦΜ 123456789 ΔΟΥ Α΄ Πατρών' });
+    const foot = el('textarea', { name: 'footer', rows: 2, maxlength: 400, placeholder: 'π.χ. Ευχαριστούμε!' });
+    setup.addEventListener('toggle', async () => {
+      if (!setup.open || setup.dataset.loaded) return;
+      try {
+        const r = await api('pos/settings');
+        head.value = r.header || '';
+        foot.value = r.footer || '';
+        setup.dataset.loaded = '1';
+      } catch (e) { fail(e); }
+    });
+    setup.append(el('div', { class: 'row' }, el('label', { class: 'grow' }, 'Επικεφαλίδα', head), el('label', { class: 'grow' }, 'Υποσέλιδο', foot),
+      el('button', {
+        type: 'button',
+        onclick: async () => {
+          try { await api('pos/settings', { header: head.value.trim() || null, footer: foot.value.trim() || null }); toast('Αποθηκεύτηκε'); } catch (e) { fail(e); }
+        },
+      }, 'Αποθήκευση')));
+  }
   show(el('h1', {}, 'Ταμείο'), el('div', { class: 'panel' }, el('div', { class: 'row' }, el('label', {}, 'Ταμείο', pick), zText), zBox),
-    scan, orders, lines, pay, change, last);
+    scan, orders, lines, pay, change, el('label', { class: 'check' }, autoPrint, 'Εκτύπωση απόδειξης αυτόματα'), last, setup);
   await load();
   if (params && params.get('order') && st && st.z) loadOrder(Number(params.get('order')));
 }
@@ -800,6 +830,50 @@ function posterPage() {
       el('button', { type: 'button', class: 'primary', onclick: () => window.print() }, 'Εκτύπωση'),
       el('a', { href: url, target: '_blank', rel: 'noopener' }, 'Άνοιγμα της σελίδας'))), box);
   draw();
+}
+
+// -- the receipt on a printer of receipts (80 mm, its driver in Windows: the paper 80 mm wide): a page of
+// its own size (a named @page: the A4 of the labels stays), what the till prints
+const nfQty = new Intl.NumberFormat('el-GR', { maximumFractionDigits: 3 });
+async function printReceipt(reg, id, extra = {}) {
+  let r;
+  try { r = await api(`pos/${encodeURIComponent(reg)}/receipt/${id}`); } catch (e) { fail(e); return; }
+  const lines = (text) => String(text || '').split('\n').filter((x) => x.trim()).map((x) => el('div', {}, x));
+  const pair = (a, b, cls) => el('div', { class: 'rc-pair' + (cls ? ' ' + cls : '') }, el('span', {}, a), el('span', {}, b));
+  const box = el('div', { class: 'receipt', id: 'receipt' },
+    el('div', { class: 'rc-head' }, lines(r.header)),
+    el('div', { class: 'rc-title' }, 'ΑΠΟΔΕΙΞΗ ΛΙΑΝΙΚΗΣ ΠΩΛΗΣΗΣ'),
+    pair('ΑΛΠ ' + r.doc_no, day(r.created_at)), pair('Ταμείο ' + r.register, r.z_no ? 'Ζ ' + r.z_no : ''),
+    r.status === 'C' ? el('div', { class: 'rc-title' }, '*** ΑΚΥΡΩΘΗΚΕ ***') : null,
+    el('hr'),
+    r.lines.map((x) => el('div', { class: 'rc-line' }, el('div', {}, x.name),
+      pair(`${nfQty.format(x.qty)} x ${money(x.price)}` + (x.discount > 0 ? ` -${nfQty.format(x.discount)}%` : ''), money(x.total) + ' ' + x.vat_code))),
+    el('hr'),
+    pair('ΣΥΝΟΛΟ', money(r.total) + ' €', 'rc-total'),
+    r.deposit > 0 ? [pair('Προκαταβολή', money(r.deposit)), pair('Πληρωτέο', money(r.due))] : null,
+    pair(r.payment === 'CARD' ? 'Κάρτα' : 'Μετρητά', money(r.due)),
+    extra.given !== undefined && extra.given !== null ? [pair('Δόθηκαν', money(extra.given)), pair('Ρέστα', money(extra.change))] : null,
+    el('hr'),
+    r.vat_rows.map((v) => pair(`ΦΠΑ ${v.vat_code} ${nfQty.format(v.vat_rate)}%`, `${money(v.net)} + ${money(v.vat)}`)),
+    r.cards.length ? [el('hr'), r.cards.map((c) => el('div', { class: 'rc-card' }, el('div', {}, c.name), pair('Serial', c.serial),
+      c.pin ? pair('PIN', c.pin, 'rc-pin') : null))] : null,
+    el('div', { class: 'rc-foot' }, lines(r.footer)));
+  const old = $('#receipt');
+  if (old) old.remove();
+  document.body.append(box);
+  // its length: as tall as it is (in mm, for the @page of the receipt; the CSSOM: the CSP allows it)
+  const mm = Math.ceil(box.getBoundingClientRect().height * 25.4 / 96) + 12;
+  const sheet = [...document.styleSheets].find((x) => (x.href || '').endsWith('app.css'));
+  if (sheet) {
+    for (let k = sheet.cssRules.length - 1; k >= 0; k -= 1) {
+      if (sheet.cssRules[k].cssText.startsWith('@page receipt')) sheet.deleteRule(k);
+    }
+    sheet.insertRule(`@page receipt { size: 80mm ${mm}mm; margin: 0; }`, sheet.cssRules.length);
+  }
+  document.body.classList.add('printing-receipt');
+  const done = () => { document.body.classList.remove('printing-receipt'); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
 }
 
 // -- the orders: written on a phone (a call, the shop), picked from the shelves, ready; at the till all
