@@ -137,6 +137,14 @@ commit;
 | `POST /api/pos/{ταμείο}/lines/{id}` `{"qty"}` | νέα ποσότητα μιας γραμμής· με 0 η γραμμή σβήνει |
 | `POST /api/pos/{ταμείο}/void` | σβήνει την ανοιχτή απόδειξη (αν ήταν από παραγγελία, η παραγγελία ξαναείναι ανοιχτή) |
 | `POST /api/pos/{ταμείο}/order` `{"id"}` | μια παραγγελία, όλη, στην απόδειξη. Αν υπάρχει άλλη απόδειξη με είδη: 409. Η απόδειξη δείχνει `deposit` και `due` (το πληρωτέο) |
+| `GET /api/doc-types` | τα είδη παραστατικών, με το τι κάνει το καθένα (MANAGER, όπως και τα παρακάτω του γραφείου) |
+| `GET /api/docs?type=&status=&q=&limit=&offset=`, `GET /api/docs/{id}` | τα παραστατικά εκτός από τις αποδείξεις, σε σελίδες· ένα με τις γραμμές του, και για τιμολόγιο τα δελτία του (`notes_in`), για δελτίο το τιμολόγιό του (`invoice_text`) |
+| `GET /api/docs/notes?type=&customer_id=&supplier_id=` | τα καταχωρημένα δελτία χωρίς τιμολόγιο |
+| `POST /api/docs` `{"doc_type", "customer_id" ή "supplier_id", "payment", "doc_date"}` ή `{"from_note", "doc_date"}` | νέο πρόχειρο· ή το πρόχειρο τιμολόγιο ενός δελτίου |
+| `POST /api/docs/{id}/lines` `{"code", "qty", "price", "discount"}`, `.../lines/{line}` `{"qty", ...}` | γραμμή (σε πώληση, κάρτες με serials: οι παλαιότερες)· αλλαγή, με `qty` 0 σβήνει |
+| `POST /api/docs/{id}/notes` `{"note_id"}` | κι άλλο δελτίο στο πρόχειρο τιμολόγιο |
+| `POST /api/docs/{id}/post`, `.../cancel`, `.../delete`, `.../credit` | καταχώριση, ακύρωση, σβήσιμο πρόχειρου, επιστροφή (πρόχειρο δελτίο επιστροφής) |
+| `GET /api/payments?kind=R\|P&q=`, `POST /api/payments` `{"kind", "partner_id", "amount", "method", "pay_date", "notes", "register"}`, `POST /api/payments/{id}/cancel` | εισπράξεις (R) και πληρωμές (P): η λίστα, νέα, ακύρωση |
 | `GET /api/orders?status=O\|D\|C\|all&q=`, `GET /api/orders/{id}` | **οι παραγγελίες** (από προεπιλογή οι ανοιχτές)· μία με τις γραμμές της: ποσότητα, τιμή, τι μαζεύτηκε (`picked`), διαθέσιμα |
 | `POST /api/orders` `{"name", "phone", "pickup_date", "notes", "customer_id"}` | νέα παραγγελία· ποιος την έγραψε κρατιέται από το login |
 | `POST /api/orders/{id}/lines` `{"code", "qty", "mode"}` | είδος με barcode ή κωδικό: `ADD` (προσθέτει, προεπιλογή) ή `SET` (ορίζει, 0 = βγαίνει) |
