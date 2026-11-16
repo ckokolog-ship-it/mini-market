@@ -745,6 +745,21 @@ select case p.kind when 'R' then 'C' else 'S' end, nvl(p.customer_id, p.supplier
 from mm_payment p
 where p.status = 'P';
 
+-- the backup (db/backup.ps1, mm_core.backup_done): the last good one and the last failed one; STATE
+-- OK, OLD (the last good one more than 2 days ago: the task of Windows stopped?), FAILED (the last
+-- try failed) or NEVER; the pages of a manager show it when it is not OK
+create or replace view mm_backup_state as
+select ok_at, ok_file, failed_at, error, round(sysdate - ok_at, 1) days,
+       case when failed_at is not null and (ok_at is null or failed_at > ok_at) then 'FAILED'
+            when ok_at is null then 'NEVER'
+            when sysdate - ok_at > 2 then 'OLD'
+            else 'OK' end state
+from (select to_date(max(case name when 'BACKUP_OK_AT' then value end), 'YYYY-MM-DD HH24:MI:SS') ok_at,
+             max(case name when 'BACKUP_OK_FILE' then value end) ok_file,
+             to_date(max(case name when 'BACKUP_FAILED_AT' then value end), 'YYYY-MM-DD HH24:MI:SS') failed_at,
+             max(case name when 'BACKUP_ERROR' then value end) error
+      from mm_setting where name like 'BACKUP\_%' escape '\');
+
 -- the check of the whole database (MM_CHECK.sql, and the tests): a row here is something that does
 -- not add up. Empty: the stock is the sum of its moves, every document the sum of its lines, every
 -- closed Z the sum of its documents and of its money, every receipt paid once in the register,

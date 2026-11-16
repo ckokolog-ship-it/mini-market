@@ -46,8 +46,8 @@ async function waitText(page, sel, text) {
   await page.fill('input[name=username]', MGR);
   await page.fill('input[name=password]', 'Wrong-pass-1');
   await page.click('button[type=submit]');
-  await page.waitForSelector('[role=alert]:not(:empty)');
-  ok((await page.textContent('[role=alert]')).includes('Λάθος'), 'a wrong password: its message');
+  await page.waitForSelector('main [role=alert]:not(:empty)');
+  ok((await page.textContent('main [role=alert]')).includes('Λάθος'), 'a wrong password: its message');
   ok((await page.inputValue('input[name=password]')) === '', 'the password does not stay');
   await page.fill('input[name=password]', PW);
   await page.click('button[type=submit]');
@@ -117,7 +117,7 @@ async function waitText(page, sel, text) {
     ['min-stock', 'ελάχιστο']]) {
     await page.goto(BASE + '/web/#/reports/' + path);
     await page.waitForFunction((w) => document.querySelector('main').textContent.includes(w), word);
-    ok(true, 'the report ' + path.split('?')[0]);
+    ok(!/\bnull\b|undefined/.test(await page.textContent('main')), 'the report ' + path.split('?')[0] + ': no "null" in it');
   }
   if (SHOTS) await page.screenshot({ path: SHOTS + '/vat.png' });
   // the trial balances: a row each; the customers with their totals; an item opens its ledger for the
@@ -321,6 +321,9 @@ async function waitText(page, sel, text) {
   await page.waitForSelector('tr.cancelled:has-text("TST web")');
   ok(true, 'cancelled');
 
+  // the backup failed (tests/test_web.py): a manager sees it on every page
+  await waitText(page, '#notice', 'Το τελευταίο backup της βάσης απέτυχε');
+  ok(await page.isVisible('#notice') && (await page.textContent('#notice')).includes('expdp: test'), 'the backup failed: the manager sees it');
   // logout: the token gone
   await page.click('#logout');
   await page.waitForSelector('input[name=username]');
@@ -337,6 +340,7 @@ async function waitText(page, sel, text) {
   await p2.waitForSelector('#nav a', { state: 'attached' });
   const nav2 = await p2.$$eval('#nav a', (as) => as.map((a) => a.textContent));
   ok(nav2.join(',') === 'Ταμείο,Παραγγελίες,Είδη,Ετικέτες,Απογραφή', 'the menu of a cashier: ' + nav2.join(','));
+  ok(await p2.isHidden('#notice'), 'a cashier: no word about the backup');
   // the menu on a phone: hidden, ☰ opens it, a group opens (the other closes), a page closes it
   ok(await p2.isHidden('#nav'), 'a phone: the menu hidden');
   await p2.click('#menu');
