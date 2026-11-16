@@ -11,7 +11,7 @@
 -- that is also its delivery note, TDA), every Friday the invoices of the notes of the week (one of
 -- many notes) and now and then goods back of an older one (a return note, then its credit note),
 -- the purchases from the suppliers every Monday (what was sold: a delivery note and its invoice, or
--- a TAD), the cards of mobile on the 1st of the month, and every Friday the receipts from the
+-- a TAD), the cards of mobile, gift cards and scratch tickets on the 1st of the month, and every Friday the receipts from the
 -- customers and the payments to the suppliers (the dairy and the press are late the last three weeks: their items go under the minimum
 -- stock). Each row gets the date and the hour of its day.
 -- Once: if the register T2 exists, nothing is done. The same random numbers every time
@@ -39,7 +39,8 @@ declare
   kits t_ids;           -- the baskets: put together every Monday
   staple t_ids;         -- bread, milk, water, the newspaper: in many receipts
   whole t_ids;          -- the items of the invoices to the shops
-  card t_ids;           -- the cards of mobile
+  card t_ids;           -- the items with serials: cards of mobile, gift cards
+  scratch t_ids;        -- the scratch tickets: more often
   cust t_ids;           -- the customers
   tpy t_ids;            -- the invoices of the year (for the goods back)
   ntpy pls_integer := 0;
@@ -96,7 +97,7 @@ declare
   begin
     doc := mm_core.new_doc(case when chance(0.3) then 'TAD' else 'DPA' end, p_supplier_id => p_supplier,
                            p_payment => 'CREDIT', p_doc_date => d);
-    for i in (select i.id, i.unit, i.serial_tracked, i.stock + 0 stock,
+    for i in (select i.id, i.unit, i.serial_tracked, i.stock + 0 stock, c.name cat,
                      case when c.name in ('Ποτά', 'Σνακ', 'Καφές και ροφήματα', 'Γαλακτοκομικά', 'Είδη καθαριότητας')
                           then 48 else 0 end shops,
                      (select -nvl(sum(m.qty), 0) from mm_stock_move m
@@ -115,10 +116,12 @@ declare
                       when 'Ρούχα' then a4
                       when 'Παπούτσια' then a4
                       when 'Κάρτες κινητής' then a5
+                      when 'Κάρτες δώρου' then a5
+                      when 'Σκρατς' then a5
                     end = (select afm from mm_supplier where id = p_supplier)
               order by i.code) loop
-      if i.serial_tracked = 'Y' then
-        q := 15;
+      if i.serial_tracked = 'Y' then                -- up to 15 cards (30 scratch tickets) of each
+        q := case i.cat when 'Σκρατς' then 30 else 15 end - greatest(i.stock, 0);
       elsif p_first then
         q := case i.unit when 'KG' then 15 else 100 end;
       else
@@ -132,7 +135,7 @@ declare
         if i.serial_tracked = 'Y' then
           for k in 1 .. q loop
             v := mm_core.add_serial(ln, 'H' || i.id || '-' || to_char(d, 'yymmdd') || '-' || lpad(k, 2, '0'),
-                                    case when pins then lpad(trunc(dbms_random.value(0, 1e12)), 12, '0') end);
+                                    case when pins and i.cat <> 'Σκρατς' then lpad(trunc(dbms_random.value(0, 1e12)), 12, '0') end);
           end loop;
         end if;
       end if;
@@ -197,9 +200,12 @@ begin
   commit;
 
   -- what is sold
-  for i in (select i.id, i.unit, c.name cat, i.code, i.kit from mm_item i join mm_category c on c.id = i.category_id
+  for i in (select i.id, i.unit, c.name cat, i.code, i.kit, i.serial_tracked from mm_item i
+            join mm_category c on c.id = i.category_id
             where i.active = 'Y' and i.is_model = 'N' order by i.code) loop
-    if i.cat = 'Κάρτες κινητής' then
+    if i.serial_tracked = 'Y' and i.cat = 'Σκρατς' then
+      scratch(scratch.count + 1) := i.id;
+    elsif i.serial_tracked = 'Y' then              -- the cards of mobile, gift cards
       card(card.count + 1) := i.id;
     else
       sale(sale.count + 1) := i.id;
@@ -286,6 +292,14 @@ begin
         exception
           when others then
             if sqlcode <> -20140 then raise; end if;     -- MM-140: no card left of it
+        end;
+      end if;
+      if scratch.count > 0 and chance(0.1) then
+        begin
+          v := mm_core.sell_serial(doc, pick(scratch));
+        exception
+          when others then
+            if sqlcode <> -20140 then raise; end if;
         end;
       end if;
       v := mm_core.post_doc(doc);

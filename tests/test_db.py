@@ -75,7 +75,7 @@ def test_tables(cur):
 
 def test_vat_and_doc_types(cur):
     cur.execute('select code, rate from mm_vat order by code')
-    assert cur.fetchall() == [('A', 24), ('B', 13), ('C', 6)]
+    assert cur.fetchall() == [('A', 24), ('B', 13), ('C', 6), ('D', 0)]
     cur.execute('select code, side, stock_sign, partner_sign, vat_sign, ref_type from mm_doc_type order by code')
     assert cur.fetchall() == [
         ('ALP', 'S', -1, 0, 1, None),

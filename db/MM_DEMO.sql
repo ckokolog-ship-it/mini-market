@@ -307,20 +307,47 @@ where not exists (select 1 from mm_item i where i.code = v.code);
 -- one card of each value in a sale
 update mm_item set max_per_sale = 1 where code like 'CRD%' and max_per_sale is null;
 
+-- gift cards (a serial and a PIN, as the cards of mobile) and scratch tickets (a serial, no PIN):
+-- outside VAT (D, 0%); their cost: what the shop pays for them, less its commission
+insert into mm_category (name)
+select v.name from (values ('Κάρτες δώρου'), ('Σκρατς')) v (name)
+where not exists (select 1 from mm_category c where c.name = v.name);
+
+insert into mm_item (code, barcode, name, category_id, vat_code, unit, price, cost, min_stock, serial_tracked)
+select v.code, v.barcode, v.name, c.id, 'D', 'PCS', v.price, v.cost, v.min_stock, 'Y'
+from (values
+  ('GPL15',  '2000000000374', 'Google Play 15 €',       'Κάρτες δώρου',  15.00,  14.10, 2),
+  ('GPL25',  '2000000000381', 'Google Play 25 €',       'Κάρτες δώρου',  25.00,  23.50, 2),
+  ('GPL50',  '2000000000398', 'Google Play 50 €',       'Κάρτες δώρου',  50.00,  47.00, 1),
+  ('NFX25',  '2000000000404', 'Netflix 25 €',           'Κάρτες δώρου',  25.00,  23.50, 2),
+  ('NFX50',  '2000000000411', 'Netflix 50 €',           'Κάρτες δώρου',  50.00,  47.00, 1),
+  ('APL25',  '2000000000428', 'Apple Gift Card 25 €',   'Κάρτες δώρου',  25.00,  23.50, 2),
+  ('APL50',  '2000000000435', 'Apple Gift Card 50 €',   'Κάρτες δώρου',  50.00,  47.00, 1),
+  ('APL100', '2000000000442', 'Apple Gift Card 100 €',  'Κάρτες δώρου', 100.00,  94.00, 1),
+  ('SKR01',  '2000000000459', 'Σκρατς 1 €',             'Σκρατς',         1.00,   0.93, 10),
+  ('SKR02',  '2000000000466', 'Σκρατς 2 €',             'Σκρατς',         2.00,   1.86, 10),
+  ('SKR03',  '2000000000473', 'Σκρατς 3 €',             'Σκρατς',         3.00,   2.79, 10),
+  ('SKR05',  '2000000000480', 'Σκρατς 5 €',             'Σκρατς',         5.00,   4.65, 10)
+) v (code, barcode, name, cat, price, cost, min_stock)
+join mm_category c on c.name = v.cat
+where not exists (select 1 from mm_item i where i.code = v.code);
+
+-- 5 cards of each (20 scratch tickets), made-up serials; the PINs (not of the scratch tickets) only
+-- when MM_PIN works
 declare
   n number;
   s number;
 begin
   select count(*) into n from user_objects where object_name = 'MM_PIN' and object_type = 'PACKAGE BODY'
   and status = 'VALID';
-  if n = 0 then
-    return;
-  end if;
-  for i in (select id, code from mm_item where serial_tracked = 'Y' and code like 'CRD%'
-            and not exists (select 1 from mm_serial s where s.item_id = mm_item.id)) loop
-    for k in 1 .. 5 loop
+  for i in (select i.id, i.code, c.name cat from mm_item i join mm_category c on c.id = i.category_id
+            where i.serial_tracked = 'Y' and c.name in ('Κάρτες κινητής', 'Κάρτες δώρου', 'Σκρατς')
+            and not exists (select 1 from mm_serial s where s.item_id = i.id)
+            and (n > 0 or c.name = 'Σκρατς')) loop
+    for k in 1 .. case i.cat when 'Σκρατς' then 20 else 5 end loop
       s := mm_core.load_serial(i.id, 'DEMO-' || i.code || '-' || lpad(k, 4, '0'),
-                               lpad(trunc(dbms_random.value(0, 1e12)), 12, '0'), 'Κάρτες επίδειξης');
+                               case when i.cat <> 'Σκρατς' then lpad(trunc(dbms_random.value(0, 1e12)), 12, '0') end,
+                               'Επίδειξη');
     end loop;
   end loop;
 end;

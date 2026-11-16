@@ -5,7 +5,8 @@ merge into mm_vat t
 using (select * from (values
          ('A', 24, 'Κανονικός 24%'),
          ('B', 13, 'Μειωμένος 13%'),
-         ('C',  6, 'Υπερμειωμένος 6%')) v (code, rate, descr)) s
+         ('C',  6, 'Υπερμειωμένος 6%'),
+         ('D',  0, 'Εκτός ΦΠΑ 0%')) v (code, rate, descr)) s     -- D: gift cards, scratch tickets
 on (t.code = s.code)
 when matched then update set t.rate = s.rate, t.descr = s.descr
 when not matched then insert (code, rate, descr) values (s.code, s.rate, s.descr);

@@ -91,7 +91,7 @@ async function waitText(page, sel, text) {
   await page.goto(BASE + '/web/#/items');
   await waitText(page, 'main', 'Σελίδα 1 από');
   await page.selectOption('.pager select', '25');
-  await waitText(page, '.pager', 'Σελίδα 1 από');
+  await page.waitForFunction(() => document.querySelectorAll('main tbody tr').length === 25);   // drawn again
   const firstCode = await page.textContent('tbody tr td');
   await page.click('.pager button:has-text("Επόμενη")');
   await waitText(page, '.pager', 'Σελίδα 2 από');
