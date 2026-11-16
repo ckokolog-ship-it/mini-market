@@ -6,3 +6,5 @@
 *.fmb binary
 *.fmx binary
 *.rdf binary
+*.jar binary
+*.keystore binary

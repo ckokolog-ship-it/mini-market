@@ -1,0 +1,19 @@
+{
+  "name": "mini-market-android",
+  "private": true,
+  "version": "1.0.0",
+  "description": "The app of the mini market for Android (mobile/android): the pages of api/src/main/resources/web in an APK (Capacitor)",
+  "scripts": {
+    "web": "node copy-web.mjs",
+    "sync": "node copy-web.mjs && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/app": "8.1.1",
+    "@capacitor/core": "8.5.2",
+    "@zxing/library": "0.21.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2"
+  }
+}

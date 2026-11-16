@@ -70,3 +70,58 @@ def read_labels(folder, item):
         assert (kind, text) in found, (k, found)
         code = item if k == 0 else 'ART01'
         assert ('QRCode', 'http://192.168.1.10:8090/web/#/item/' + code) in found, (k, found)
+
+
+def y4m(path, bars, w=640, h=480, frames=12):
+    """a video of the fake camera of Chromium: the bars of a barcode, black on white, in the middle"""
+    import array
+    y = array.array('B', [235]) * (w * h)
+    mod = 4
+    x0 = (w - (len(bars) + 20) * mod) // 2 + 10 * mod
+    for i, b in enumerate(bars):
+        if b == '1':
+            for x in range(x0 + i * mod, x0 + (i + 1) * mod):
+                for row in range(140, 340):
+                    y[row * w + x] = 16
+    uv = bytes([128]) * (w * h // 4)
+    with open(path, 'wb') as f:
+        f.write(b'YUV4MPEG2 W%d H%d F10:1 Ip A1:1 C420jpeg\n' % (w, h))
+        for _ in range(frames):
+            f.write(b'FRAME\n' + y.tobytes() + uv + uv)
+
+
+def test_the_app_mode(api, env, users):
+    """the pages as the app of Android runs them: another origin, the address of the shop, CORS, the
+    camera (a fake one showing the barcode of the bread)"""
+    db, ids = env
+    if subprocess.run(['node', '-e', "require('playwright')"], capture_output=True).returncode:
+        pytest.skip('no Playwright for node')
+    import http.server
+    import json
+    import threading
+    web = os.path.join(HERE, '..', 'api', 'src', 'main', 'resources', 'web')
+    bars = json.loads(subprocess.check_output(['node', os.path.join(HERE, 'codes_check.mjs'),
+                                               json.dumps({'ean': ['2000000000015'], 'c128': [], 'qr': []})]))
+    tmp = tempfile.mkdtemp(prefix='mmapp-')
+    video = os.path.join(tmp, 'bread.y4m')
+    y4m(video, bars['ean'][0]['bars'])
+
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **k):
+            super().__init__(*a, directory=web, **k)
+
+        def log_message(self, *a):
+            pass
+    srv = http.server.ThreadingHTTPServer(('127.0.0.1', test_api.APP_PORT), Quiet)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        e = dict(os.environ, APP='http://localhost:%d' % test_api.APP_PORT, API=api, BAD='127.0.0.1:%d' % test_api.free_port(),
+                 MGR=users['MANAGER'],
+                 PW=test_api.PW, VIDEO=video, SHOTS=os.environ.get('MM_WEB_SHOTS', ''))
+        r = subprocess.run(['node', os.path.join(HERE, 'app_check.js')], env=e, capture_output=True, text=True, timeout=180)
+        print(r.stdout, r.stderr)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert '== app OK' in r.stdout
+    finally:
+        srv.shutdown()
+        shutil.rmtree(tmp, ignore_errors=True)

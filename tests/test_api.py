@@ -32,6 +32,16 @@ env = test_core.env
 NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
+def free_port():
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+
+
+# the pages of the app of Android in the tests (test_web.py): from another origin, as on the phone
+APP_PORT = free_port()
+
+
 @pytest.fixture(scope='module')
 def api():
     if not os.path.exists(JAR):
@@ -44,7 +54,8 @@ def api():
         s.bind(('127.0.0.1', 0))
         port = s.getsockname()[1]
     e = dict(os.environ, MM_DB_URL='jdbc:oracle:thin:@' + where, MM_DB_USER=user, MM_DB_PASSWORD=pw,
-             MM_API_PORT=str(port), MM_API_BIND='127.0.0.1')
+             MM_API_PORT=str(port), MM_API_BIND='127.0.0.1',
+             MM_API_CORS='http://localhost,http://localhost:%d' % APP_PORT)
     p = subprocess.Popen(['java', '-jar', JAR], env=e, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     base = 'http://127.0.0.1:%d' % port
     try:
@@ -383,3 +394,31 @@ def test_orders_to_the_till(api, env, users):
     o4 = post(api, '/api/orders', {'name': 'Test ακύρωση', 'phone': '6912345678'}, token='CASHIER')
     assert post(api, '/api/orders/%d/cancel' % o4['id'], token='CASHIER')['status'] == 'C'
     assert get(api, '/api/orders/999999999', 404, token='CASHIER')['error'] == 'not_found'
+
+
+def test_cors_for_the_app(api, users):
+    """the app of Android (its pages from http://localhost of the phone) may call the service: the question
+    before a call (OPTIONS) and the answers carry its origin; another origin gets nothing of it"""
+    def ask(method, origin, path='/api/items?limit=1', token='CASHIER'):
+        req = urllib.request.Request(api + path, method=method)
+        req.add_header('Origin', origin)
+        if method == 'OPTIONS':
+            req.add_header('Access-Control-Request-Method', 'GET')
+            req.add_header('Access-Control-Request-Headers', 'authorization')
+        elif token:
+            req.add_header('Authorization', 'Bearer ' + TOKENS[token])
+        try:
+            r = NO_PROXY.open(req, timeout=30)
+        except urllib.error.HTTPError as e:
+            r = e
+        return r.status, r.headers
+    st, h = ask('OPTIONS', 'http://localhost')
+    assert st == 204 and h['Access-Control-Allow-Origin'] == 'http://localhost'
+    assert 'Authorization' in h['Access-Control-Allow-Headers'] and 'POST' in h['Access-Control-Allow-Methods']
+    st, h = ask('GET', 'http://localhost')
+    assert st == 200 and h['Access-Control-Allow-Origin'] == 'http://localhost' and h['Vary'] == 'Origin'
+    for bad in ('http://evil.example', 'http://localhost.evil.example', 'null'):
+        st, h = ask('GET', bad)
+        assert h['Access-Control-Allow-Origin'] is None, bad
+        st, h = ask('OPTIONS', bad)
+        assert st == 405 and h['Access-Control-Allow-Origin'] is None, bad     # GET or POST only
