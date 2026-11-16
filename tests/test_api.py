@@ -422,3 +422,63 @@ def test_cors_for_the_app(api, users):
         assert h['Access-Control-Allow-Origin'] is None, bad
         st, h = ask('OPTIONS', bad)
         assert st == 405 and h['Access-Control-Allow-Origin'] is None, bad     # GET or POST only
+
+
+def test_the_office(api, env, users):
+    """the documents of the office through the service, as a manager: two delivery notes, the invoice of
+    both, goods back (a return note, its credit note), a receipt of money and its cancel; a cashier: no"""
+    db, ids = env
+    c, b, a = ids['customer'], 'TST%sB' % ids['tag'], 'TST%sA' % ids['tag']
+    assert get(api, '/api/docs', 403, token='CASHIER')['error'] == 'forbidden'
+    assert post(api, '/api/payments', {'kind': 'R'}, token='CASHIER', status=403)['error'] == 'forbidden'
+    types = {t['code']: t for t in get(api, '/api/doc-types')['rows']}
+    assert types['TPY']['ref_type'] == 'DAP' and types['DAP']['partner_sign'] == 0
+    assert post(api, '/api/docs', {'doc_type': 'ALP'}, status=400)['error'] == 'bad_type'
+    n1 = post(api, '/api/docs', {'doc_type': 'DAP', 'customer_id': c})
+    assert (n1['status'], n1['payment'], n1['partner']) == ('D', 'CREDIT', db.one('select name from mm_customer where id = :c', c=c)[0])
+    n1 = post(api, '/api/docs/%d/lines' % n1['id'], {'code': b, 'qty': 3, 'price': 2})
+    n1 = post(api, '/api/docs/%d/lines' % n1['id'], {'code': a, 'qty': 1})
+    line = n1['lines'][1]['id']
+    n1 = post(api, '/api/docs/%d/lines/%d' % (n1['id'], line), {'qty': 2, 'discount': 10})
+    assert [(x['code'], x['qty'], x['discount']) for x in n1['lines']] == [(b, 3, 0), (a, 2, 10)]
+    assert post(api, '/api/docs/%d/lines/1' % n1['id'], {'qty': 1}, status=404)['error'] == 'not_found'
+    n1 = post(api, '/api/docs/%d/post' % n1['id'])
+    assert n1['status'] == 'P' and n1['doc_no'] > 0 and n1['invoice_text'] is None and n1['ref_text'] is None
+    assert post(api, '/api/docs/%d/lines' % n1['id'], {'code': b}, status=409)['error'] == 'not_draft'
+    n2 = post(api, '/api/docs', {'doc_type': 'DAP', 'customer_id': c})
+    post(api, '/api/docs/%d/lines' % n2['id'], {'code': b, 'qty': 1})
+    n2 = post(api, '/api/docs/%d/post' % n2['id'])
+    notes = get(api, '/api/docs/notes?type=DAP&customer_id=%d' % c)['rows']
+    assert {n1['id'], n2['id']} <= {x['id'] for x in notes}
+    inv = post(api, '/api/docs', {'from_note': n1['id']})
+    assert (inv['doc_type'], inv['status']) == ('TPY', 'D')
+    inv = post(api, '/api/docs/%d/notes' % inv['id'], {'note_id': n2['id']})
+    assert [x['id'] for x in inv['notes_in']] == [n1['id'], n2['id']] and len(inv['lines']) == 3
+    assert inv['total'] == round(n1['total'] + n2['total'], 2)
+    assert post(api, '/api/docs/%d/post' % inv['id'])['status'] == 'P'
+    assert get(api, '/api/docs/%d' % n1['id'])['invoice_text'].startswith('TPY ')
+    assert post(api, '/api/docs/%d/cancel' % n1['id'], status=400)['error'] == 'MM-185'
+    # goods back: a return note (a third of one line), posted; its credit note from it
+    back = post(api, '/api/docs/%d/credit' % inv['id'])
+    assert (back['doc_type'], back['ref_doc_id']) == ('DEP', inv['id'])
+    for x in back['lines'][1:]:
+        back = post(api, '/api/docs/%d/lines/%d' % (back['id'], x['id']), {'qty': 0})
+    back = post(api, '/api/docs/%d/lines/%d' % (back['id'], back['lines'][0]['id']), {'qty': 1})
+    post(api, '/api/docs/%d/post' % back['id'])
+    cn = post(api, '/api/docs', {'from_note': back['id']})
+    cn = post(api, '/api/docs/%d/post' % cn['id'])
+    assert cn['doc_type'] == 'PPY' and cn['status'] == 'P'
+    lst = get(api, '/api/docs?type=TPY&limit=5')
+    assert lst['rows'][0]['doc_type'] == 'TPY' and lst['total'] >= 1
+    # a draft deleted
+    d = post(api, '/api/docs', {'doc_type': 'TDA', 'customer_id': c})
+    assert post(api, '/api/docs/%d/delete' % d['id'])['ok'] is True
+    assert get(api, '/api/docs/%d' % d['id'], 404)['error'] == 'not_found'
+    # the money: a receipt, listed, cancelled; a payment to the supplier
+    r = post(api, '/api/payments', {'kind': 'R', 'partner_id': c, 'amount': 5, 'method': 'BANK', 'notes': 'TST web'})
+    assert (r['kind'], r['amount'], r['method'], r['status']) == ('R', 5, 'BANK', 'P')
+    assert any(x['id'] == r['id'] for x in get(api, '/api/payments?kind=R')['rows'])
+    assert post(api, '/api/payments/%d/cancel' % r['id'])['status'] == 'C'
+    pp = post(api, '/api/payments', {'kind': 'P', 'partner_id': ids['supplier'], 'amount': 7})
+    assert (pp['kind'], pp['method']) == ('P', 'BANK')
+    assert post(api, '/api/payments', {'kind': 'X', 'partner_id': c, 'amount': 1}, status=400)['error'] == 'bad_kind'

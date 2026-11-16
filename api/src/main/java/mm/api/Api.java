@@ -37,6 +37,7 @@ import java.util.Optional;
  *   POST /api/counts/{id}/post   .../cancel     the count to the stock, or dropped (MANAGER)
  *   /api/pos/...                               the till: see Pos
  *   /api/orders/...                            the orders: see Orders
+ *   /api/docs/..., /api/doc-types, /api/payments/...   the office: invoices, notes, receipts (MANAGER): see Docs
  * </pre>
  */
 final class Api {
@@ -207,6 +208,10 @@ final class Api {
         if ("orders".equals(p[0])) {
             return Orders.post(c, u, p, in);
         }
+        if ("docs".equals(p[0]) || "payments".equals(p[0])) {
+            need(u, "MANAGER");
+            return Docs.post(c, p, in);
+        }
         if ("counts".equals(p[0])) {
             if (n == 1) {
                 need(u, "MANAGER");
@@ -289,6 +294,10 @@ final class Api {
             }
             case "orders" -> {
                 return Orders.get(c, p, q);
+            }
+            case "docs", "doc-types", "payments" -> {
+                need(u, "MANAGER");
+                return Docs.get(c, p, q);
             }
             case "counts" -> {
                 if (n == 1) {

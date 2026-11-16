@@ -240,6 +240,46 @@ async function waitText(page, sel, text) {
     await sharp.close();
   }
 
+  // the office: a delivery note (the bread by a word), posted; its invoice; goods back; a receipt of money
+  await page.goto(BASE + '/web/#/docs');
+  await page.waitForSelector('select[name=partner] option:nth-child(2)', { state: 'attached' });
+  await page.selectOption('select[name=type]', 'DAP');
+  await page.selectOption('select[name=partner]', { index: 1 });
+  await page.click('form button:has-text("Νέο")');
+  await page.waitForSelector('input[name=code]');
+  await page.fill('input[name=code]', 'Ψωμί χωριάτικο');
+  await page.fill('input[name=qty]', '6');
+  await page.press('input[name=code]', 'Enter');
+  await waitText(page, 'main tbody', 'ART01');
+  await page.click('button:has-text("Καταχώριση")');
+  await waitText(page, '.kv', 'καταχωρημένο');
+  ok(true, 'the office: a delivery note posted');
+  await page.click('button:has-text("Τιμολόγιο από αυτό")');
+  await waitText(page, 'h1', 'Τιμολόγιο πώλησης');
+  await waitText(page, '.kv', 'Δελτία του');
+  await page.click('button:has-text("Καταχώριση")');
+  await waitText(page, '.kv', 'καταχωρημένο');
+  ok(true, 'its invoice, posted');
+  await page.click('button:has-text("Επιστροφή")');
+  await waitText(page, 'h1', 'Δελτίο επιστροφής');
+  ok((await page.textContent('.kv')).includes('πρόχειρο'), 'goods back: a draft return note of its lines');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/doc.png', fullPage: true });
+  await page.click('button:has-text("Σβήσε πρόχειρο")');
+  await page.waitForSelector('select[name=type]');
+  await page.goto(BASE + '/web/#/payments');
+  await page.waitForSelector('select[name=partner_id] option:nth-child(2)', { state: 'attached' });
+  await page.selectOption('select[name=partner_id]', { index: 1 });
+  await waitText(page, 'main', 'Χρωστάει');
+  await page.fill('input[name=amount]', '3.5');
+  await page.fill('input[name=notes]', 'TST web');
+  await page.click('form button:has-text("Καταχώριση")');
+  await waitText(page, 'main tbody', 'TST web');
+  ok(true, 'a receipt of money, in the list');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/payments.png', fullPage: true });
+  await page.click('tr:has-text("TST web") button:has-text("Ακύρωση")');
+  await page.waitForSelector('tr.cancelled:has-text("TST web")');
+  ok(true, 'cancelled');
+
   // logout: the token gone
   await page.click('#logout');
   await page.waitForSelector('input[name=username]');
