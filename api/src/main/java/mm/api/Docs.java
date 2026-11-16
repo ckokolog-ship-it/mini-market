@@ -26,6 +26,8 @@ import java.util.Map;
  *   POST /api/docs/{id}/notes {note_id}            one more note into the draft invoice
  *   POST /api/docs/{id}/post | cancel | delete     posted (its number), cancelled, a draft deleted
  *   POST /api/docs/{id}/credit                     goods back: a draft return note of its lines
+ *   GET  /api/docs/{id}/mydata                     the XML of myDATA (checked by the XSD of AADE)
+ *   POST /api/docs/{id}/mydata  .../mydata/cancel  sent to myDATA now; cancelled there and here (MyData)
  *   GET  /api/payments?kind=R|P&q=&limit=&offset=  receipts (R) and payments (P)
  *   POST /api/payments {kind, partner_id, amount, method, pay_date, notes, register}
  *   POST /api/payments/{id}/cancel
@@ -67,6 +69,9 @@ final class Docs {
             }
             if (p.length == 2) {
                 return doc(c, Http.id(p[1]));
+            }
+            if (p.length == 3 && "mydata".equals(p[2])) {
+                return Map.of("xml", MyData.xml(c, Http.id(p[1])));
             }
         }
         throw new Http.Fail(404, "not_found", "no such endpoint");
@@ -127,7 +132,9 @@ final class Docs {
                 select d.id, d.doc_type, t.name type_name, t.side, t.stock_sign, t.partner_sign, t.ref_type,
                        d.doc_no, d.doc_date, d.status, d.customer_id, d.supplier_id, nvl(cu.name, s.name) partner,
                        d.payment, d.net, d.vat, d.total, d.notes, d.ref_doc_id, case when r.id is not null then r.doc_type || ' ' || r.doc_no end ref_text,
-                       d.invoice_id, case when i.id is not null then i.doc_type || ' ' || i.doc_no end invoice_text
+                       d.invoice_id, case when i.id is not null then i.doc_type || ' ' || i.doc_no end invoice_text,
+                       t.mydata_type, d.mydata_state, d.mydata_mark, d.mydata_uid, d.mydata_qr, d.mydata_error,
+                       d.mydata_at, d.mydata_cancel_mark
                 from mm_doc d
                 join mm_doc_type t on t.code = d.doc_type
                 left join mm_customer cu on cu.id = d.customer_id
@@ -223,6 +230,14 @@ final class Docs {
                     pay, dateOf(in, "doc_date")));
         }
         long id = Http.id(p[1]);
+        if (p.length == 3 && "mydata".equals(p[2])) {             // sent to AADE now (myDATA)
+            MyData.send(c, id);
+            return doc(c, id);
+        }
+        if (p.length == 4 && "mydata".equals(p[2]) && "cancel".equals(p[3])) {
+            MyData.cancel(c, id);
+            return doc(c, id);
+        }
         if (p.length == 3) {
             switch (p[2]) {
                 case "lines" -> {

@@ -390,6 +390,9 @@ select * from table(mm_ledger.trial_rows('C', :from, :to));        -- 'I' είδ
 
 Online παραγγελίες πελατών (η σελίδα `/shop/` του mm-api): `online_order` (όνομα, τηλέφωνο, σημείωση, τυχαίος κωδικός: κράτηση για σήμερα από `online`), `confirm_order` (το μαγαζί μίλησε με τον πελάτη), `cancel_online` (ακύρωση από τον πελάτη με τον κωδικό). Στον πίνακα: `MM_RESERVATION.SOURCE` (`S` μαγαζί, `O` online), `PUBLIC_TOKEN` (μοναδικό), `CONFIRMED_AT`. Το `INSTALL.sql` τις προσθέτει σε υπάρχουσα βάση χωρίς να χαθεί τίποτα.
 
+myDATA της ΑΑΔΕ (το mm-api στέλνει, `ODIGIES_REST.md`): `MM_DOC_TYPE.MYDATA_TYPE` (TPY, TDA `1.1`, PPY `5.1`/`5.2`)· στο `MM_DOC` οι `MYDATA_STATE` (`Q` περιμένει, `S` διαβιβάστηκε, `E` απέτυχε, `X` ακυρώθηκε στην ΑΑΔΕ), `MYDATA_MARK`, `MYDATA_UID`, `MYDATA_QR`, `MYDATA_ERROR`, `MYDATA_AT`, `MYDATA_CANCEL_MARK`· στο `MM_CORE` τα `mydata_queue`, `mydata_sent`, `mydata_failed`, `mydata_cancelled`. Οι ρυθμίσεις: `SET_MYDATA.sql`.
+
+- **MM-189:** myDATA: είδος παραστατικού που δεν διαβιβάζεται, πρόχειρο, ήδη διαβιβασμένο, πελάτης ή μαγαζί χωρίς ΑΦΜ, ΦΠΑ 0% χωρίς αιτία εξαίρεσης, ακύρωση εδώ πριν από την ακύρωση στην ΑΑΔΕ.
 - **MM-188:** online παραγγελία: ήδη 3 ανοιχτές από το ίδιο τηλέφωνο, κωδικός πολύ μικρός, ή ακύρωση από τον πελάτη μετά την επιβεβαίωση.
 
 ## 14. Backup της βάσης (`db\backup.ps1`)

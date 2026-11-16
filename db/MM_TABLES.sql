@@ -375,6 +375,18 @@ begin
           || 'constraint mm_reservation_source_ck check (source in (''S'', ''O''))');
   add_col('MM_RESERVATION', 'PUBLIC_TOKEN', 'public_token varchar2(64) constraint mm_reservation_token_uk unique');
   add_col('MM_RESERVATION', 'CONFIRMED_AT', 'confirmed_at date');
+  -- myDATA of AADE (the invoices and the credit notes of the sales, mm-api MyData.java): the kind of
+  -- each document there (1.1, 5.1 ...); a document: its state (Q to be sent, S sent, E failed, X its
+  -- cancellation sent), its MARK, UID and QR from AADE, the error of the last try
+  add_col('MM_DOC_TYPE', 'MYDATA_TYPE', 'mydata_type varchar2(5)');
+  add_col('MM_DOC', 'MYDATA_STATE', 'mydata_state varchar2(1) '
+          || 'constraint mm_doc_mydata_ck check (mydata_state in (''Q'', ''S'', ''E'', ''X''))');
+  add_col('MM_DOC', 'MYDATA_MARK', 'mydata_mark number(20)');
+  add_col('MM_DOC', 'MYDATA_UID', 'mydata_uid varchar2(40)');
+  add_col('MM_DOC', 'MYDATA_QR', 'mydata_qr varchar2(1000)');
+  add_col('MM_DOC', 'MYDATA_ERROR', 'mydata_error varchar2(1000)');
+  add_col('MM_DOC', 'MYDATA_AT', 'mydata_at date');
+  add_col('MM_DOC', 'MYDATA_CANCEL_MARK', 'mydata_cancel_mark number(20)');
   add_col('MM_RESERVATION_LINE', 'PICKED', 'picked number(12,3) default 0 not null '
           || 'constraint mm_res_line_picked_ck check (picked >= 0)');
   for c in (select data_length n from user_tab_cols where table_name = 'MM_CASH_MOVE' and column_name = 'KIND') loop

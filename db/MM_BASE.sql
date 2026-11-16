@@ -41,4 +41,11 @@ when not matched then insert (code, name, side, stock_sign, partner_sign, vat_si
                       values (s.code, s.name, s.side, s.stock_sign, s.partner_sign, s.vat_sign,
                               s.prices_incl_vat, s.partner_needed, s.ref_type);
 
+-- myDATA (mm-api MyData.java): the invoices of a sale 1.1 (Τιμολόγιο Πώλησης), a credit note of a sale
+-- 5.1 (Πιστωτικό Συσχετιζόμενο: of an invoice sent, its MARK) or else 5.2 (Μη Συσχετιζόμενο). The
+-- retail receipts go to AADE through the cash register (ΦΗΜ) or a provider, the delivery notes and the
+-- purchases are not sent by the shop
+update mm_doc_type set mydata_type = case code when 'TPY' then '1.1' when 'TDA' then '1.1' when 'PPY' then '5.1' end
+where decode(mydata_type, case code when 'TPY' then '1.1' when 'TDA' then '1.1' when 'PPY' then '5.1' end, 1, 0) = 0;
+
 commit;

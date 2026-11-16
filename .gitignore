@@ -8,3 +8,4 @@ __pycache__/
 *.fmb
 api/service/
 api/docker/
+mydata.properties
