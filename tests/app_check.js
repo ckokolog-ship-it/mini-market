@@ -38,7 +38,7 @@ function ok(cond, what) {
   await page.fill('input[name=username]', MGR);
   await page.fill('input[name=password]', PW);
   await page.click('button[type=submit]');
-  await page.waitForSelector('#nav a');
+  await page.waitForSelector('#nav a', { state: 'attached' });
   ok(true, 'logged in through CORS');
 
   // the camera: the barcode of the bread, read (ZXing: no BarcodeDetector here), the item opened

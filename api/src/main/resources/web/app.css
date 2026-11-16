@@ -12,13 +12,33 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }   /* (else display:flex of a form wins over hidden) */
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, "Segoe UI", Roboto, Arial, sans-serif; }
-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px;
+header { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px 16px; padding: 10px 16px; min-height: 53px;
          background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
 .brand { font-weight: 700; color: var(--ink); text-decoration: none; }
-nav { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; }
-nav a { padding: 6px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; }
-nav a.on, nav a:hover { background: var(--row); }
+/* the menu: groups that open and close (an accordion, one open at a time); on a desk a column on the left,
+   on a phone a drawer from the button ☰ */
+.brand { flex: 1; white-space: nowrap; }
+#menu { font-size: 18px; line-height: 1; padding: 6px 10px; }
+#nav { position: fixed; top: 53px; left: 0; bottom: 0; width: 220px; overflow-y: auto; background: var(--panel);
+       border-right: 1px solid var(--line); padding: 8px; z-index: 3; }
+#top[hidden] ~ #nav { display: none; }
+#nav details { border-bottom: 1px solid var(--line); }
+#nav summary { cursor: pointer; padding: 9px 8px; font-weight: 600; list-style: none; display: flex; justify-content: space-between; }
+#nav summary::-webkit-details-marker { display: none; }
+#nav summary::after { content: '▸'; color: var(--muted); transition: transform .15s; }
+#nav details[open] summary::after { transform: rotate(90deg); }
+#nav a { display: block; padding: 7px 10px 7px 18px; border-radius: 6px; color: var(--ink); text-decoration: none; margin-bottom: 2px; }
+#nav a.on, #nav a:hover { background: var(--row); }
+#nav a.on { font-weight: 600; }
 #who { color: var(--muted); font-size: 13px; }
+@media (min-width: 900px) {
+  #menu { display: none; }
+  #top:not([hidden]) ~ main { margin-left: 220px; }
+}
+@media (max-width: 899px) {
+  #nav { display: none; width: min(82vw, 300px); box-shadow: 0 6px 24px rgba(0, 0, 0, .25); }
+  body.menu-open #top:not([hidden]) ~ #nav { display: block; }
+}
 main { max-width: 1100px; margin: 0 auto; padding: 16px; }
 h1 { font-size: 20px; margin: 4px 0 12px; }
 h2 { font-size: 16px; margin: 18px 0 8px; }
@@ -62,10 +82,8 @@ tr.click:hover td { background: var(--row); }
 @media (max-width: 640px) {
   main { padding: 10px; }
   header { padding: 8px 10px; }
-  /* a phone: the name, who and logout on top; the menu its own line under them, scrolled sideways */
-  #who { flex: 1; text-align: right; }
-  nav { order: 3; flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; }
-  nav a { white-space: nowrap; }
+  /* a phone: ☰, the name, who and logout on one line */
+  #who { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hide-phone { display: none; }
   .scan input[name=code] { width: 100%; }
 }
@@ -97,7 +115,7 @@ label.check { flex-direction: row; align-items: center; gap: 6px; padding-bottom
 @media print {
   @page { size: A4; margin: 0; }
   body { background: #fff; }
-  header, .no-print, #toast { display: none !important; }
+  header, #nav, .no-print, #toast { display: none !important; }
   main { max-width: none; padding: 0; margin: 0; }
   .sheets { overflow: visible; }
   .sheet { margin: 0; box-shadow: none; break-after: page; }
