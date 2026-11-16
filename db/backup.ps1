@@ -56,18 +56,26 @@ function Get-Svc([string]$n) {
   return Get-Service -Name $n -ErrorAction SilentlyContinue
 }
 
-# a script of SQL*Plus through the wallet; its lines back (no password: /@MM_DB)
+# a script of SQL*Plus through the wallet; its lines back (no password: /@MM_DB). From a file of
+# ASCII, not through a pipe: Windows PowerShell 5 puts a BOM in front of what it pipes when the console
+# is UTF-8, and SQL*Plus takes it for an unknown command (SP2-0734). Any SP2- or ORA- line: an error
 function Sql([string]$text) {
-  $out = ("whenever sqlerror exit failure`nset heading off feedback off pagesize 0 linesize 400 trimout on`n" + $text + "`nexit`n") |
-    & $sqlplus -s -L "/@$Alias"
-  if ($LASTEXITCODE) { throw ("SQL*Plus /@${Alias}: " + (($out | Where-Object { $_ -match '\S' }) -join ' | ')) }
-  return @($out | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+  $file = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'mm_backup_' + [guid]::NewGuid().ToString('N') + '.sql')
+  [IO.File]::WriteAllText($file, "whenever sqlerror exit failure`r`nset heading off feedback off pagesize 0 linesize 400 trimout on`r`n" +
+    $text.Replace("`r`n", "`n").Replace("`n", "`r`n") + "`r`nexit`r`n", [Text.Encoding]::ASCII)
+  try {
+    $out = @(& $sqlplus -s -L "/@$Alias" "@$file" | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+  } finally { Remove-Item $file -Force -ErrorAction SilentlyContinue }
+  $bad = @($out | Where-Object { $_ -match '^(SP2-|ORA-|ERROR)' })
+  if ($LASTEXITCODE -or $bad) { throw ("SQL*Plus /@${Alias}: " + ($out -join ' | ')) }
+  return $out
 }
 
 # the folder of DATA_PUMP_DIR (where expdp writes, on the side of the database)
 function Get-PumpDir {
   $r = @(Sql "select directory_path from all_directories where directory_name = 'DATA_PUMP_DIR';")
   if (-not $r) { throw 'MM may not use DATA_PUMP_DIR: GRANT_BACKUP.sql as SYS first (docs\ODIGIES_VASI.md, the backup)' }
+  if (-not (Test-Path $r[0])) { throw "DATA_PUMP_DIR is $($r[0]): no such folder on this computer (the database on another one?)" }
   return $r[0]
 }
 
@@ -123,7 +131,9 @@ function Invoke-Backup([string]$prefix = 'mm') {
   $mb = [math]::Round((Get-Item $file).Length / 1MB, 1)
   Write-Host "== $file ($mb MB)"
   $where = ''
-  if ($CopyTo) {
+  if ($CopyTo -and ([IO.Path]::GetFullPath($CopyTo).TrimEnd('\', '/') -eq [IO.Path]::GetFullPath($Dir).TrimEnd('\', '/'))) {
+    Write-Host "== [!] -CopyTo is the folder of the backups itself: no copy (another disk: a USB disk, e.g. -CopyTo E:\mm_backup)"
+  } elseif ($CopyTo) {
     if (Test-Path ([IO.Path]::GetPathRoot($CopyTo))) {
       New-BackupDir $CopyTo
       Copy-Item $file, (Join-Path $Dir "$name.log") $CopyTo -Force
