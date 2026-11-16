@@ -361,8 +361,19 @@ async function waitText(page, sel, text) {
   await waitText(p3, 'main', 'Σύνολο: 4,20');
   await p3.fill('input[name=name]', 'Test online πελάτης');
   await p3.fill('input[name=phone]', '6900000001');
+  await p2.goto(BASE + '/web/#/pos');                              // the cashier at the till: the bell asked
+  await waitText(p2, 'main', 'Αρχικό ταμείο');
+  await p2.waitForTimeout(500);
   await p3.click('button:has-text("Αποστολή παραγγελίας")');
   await waitText(p3, '.state', 'Στάλθηκε');
+  await p2.evaluate(() => window.dispatchEvent(new Event('focus')));   // (else in 30 seconds)
+  await waitText(p2, '#toast', 'Νέα online παραγγελία: Test online πελάτης');
+  await p2.waitForSelector('#menu[data-n]', { state: 'attached' });
+  ok(/^\(\d+\) /.test(await p2.title()), 'the bell: the count in the title of the tab: ' + await p2.title());
+  await p2.click('#menu');
+  ok(Number(await p2.textContent('#nav a[href="#/orders"] .nav-count')) >= 1, 'the bell: the count next to «Παραγγελίες»');
+  if (SHOTS) await p2.screenshot({ path: SHOTS + '/bell.png' });
+  await p2.click('#menu');
   ok(await p3.isVisible('button:has-text("Ακύρωση παραγγελίας")'), 'sent: the customer may cancel it');
   ok((await p3.textContent('#cartn')) === '0', 'sent: the cart empty');
   ok(await p3.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'the shop fits a phone');
@@ -373,9 +384,13 @@ async function waitText(page, sel, text) {
   await p2.goto(BASE + '/web/#/order/' + no);
   await waitText(p2, 'main', 'προς επιβεβαίωση');
   ok(await p2.isVisible('a[href="tel:6900000001"]'), 'the order: the phone to call');
+  const waiting = Number(await p2.evaluate(() => document.querySelector('#menu').dataset.n || 0));
   await p2.click('button:has-text("Επιβεβαιώθηκε")');
   await waitText(p2, 'main', 'online · επιβεβαιώθηκε');
   ok(await p2.isHidden('button:has-text("Επιβεβαιώθηκε")'), 'confirmed: once');
+  await p2.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await p2.waitForFunction((n) => Number(document.querySelector('#menu').dataset.n || 0) === n - 1, waiting, { timeout: 15000 });
+  ok(true, 'confirmed: the count of the bell one less');
   await p3.reload();
   await waitText(p3, '.state', 'Επιβεβαιώθηκε');
   ok(await p3.isHidden('button:has-text("Ακύρωση παραγγελίας")'), 'confirmed: no cancel by the customer');
