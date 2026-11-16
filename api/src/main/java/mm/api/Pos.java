@@ -25,6 +25,11 @@ import java.util.Map;
  *   POST /api/pos/{register}/lines/{id} {qty}  the quantity of a line (0: the line out)
  *   POST /api/pos/{register}/void              the draft out (an order in it: open again)
  *   POST /api/pos/{register}/order {id}        an order (Orders), all of its lines, into the receipt
+ *   GET  /api/pos/{register}/receipt/{id}      a receipt of the register to print (80 mm): the header and
+ *                                              the footer of the shop, its lines, its VAT, the PINs of
+ *                                              its cards sold today (each print in MM_PIN_LOG, by whom)
+ *   GET  /api/pos/settings                     the header and the footer of the receipts
+ *   POST /api/pos/settings {header, footer}    (MANAGER)
  *   POST /api/pos/{register}/pay {payment CASH|CARD, given}   posted: its number, total, what was due
  *                                              (less a deposit of its order) and the change
  * </pre>
@@ -33,7 +38,13 @@ final class Pos {
     private Pos() {
     }
 
-    static Object get(Connection c, String[] p) throws SQLException {
+    static Object get(Connection c, Api.User u, String[] p) throws SQLException {
+        if (p.length == 2 && "settings".equals(p[1])) {
+            return settings(c);
+        }
+        if (p.length == 4 && "receipt".equals(p[2])) {
+            return receipt(c, u, register(c, p[1]), Http.id(p[3]));
+        }
         if (p.length == 1) {
             return Map.of("rows", Db.rows(c, """
                     select r.id, r.code, r.name, z.id z_id, z.z_no, z.opened_at
@@ -46,7 +57,27 @@ final class Pos {
         throw new Http.Fail(404, "not_found", "no such endpoint");
     }
 
-    static Object post(Connection c, String[] p, Map<String, Object> in) throws SQLException {
+    static Object post(Connection c, Api.User u, String[] p, Map<String, Object> in) throws SQLException {
+        if (p.length == 2 && "settings".equals(p[1])) {
+            if (!u.atLeast("MANAGER")) {
+                throw new Http.Fail(403, "forbidden", "only MANAGER or above");
+            }
+            for (String k : new String[] {"header", "footer"}) {
+                String v = Http.text(in, k, false);
+                if (v != null && v.length() > 400) {
+                    throw new Http.Fail(400, "too_long", k + ": up to 400 characters");
+                }
+                try (java.sql.PreparedStatement st = c.prepareStatement("""
+                        merge into mm_setting s using (select ? name, ? value from dual) v on (s.name = v.name)
+                        when matched then update set s.value = v.value
+                        when not matched then insert (name, value) values (v.name, v.value)""")) {
+                    st.setString(1, "RECEIPT_" + k.toUpperCase(java.util.Locale.ROOT));
+                    st.setString(2, v);
+                    st.executeUpdate();
+                }
+            }
+            return settings(c);
+        }
         if (p.length < 3) {
             throw new Http.Fail(404, "not_found", "no such endpoint");
         }
@@ -356,6 +387,70 @@ final class Pos {
                 select id, doc_no, created_at, payment, total, status from mm_doc
                 where z_id = ? and doc_type = 'ALP' and status in ('P', 'C')
                 order by id desc fetch first 5 rows only""", z));
+        return out;
+    }
+
+    private static Map<String, Object> settings(Connection c) throws SQLException {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("header", null);
+        out.put("footer", null);
+        for (Map<String, Object> r : Db.rows(c, "select name, value from mm_setting where name in ('RECEIPT_HEADER', 'RECEIPT_FOOTER')")) {
+            out.put("RECEIPT_HEADER".equals(r.get("name")) ? "header" : "footer", r.get("value"));
+        }
+        return out;
+    }
+
+    /** a posted (or cancelled) receipt of this register, as printed: the PINs of its cards sold today */
+    private static Object receipt(Connection c, Api.User u, long reg, long id) throws SQLException {
+        List<Map<String, Object>> h = Db.rows(c, """
+                select d.id, d.doc_no, d.created_at, d.status, d.payment, d.net, d.vat, d.total, d.deposit,
+                       d.total - d.deposit due, r.code register, r.name register_name, z.z_no
+                from mm_doc d join mm_register r on r.id = d.register_id left join mm_z z on z.id = d.z_id
+                where d.id = ? and d.register_id = ? and d.doc_type = 'ALP' and d.status in ('P', 'C')""", id, reg);
+        if (h.isEmpty()) {
+            throw new Http.Fail(404, "not_found", "no such receipt of this register: " + id);
+        }
+        Map<String, Object> out = new LinkedHashMap<>(h.get(0));
+        out.putAll(settings(c));
+        out.put("lines", Db.rows(c, """
+                select l.id, i.code, i.name, i.unit, l.qty, l.price, l.discount, l.vat_code, l.vat_rate, l.total
+                from mm_doc_line l join mm_item i on i.id = l.item_id
+                where l.doc_id = ? order by l.line_no""", id));
+        out.put("vat_rows", Db.rows(c, """
+                select vat_code, vat_rate, sum(net) net, sum(vat) vat, sum(total) total
+                from mm_doc_line where doc_id = ? group by vat_code, vat_rate order by vat_code""", id));
+        List<Map<String, Object>> cards = Db.rows(c, """
+                select s.id, s.serial, i.name, case when s.pin_enc is null then 'N' else 'Y' end has_pin
+                from mm_serial s join mm_item i on i.id = s.item_id
+                where s.out_doc_id = ? and s.status = 'S' order by s.serial""", id);
+        if (!cards.isEmpty() && "P".equals(out.get("status"))) {
+            // who printed the PINs: the user of the login (MM_PIN_LOG), not a name typed
+            try (CallableStatement cs = c.prepareCall("begin dbms_session.set_identifier(?); end;")) {
+                cs.setString(1, u.username());
+                cs.execute();
+            }
+            try {
+                for (Map<String, Object> card : cards) {
+                    if (!"Y".equals(card.get("has_pin"))) {
+                        continue;
+                    }
+                    try (CallableStatement cs = c.prepareCall("begin ? := mm_core.receipt_pin(?); end;")) {
+                        cs.registerOutParameter(1, Types.VARCHAR);
+                        cs.setObject(2, card.get("id"));
+                        cs.execute();
+                        card.put("pin", cs.getString(1));
+                    } catch (SQLException e) {
+                        card.put("pin", null);              // not sold today (MM-144), no MM_PIN
+                    }
+                }
+            } finally {
+                try (CallableStatement cs = c.prepareCall("begin dbms_session.clear_identifier; end;")) {
+                    cs.execute();
+                }
+            }
+        }
+        cards.forEach(card -> card.remove("has_pin"));
+        out.put("cards", cards);
         return out;
     }
 }

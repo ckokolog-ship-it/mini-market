@@ -122,3 +122,25 @@ tr.cancelled td { color: var(--muted); text-decoration: line-through; }
 tr.cancelled td:last-child { text-decoration: none; }
 details { margin-bottom: 14px; }
 summary { cursor: pointer; padding: 6px 0; }
+
+/* the receipt (80 mm): off the screen until printed; then alone on its page (@page receipt, its height
+   set by printReceipt) */
+.receipt { position: absolute; left: -10000px; top: 0; width: 72mm; padding: 2mm 4mm; background: #fff; color: #000;
+           font: 11px/1.3 "Courier New", Courier, monospace; page: receipt; }
+.receipt hr { border: 0; border-top: 1px dashed #000; margin: 4px 0; }
+.rc-head, .rc-foot, .rc-title { text-align: center; }
+.rc-head { font-weight: 700; margin-bottom: 4px; }
+.rc-foot { margin-top: 6px; }
+.rc-title { font-weight: 700; margin: 4px 0; }
+.rc-pair { display: flex; justify-content: space-between; gap: 6px; }
+.rc-total { font-size: 14px; font-weight: 700; }
+.rc-line { margin-bottom: 2px; }
+.rc-card { margin: 4px 0; }
+.rc-pin span:last-child { font-size: 15px; font-weight: 700; letter-spacing: 1px; }
+.receipt-setup textarea { font: inherit; width: 100%; }
+button.print-btn { margin-left: 10px; }
+@media print {
+  body.printing-receipt > *:not(#receipt) { display: none !important; }
+  body.printing-receipt { background: #fff; }
+  body.printing-receipt #receipt { position: static; }
+}
