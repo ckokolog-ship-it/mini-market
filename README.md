@@ -37,13 +37,14 @@ Oracle Forms ──────────────────────�
 | 6 | Ταμείο λιανικής: απόδειξη, σάρωση, μετρητά/κάρτα, άνοιγμα και κλείσιμο Ζ | ✔ η φόρμα `MM_POS` |
 | 7 | REST: το `MM_CORE` για web και κινητό | ✔ η υπηρεσία `api/` (Java, [ODIGIES_REST.md](docs/ODIGIES_REST.md)), με login και ρόλους |
 | 7α | Login και ρόλοι, όπως στο PROPOApplication (π.χ. ποιος βλέπει τα PIN) | ✔ χρήστες και ρόλοι στη βάση (`MM_AUTH`), login στο REST και στις φόρμες (`MM_LOGIN`, `MM_USERS`) |
-| 8 | Σελίδες web: ό,τι κάνουν οι φόρμες, και το ταμείο | ◐ οι σελίδες μέσα στο `mm-api.jar` ([ODIGIES_WEB.md](docs/ODIGIES_WEB.md)): είδη, πελάτες, καρτέλες, reports, απογραφή από κινητό· δεν έχουν ακόμα ταμείο και καταχωρίσεις (τιμολόγια, εισπράξεις) |
-| 9 | Κινητό Android: σάρωση από τα ράφια για απογραφή | |
+| 8 | Σελίδες web: ό,τι κάνουν οι φόρμες, και το ταμείο | ◐ οι σελίδες μέσα στο `mm-api.jar` ([ODIGIES_WEB.md](docs/ODIGIES_WEB.md)): ταμείο, παραγγελίες, ετικέτες με barcode και QR, είδη, πελάτες, καρτέλες, reports, απογραφή· δεν έχουν ακόμα τιμολόγια και εισπράξεις |
+| 9 | Κινητό Android: σάρωση από τα ράφια για απογραφή | ✔ η εφαρμογή `mobile/` (APK, [ODIGIES_ANDROID.md](docs/ODIGIES_ANDROID.md)): οι σελίδες web με σάρωση από την κάμερα (barcode και QR) |
 
 ## Φάκελοι
 
 - `db/`: η βάση (`CREATE_USER.sql`, `INSTALL.sql`, `UNINSTALL.sql`) και το `MM_CORE.sql`. Ένας χρόνος δεδομένων για τα reports: `MM_DEMO_BIG.sql`· ο έλεγχος ότι όλα συμφωνούν: `MM_CHECK.sql`. Οδηγίες στο [docs/ODIGIES_VASI.md](docs/ODIGIES_VASI.md).
 - `forms/`: οι φόρμες (`mkforms.py` → `MM_*.xml`, `build_forms.ps1`). Οδηγίες στο [docs/ODIGIES_FORMS.md](docs/ODIGIES_FORMS.md).
 - `reports/`: τα reports (`mkreports.py` → `MM_LEDGER_*.xml`, `build_reports.ps1` → `.rdf`). Οδηγίες στο [docs/ODIGIES_REPORTS.md](docs/ODIGIES_REPORTS.md).
-- `api/`: η υπηρεσία REST (`mm-api.jar`, `run_api.ps1`). Οδηγίες στο [docs/ODIGIES_REST.md](docs/ODIGIES_REST.md).
+- `api/`: η υπηρεσία REST (`mm-api.jar`, `run_api.ps1`) και οι σελίδες web. Οδηγίες στο [docs/ODIGIES_REST.md](docs/ODIGIES_REST.md) και στο [docs/ODIGIES_WEB.md](docs/ODIGIES_WEB.md).
+- `mobile/`: η εφαρμογή Android (`build_apk.ps1` → APK). Οδηγίες στο [docs/ODIGIES_ANDROID.md](docs/ODIGIES_ANDROID.md).
 - `tests/`: tests σε Python (`pytest`, `oracledb`) πάνω σε ζωντανή βάση.

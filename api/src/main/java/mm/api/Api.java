@@ -66,9 +66,39 @@ final class Api {
         }
     }
 
+    /**
+     * The origins of other pages that may call the service (CORS): the app of Android (its pages from the
+     * phone itself, http://localhost). MM_API_CORS: others, by commas; "none": no other.
+     */
+    private static final java.util.Set<String> ORIGINS = origins(Main.env("MM_API_CORS", "http://localhost"));
+
+    static java.util.Set<String> origins(String v) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        for (String o : v.split(",")) {
+            String t = o.trim().replaceAll("/+$", "");
+            if (!t.isEmpty() && !"none".equalsIgnoreCase(t)) {
+                out.add(t);
+            }
+        }
+        return out;
+    }
+
     private void handle(HttpExchange ex) throws IOException {
         // (not "try (ex)": that closes the exchange before a catch could send its error)
         try {
+            String origin = ex.getRequestHeaders().getFirst("Origin");
+            if (origin != null && ORIGINS.contains(origin)) {
+                var h = ex.getResponseHeaders();
+                h.set("Access-Control-Allow-Origin", origin);
+                h.set("Vary", "Origin");
+                if ("OPTIONS".equals(ex.getRequestMethod())) {          // the question before a call
+                    h.set("Access-Control-Allow-Methods", "GET, POST");
+                    h.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+                    h.set("Access-Control-Max-Age", "600");
+                    ex.sendResponseHeaders(204, -1);
+                    return;
+                }
+            }
             String raw = ex.getRequestURI().getRawPath();
             String low = raw.toLowerCase();
             if (low.contains("..") || low.contains("%2e") || low.contains("%2f") || low.contains("//")) {

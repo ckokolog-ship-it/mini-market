@@ -4,6 +4,7 @@
 // The pages by role: CASHIER the till, the items and the counts; MANAGER all the rest; as the REST service.
 
 import { barsSvg, itemBars, qrSvg } from './codes.js';
+import { canScan, codeOf, scanOnce } from './scan.js';
 
 const $ = (sel) => document.querySelector(sel);
 const main = () => $('#main');
@@ -23,6 +24,14 @@ const PAGES = [
 
 let session = null;
 try { session = JSON.parse(sessionStorage.getItem('mm') || 'null'); } catch (e) { session = null; }
+
+// the app of Android (Capacitor): the pages from the phone itself (http://localhost), the REST service at
+// the address of the shop, kept on the phone (e.g. http://192.168.1.10:8090). In a browser: this server
+const APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+let server = '';
+if (APP) {
+  try { server = localStorage.getItem('mm.server') || ''; } catch (e) { server = ''; }
+}
 
 // -- a little DOM ------------------------------------------------------------------------------------
 function el(tag, attrs, ...kids) {
@@ -89,6 +98,23 @@ function toast(text, bad) {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => { t.className = ''; }, bad ? 5000 : 2500);
 }
+// a button of the camera next to a field of scans (where the page may use the camera): the code read
+// goes into the field, then done (a form sent, or the Enter of the field)
+function camera(input, done) {
+  if (!canScan()) return null;
+  return el('button', {
+    type: 'button', class: 'cam', 'aria-label': 'Σάρωση με την κάμερα', title: 'Κάμερα',
+    onclick: async () => {
+      try {
+        const text = await scanOnce();
+        if (!text) return;
+        input.value = codeOf(text);
+        if (done) done(); else if (input.form) input.form.requestSubmit();
+        else input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      } catch (e) { toast(e.message, true); }
+    },
+  }, '📷');
+}
 function show(...kids) {
   main().replaceChildren(...kids);
 }
@@ -102,7 +128,12 @@ async function api(path, body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  const r = await fetch('/api/' + path, opts);
+  let r;
+  try {
+    r = await fetch(server + '/api/' + path, opts);
+  } catch (e) {                                    // no answer at all: the network, the address
+    throw new Error(APP ? 'Δεν απαντά το μαγαζί (' + server + '): WiFi, διεύθυνση;' : 'Δεν απαντά ο server');
+  }
   let data = null;
   try { data = await r.json(); } catch (e) { data = { error: 'http_' + r.status, message: r.statusText }; }
   if (r.status === 401 && path !== 'auth/login') {
@@ -122,11 +153,41 @@ function fail(e) {
 }
 
 // -- login -----------------------------------------------------------------------------------------
-function logoutLocal() {
+function logoutLocal(quiet) {
   session = null;
   sessionStorage.removeItem('mm');
-  render();
+  if (!quiet) render();
 }
+// the address of the shop, once (the app): asked, its service checked (/api/health), kept on the phone
+function serverPage() {
+  $('#top').hidden = true;
+  const addr = el('input', { name: 'server', inputmode: 'url', autocomplete: 'off', placeholder: 'π.χ. 192.168.1.10:8090', value: server.replace(/^https?:\/\//, '') });
+  const msg = el('p', { class: 'neg', role: 'alert' });
+  const form = el('form', {
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      msg.textContent = '';
+      let v = addr.value.trim().replace(/\/+$/, '');
+      if (!v) return;
+      if (!/^https?:\/\//i.test(v)) v = 'http://' + v;
+      if (!/:\d+$/.test(v.replace(/^https?:\/\//i, ''))) v += ':8090';
+      try {
+        const r = await fetch(v + '/api/health');
+        if (!r.ok) throw new Error();
+        if (v !== server) logoutLocal(true);
+        server = v;
+        try { localStorage.setItem('mm.server', server); } catch (e) { /* kept for this time only */ }
+        render();
+      } catch (e) {
+        msg.textContent = 'Δεν απαντά: ' + v + '. Είναι το κινητό στο WiFi του μαγαζιού, και τρέχει το mm-api εκεί;';
+      }
+    },
+  }, el('label', {}, 'Η διεύθυνση του μαγαζιού', addr), el('button', { class: 'primary', type: 'submit' }, 'Σύνδεση'), msg);
+  show(el('div', { class: 'panel login' }, el('h1', {}, 'Mini market'),
+    el('p', { class: 'muted' }, 'Η διεύθυνση του υπολογιστή όπου τρέχει το mm-api (run_api.ps1 -Bind 0.0.0.0).'), form));
+  addr.focus();
+}
+
 function loginPage() {
   $('#top').hidden = true;
   const user = el('input', { name: 'username', autocomplete: 'username', required: true, autofocus: true });
@@ -151,7 +212,10 @@ function loginPage() {
     },
   }, el('label', {}, 'Όνομα χρήστη', user), el('label', {}, 'Κωδικός', pw),
   el('button', { class: 'primary', type: 'submit' }, 'Σύνδεση'), msg);
-  show(el('div', { class: 'panel login' }, el('h1', {}, 'Mini market'), form));
+  show(el('div', { class: 'panel login' }, el('h1', {}, 'Mini market'), form,
+    APP ? el('p', { class: 'muted' }, 'Μαγαζί: ' + server + ' · ', el('a', {
+      href: '#', onclick: (ev) => { ev.preventDefault(); serverPage(); },
+    }, 'αλλαγή')) : null));
   user.focus();
 }
 
@@ -180,7 +244,7 @@ async function itemsPage(params) {
     if (/^\d{8,14}$/.test(v)) location.hash = '#/item/' + encodeURIComponent(v);   // a barcode: straight to it
     else go(0);
   });
-  show(el('h1', {}, 'Είδη'), el('div', { class: 'panel row' }, el('label', { style: null }, 'Αναζήτηση', q)), out);
+  show(el('h1', {}, 'Είδη'), el('div', { class: 'panel row' }, el('label', { style: null }, 'Αναζήτηση', q), camera(q)), out);
   q.focus();
   go();
 }
@@ -431,7 +495,7 @@ async function countPage(id) {
       }
       code.focus();
     },
-  }, el('label', {}, 'Σάρωση (Enter)', code), el('label', {}, 'Ποσότητα', n), el('label', {}, 'Τρόπος', mode),
+  }, el('label', {}, 'Σάρωση (Enter)', code), camera(code), el('label', {}, 'Ποσότητα', n), el('label', {}, 'Τρόπος', mode),
   el('button', { class: 'primary', type: 'submit' }, 'Βάλε'));
   const act = (what, ask) => async () => {
     if (!confirm(ask)) return;
@@ -491,7 +555,7 @@ function labelSheets(opt) {
   return sheets;
 }
 async function labelsPage() {
-  const opt = { sheet: '3x8', start: 1, price: true, base: location.origin, ...store('mm.labelOpt', {}) };
+  const opt = { sheet: '3x8', start: 1, price: true, base: server || location.origin, ...store('mm.labelOpt', {}) };
   const q = el('input', { name: 'q', type: 'search', placeholder: 'περιγραφή, κωδικός ή barcode (Enter: σάρωση)', autocomplete: 'off' });
   const found = el('div');
   const chosen = el('div');
@@ -559,7 +623,7 @@ async function labelsPage() {
   const printBtn = el('button', { type: 'button', class: 'primary', onclick: () => window.print() }, 'Εκτύπωση');
   show(el('div', { class: 'no-print' },
     el('h1', {}, 'Ετικέτες'),
-    el('div', { class: 'panel row' }, el('label', { class: 'grow' }, 'Είδος', q)), found,
+    el('div', { class: 'panel row' }, el('label', { class: 'grow' }, 'Είδος', q), camera(q)), found,
     el('h2', {}, 'Για εκτύπωση'), chosen,
     el('div', { class: 'panel row' }, el('label', {}, 'Φύλλο A4', sheet), el('label', {}, 'Από την ετικέτα', start),
       el('label', { class: 'check' }, price, 'Τιμή'), el('label', {}, 'Διεύθυνση για το QR', base),
@@ -670,7 +734,7 @@ async function posPage(params) {
         change.textContent = '';
       } else code.select();
     },
-  }, el('label', {}, 'Σάρωση (Enter)', code), el('label', {}, 'Ποσότητα', n), el('button', { class: 'primary', type: 'submit' }, 'Βάλε'),
+  }, el('label', {}, 'Σάρωση (Enter)', code), camera(code), el('label', {}, 'Ποσότητα', n), el('button', { class: 'primary', type: 'submit' }, 'Βάλε'),
   el('button', { type: 'button', onclick: () => pickOrder() }, 'Παραγγελία'), orderText, total);
   // an order into the receipt, all of it: the open ones of today and before, the ready ones first
   const loadOrder = async (id) => {
@@ -805,12 +869,12 @@ async function orderPage(id) {
         .filter(([, v]) => v !== null && v !== undefined && v !== '')
         .flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
     scan.hidden = !open;
-    lines.replaceChildren(o.lines.length ? table([['Κωδικός'], ['Είδος'], ['Ποσότητα', 'num'], ['Τιμή', 'num'], ['Ποσό', 'num'], ['Μαζεύτηκε'], ['']],
+    lines.replaceChildren(o.lines.length ? table([['Κωδικός', 'hide-phone'], ['Είδος'], ['Ποσότητα', 'num'], ['Τιμή', 'num hide-phone'], ['Ποσό', 'num'], ['Μαζεύτηκε'], ['']],
       o.lines.map((x) => {
         const done = x.picked >= x.qty;
-        return el('tr', { class: done ? 'picked' : null }, el('td', {}, x.code),
+        return el('tr', { class: done ? 'picked' : null }, el('td', { class: 'hide-phone' }, x.code),
           el('td', { class: 'wrap' }, x.name, x.available < 0 ? el('div', { class: 'neg' }, 'δεν φτάνει το απόθεμα') : null),
-          num(x.qty, qty), num(x.price), num(x.total),
+          num(x.qty, qty), num(x.price, money, 'num hide-phone'), num(x.total),
           el('td', {}, el('input', {
             type: 'checkbox', checked: done, disabled: !open, 'aria-label': 'Μαζεύτηκε ' + x.code,
             onchange: (ev) => run('pick', { item_id: x.item_id, qty: ev.target.checked ? x.qty : 0 }),
@@ -850,7 +914,7 @@ async function orderPage(id) {
         else search();
       } catch (e) { fail(e); }
     },
-  }, el('label', {}, 'Σάρωση ή αναζήτηση (Enter)', code), el('label', {}, 'Ποσότητα', n), el('button', { class: 'primary', type: 'submit' }, 'Βάλε'));
+  }, el('label', {}, 'Σάρωση ή αναζήτηση (Enter)', code), camera(code), el('label', {}, 'Ποσότητα', n), el('button', { class: 'primary', type: 'submit' }, 'Βάλε'));
   const search = async () => {
     const v = code.value.trim();
     if (v.length < 2) { found.replaceChildren(); return; }
@@ -876,6 +940,10 @@ function navBar() {
     el('a', { href: h, class: location.hash.startsWith(h) ? 'on' : null }, t)));
 }
 function render() {
+  if (APP && !server) {
+    serverPage();
+    return;
+  }
   if (!session) {
     loginPage();
     return;

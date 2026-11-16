@@ -10,7 +10,7 @@ import java.util.Map;
 
 /**
  * The pages of the shop (step 8): index.html, app.js, codes.js (the barcodes and QR codes of the
- * labels), app.css from the jar (resources/web), at http://host:8090/. They speak to /api/ with the
+ * labels), scan.js and zxing.min.js (the camera as a scanner), app.css from the jar (resources/web), at http://host:8090/. They speak to /api/ with the
  * token of their login. Only these files, only
  * GET; a Content-Security-Policy of this server only (no script, style or connection elsewhere).
  */
@@ -19,6 +19,8 @@ final class Web {
             "index.html", "text/html; charset=utf-8",
             "app.js", "text/javascript; charset=utf-8",
             "codes.js", "text/javascript; charset=utf-8",
+            "scan.js", "text/javascript; charset=utf-8",
+            "zxing.min.js", "text/javascript; charset=utf-8",
             "app.css", "text/css; charset=utf-8");
     private static final String CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
             + "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";

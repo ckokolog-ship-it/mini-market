@@ -16,6 +16,7 @@ import java.util.concurrent.Executors;
  *   MM_TNS_ADMIN     the folder of tnsnames.ora and sqlnet.ora (the domain of the Forms on Windows)
  *   MM_WALLET        the folder of the wallet (MM_TNS_ADMIN\forms_wallet)
  *   MM_DB_USER, MM_DB_PASSWORD   without a wallet (a test database): user and password
+ *   MM_API_CORS      the origins of other pages that may call it (http://localhost: the app of Android)
  * </pre>
  */
 public final class Main {
