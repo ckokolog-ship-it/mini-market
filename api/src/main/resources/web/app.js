@@ -151,10 +151,81 @@ function fail(e) {
 
 // -- login -----------------------------------------------------------------------------------------
 function logoutLocal(quiet) {
+  bellStop();
   session = null;
   sessionStorage.removeItem('mm');
   if (!quiet) render();
 }
+// -- the bell: the orders of the customers (/shop/) not confirmed yet, asked every 30 seconds; their
+// count next to «Παραγγελίες» (and ☰, and the title of the tab); a new one: a sound (Web Audio, no file:
+// the browser allows it after a click on the page, e.g. the login) and a message
+const bell = { timer: null, seen: null, count: 0, audio: null, title: document.title };
+const soundOn = () => { try { return localStorage.getItem('mm.sound') !== 'off'; } catch (e) { return true; } };
+function bellSound() {
+  if (!soundOn() || !bell.audio) return;
+  const t = bell.audio.currentTime;
+  [[880, 0], [1320, 0.18], [880, 0.5], [1320, 0.68]].forEach(([f, at]) => {
+    const o = bell.audio.createOscillator();
+    const g = bell.audio.createGain();
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t + at);
+    g.gain.exponentialRampToValueAtTime(0.3, t + at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.16);
+    o.connect(g).connect(bell.audio.destination);
+    o.start(t + at);
+    o.stop(t + at + 0.17);
+  });
+}
+// the sound needs a gesture of the user first: the first click or key makes it ready
+function bellAudio() {
+  const A = window.AudioContext || window.webkitAudioContext;
+  if (!A) return;
+  if (!bell.audio) bell.audio = new A();
+  if (bell.audio.state === 'suspended') bell.audio.resume().catch(() => {});
+}
+document.addEventListener('pointerdown', bellAudio, { capture: true });
+document.addEventListener('keydown', bellAudio, { capture: true });
+function bellBadge() {
+  const n = bell.count;
+  const a = $('#nav a[href="#/orders"]');
+  if (a) {
+    let b = a.querySelector('.nav-count');
+    if (n && !b) a.append(b = el('span', { class: 'nav-count', 'aria-label': n + ' νέες online' }));
+    if (b) { if (n) b.textContent = String(n); else b.remove(); }
+  }
+  if (n) $('#menu').dataset.n = String(n); else delete $('#menu').dataset.n;
+  document.title = (n ? `(${n}) ` : '') + bell.title;
+}
+async function bellCheck() {
+  if (!session || !can('CASHIER')) return;
+  let r;
+  try { r = await api('orders/new'); } catch (e) { return; }      // the network: next time
+  bell.count = r.count || 0;
+  const last = r.last_id || 0;
+  if (bell.seen === null) bell.seen = last;                        // the first time: no sound
+  else if (last > bell.seen) {
+    bell.seen = last;
+    bellSound();
+    toast('Νέα online παραγγελία: ' + (r.last_name || '') + ' · Παραγγελίες');
+    // the list of the orders open (no new one being written): shown again with it
+    const f = $('main form input[name=name]');
+    if (location.hash.startsWith('#/orders') && !(f && f.value) && !($('main form input[name=phone]') || {}).value) render();
+  }
+  bellBadge();
+}
+// back to the tab (a browser asks seldom in a tab in the background): at once
+window.addEventListener('focus', () => { if (bell.timer) bellCheck(); });
+function bellStart() {
+  if (bell.timer) return;
+  bellCheck();
+  bell.timer = setInterval(bellCheck, 30000);
+}
+function bellStop() {
+  clearInterval(bell.timer);
+  Object.assign(bell, { timer: null, seen: null, count: 0 });
+  bellBadge();
+}
+
 // the address of the shop, once (the app): asked, its service checked (/api/health), kept on the phone
 function serverPage() {
   $('#top').hidden = true;
@@ -927,7 +998,11 @@ async function ordersPage(params) {
   } catch (e) { fail(e); }
   show(el('h1', {}, 'Παραγγελίες'), form,
     el('p', { class: 'row' }, el('a', { href: all ? '#/orders' : '#/orders?all=1' }, all ? 'Μόνο οι ανοιχτές' : 'Και οι παλιές (90 ημερών)'),
-      el('a', { href: '#/poster' }, 'Αφίσα με QR για τις παραγγελίες των πελατών')), out);
+      el('a', { href: '#/poster' }, 'Αφίσα με QR για τις παραγγελίες των πελατών'),
+      el('label', { class: 'check' }, el('input', {
+        type: 'checkbox', name: 'sound', checked: soundOn(),
+        onchange: (ev) => { try { localStorage.setItem('mm.sound', ev.target.checked ? 'on' : 'off'); } catch (e) { /* */ } if (ev.target.checked) { bellAudio(); bellSound(); } },
+      }), '🔔 Ήχος για νέες online παραγγελίες')), out);
   name.focus();
 }
 
@@ -1306,6 +1381,7 @@ function navBar() {
   }).filter(Boolean));
   document.body.classList.remove('menu-open');
   $('#menu').setAttribute('aria-expanded', 'false');
+  bellBadge();
 }
 $('#menu').addEventListener('click', () => {
   const on = document.body.classList.toggle('menu-open');
@@ -1327,6 +1403,7 @@ function render() {
     return;
   }
   navBar();
+  bellStart();
   const [path, query] = (location.hash.slice(1) || '/items').split('?');
   const params = new URLSearchParams(query || '');
   const p = path.split('/').filter(Boolean).map(decodeURIComponent);

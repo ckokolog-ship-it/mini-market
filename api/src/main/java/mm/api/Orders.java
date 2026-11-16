@@ -19,6 +19,7 @@ import java.util.Map;
  * <pre>
  *   GET  /api/orders?status=O|D|C|all&q=          the orders (the open ones first by their day)
  *   GET  /api/orders/{id}                         one with its lines
+ *   GET  /api/orders/new                          the orders of the customers not confirmed yet: count, last_id, last_name
  *   POST /api/orders {name, phone, customer_id, pickup_date, notes}   a new one (by whom: the login)
  *   POST /api/orders/{id}/lines {code, qty, mode ADD|SET}   an item in (ADD: one more of it), 0 out
  *   POST /api/orders/{id}/pick {item_id, qty}     what of a line was picked
@@ -51,6 +52,12 @@ final class Orders {
                       and (r.status = 'O' or r.created_at > sysdate - 90)
                     order by case r.status when 'O' then 0 else 1 end, r.pickup_date, r.id
                     fetch first 200 rows only""", st, st, s.isEmpty() ? null : s, s, s, s));
+        }
+        if (p.length == 2 && "new".equals(p[1])) {
+            // the orders of the customers (/shop/) waiting for a call: for the bell of the pages
+            return Db.rows(c, """
+                    select count(*) count, max(id) last_id, max(name) keep (dense_rank last order by id) last_name
+                    from mm_reservation where source = 'O' and status = 'O' and confirmed_at is null""").get(0);
         }
         if (p.length == 2) {
             return order(c, Http.id(p[1]));

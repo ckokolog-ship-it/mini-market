@@ -504,6 +504,9 @@ def test_the_shop_of_the_customers(api, env, users):
     o = post(api, '/api/shop/orders', order, token=None)
     assert len(o['token']) == 48 and o['state'] == 'sent' and o['pickup_date'] == datetime.date.today().isoformat()
     assert sorted((y['code'], y['qty']) for y in o['lines']) == [(a, 1), (b, 3)] and o['total'] == 19.18
+    bell = get(api, '/api/orders/new', token='CASHIER')
+    assert bell['count'] >= 1 and bell['last_id'] == o['id'] and bell['last_name'] == 'Test πελάτης'
+    assert get(api, '/api/orders/new', 401, token=None)['error'] == 'auth_required'
     staff = get(api, '/api/orders/%d' % o['id'], token='CASHIER')
     assert (staff['source'], staff['confirmed_at'], staff['created_by']) == ('O', None, 'online')
     # wrong: no lines, a bad phone, an item not there, too many; a token wrong
@@ -518,8 +521,10 @@ def test_the_shop_of_the_customers(api, env, users):
     assert post(api, '/api/shop/orders', order, token=None, status=400)['error'] == 'MM-188'         # 3 open a phone
     assert post(api, '/api/shop/orders/%s/cancel' % o3['token'], token=None)['state'] == 'cancelled'
     # the shop confirms (a call): the customer sees it, cannot cancel it any more; ready
+    n = get(api, '/api/orders/new', token='CASHIER')['count']
     s = post(api, '/api/orders/%d/confirm' % o['id'], token='CASHIER')
     assert s['confirmed_at'] is not None
+    assert get(api, '/api/orders/new', token='CASHIER')['count'] == n - 1                # confirmed: no bell
     assert get(api, '/api/shop/orders/%s' % o['token'], token=None)['state'] == 'confirmed'
     assert post(api, '/api/shop/orders/%s/cancel' % o['token'], token=None, status=400)['error'] == 'MM-188'
     post(api, '/api/orders/%d/ready' % o['id'], {'ready': True}, token='CASHIER')
