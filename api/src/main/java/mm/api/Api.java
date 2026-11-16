@@ -37,6 +37,7 @@ import java.util.Optional;
  *   POST /api/counts/{id}/post   .../cancel     the count to the stock, or dropped (MANAGER)
  *   /api/pos/...                               the till: see Pos
  *   /api/orders/...                            the orders: see Orders
+ *   /api/shop/...                              the page of the customers, no login: see Shop
  *   /api/docs/..., /api/doc-types, /api/payments/...   the office: invoices, notes, receipts (MANAGER): see Docs
  * </pre>
  */
@@ -120,6 +121,9 @@ final class Api {
                         body = login(c, in, ex);
                     } else if ("GET".equals(method) && p.length == 1 && "health".equals(p[0])) {
                         body = route(c, null, p, q);
+                    } else if ("shop".equals(p[0])) {         // the page of the customers: no login
+                        body = "POST".equals(method) ? Shop.post(c, p, in, ex.getRemoteAddress().getAddress().getHostAddress())
+                                : Shop.get(c, p, q);
                     } else {
                         User u = user(c, ex);
                         body = "POST".equals(method) ? post(c, u, p, in) : route(c, u, p, q);

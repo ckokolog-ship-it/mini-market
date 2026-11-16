@@ -112,6 +112,12 @@ create or replace package mm_core as
   -- quantity), the order ready or not; for a customer on credit, a delivery note instead of a receipt
   procedure pick(p_res_id number, p_item_id number, p_qty number);
   procedure set_ready(p_res_id number, p_ready varchar2 default 'Y');
+  -- an order of a customer from the page of the shop: for today, its token (the page of its status), at
+  -- most 3 open ones a phone (MM-188); confirmed by the shop (a call), or cancelled by the customer
+  -- while not confirmed
+  function online_order(p_name varchar2, p_phone varchar2, p_notes varchar2, p_token varchar2) return number;
+  procedure confirm_order(p_res_id number);
+  procedure cancel_online(p_token varchar2);
   function deliver_note(p_res_id number) return number;                -- a draft DAP of its lines
   procedure reserve(p_res_id number, p_item_id number, p_qty number, p_price number default null);  -- 0: out
   procedure take_deposit(p_res_id number, p_register_id number, p_amount number,
@@ -1500,6 +1506,42 @@ create or replace package body mm_core as
       fail(86, 'Μαζεύτηκαν από 0 έως ' || q);
     end if;
     update mm_reservation_line set picked = p_qty where reservation_id = p_res_id and item_id = p_item_id;
+  end;
+
+  function online_order(p_name varchar2, p_phone varchar2, p_notes varchar2, p_token varchar2) return number is
+    n number;
+    v number;
+  begin
+    if p_token is null or length(p_token) < 32 then
+      fail(88, 'Λάθος token παραγγελίας');
+    end if;
+    select count(*) into n from mm_reservation where source = 'O' and status = 'O' and phone = p_phone;
+    if n >= 3 then
+      fail(88, 'Υπάρχουν ήδη 3 ανοιχτές παραγγελίες με αυτό το τηλέφωνο');
+    end if;
+    v := new_reservation(p_name, p_phone, trunc(sysdate), null, substr(p_notes, 1, 400), 'online');
+    update mm_reservation set source = 'O', public_token = p_token where id = v;
+    return v;
+  end;
+
+  procedure confirm_order(p_res_id number) is
+    r mm_reservation%rowtype := open_res(p_res_id);
+  begin
+    update mm_reservation set confirmed_at = nvl(confirmed_at, sysdate) where id = p_res_id;
+  end;
+
+  procedure cancel_online(p_token varchar2) is
+    r mm_reservation%rowtype;
+  begin
+    begin
+      select * into r from mm_reservation where public_token = p_token and source = 'O';
+    exception
+      when no_data_found then fail(50, 'Δεν υπάρχει αυτή η παραγγελία');
+    end;
+    if r.confirmed_at is not null then
+      fail(88, 'Η παραγγελία επιβεβαιώθηκε από το μαγαζί: για ακύρωση, τηλεφώνησε στο μαγαζί');
+    end if;
+    cancel_reservation(r.id, null, 'N');               -- (no deposit: online)
   end;
 
   procedure set_ready(p_res_id number, p_ready varchar2 default 'Y') is

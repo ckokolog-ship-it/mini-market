@@ -368,6 +368,13 @@ begin
   -- line was picked
   add_col('MM_RESERVATION', 'CREATED_BY', 'created_by varchar2(30)');
   add_col('MM_RESERVATION', 'READY_AT', 'ready_at date');
+  -- an order of a customer from the page of the shop (/shop/, the WiFi of the shop): SOURCE 'O' (online;
+  -- 'S' the staff), the token of its page of status (not its number: not to be guessed), when the shop
+  -- confirmed it (a call to the phone given)
+  add_col('MM_RESERVATION', 'SOURCE', 'source varchar2(1) default ''S'' not null '
+          || 'constraint mm_reservation_source_ck check (source in (''S'', ''O''))');
+  add_col('MM_RESERVATION', 'PUBLIC_TOKEN', 'public_token varchar2(64) constraint mm_reservation_token_uk unique');
+  add_col('MM_RESERVATION', 'CONFIRMED_AT', 'confirmed_at date');
   add_col('MM_RESERVATION_LINE', 'PICKED', 'picked number(12,3) default 0 not null '
           || 'constraint mm_res_line_picked_ck check (picked >= 0)');
   for c in (select data_length n from user_tab_cols where table_name = 'MM_CASH_MOVE' and column_name = 'KIND') loop

@@ -140,3 +140,35 @@ tr.cancelled td { color: var(--muted); text-decoration: line-through; }
 tr.cancelled td:last-child { text-decoration: none; }
 details { margin-bottom: 14px; }
 summary { cursor: pointer; padding: 6px 0; }
+
+/* the page of the customers (/shop/): big buttons for a phone, a grid of the items */
+body.shop main { max-width: 900px; }
+body.shop header { position: sticky; }
+#cartlink { padding: 7px 12px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); text-decoration: none; font-weight: 600; }
+#cartn { display: inline-block; min-width: 1.4em; text-align: center; }
+.shop-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.shop-item { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.shop-item.out { opacity: .55; }
+.shop-name { font-weight: 600; }
+.shop-price { font-size: 18px; font-weight: 700; margin-top: auto; }
+.shop-item button { padding: 9px 12px; }
+.qty { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.qty button { min-width: 44px; font-size: 18px; }
+.cart-bar { position: sticky; bottom: 10px; display: block; text-align: center; padding: 12px; border-radius: 10px;
+            background: var(--accent); color: var(--accent-ink); font-weight: 700; text-decoration: none; }
+.shop-form { display: grid; gap: 10px; max-width: 420px; }
+.shop-form button { padding: 11px; }
+.state-sent { border-color: var(--accent); }
+.state-ready, .state-delivered { border-color: var(--good); }
+.state-cancelled { border-color: var(--bad); }
+
+/* the orders of the customers: a badge; the poster of the door (A4) */
+.badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 10px; font-size: 12px;
+         background: var(--accent); color: var(--accent-ink); }
+.poster { width: 190mm; max-width: 100%; box-sizing: border-box; margin: 0 auto; padding: 15mm; background: #fff; color: #000; text-align: center;
+          border: 1px solid var(--line); }
+.poster .qr { width: 120mm; height: auto; max-width: 100%; aspect-ratio: 1; display: block; margin: 8mm auto; }
+.poster-title { font-size: 30pt; font-weight: 700; }
+.poster-text { font-size: 16pt; margin: 4mm 0; }
+.poster-url { font: 14pt monospace; }
+@media print { .poster { border: 0; } }
