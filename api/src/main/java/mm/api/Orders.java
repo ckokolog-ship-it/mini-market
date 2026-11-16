@@ -25,6 +25,7 @@ import java.util.Map;
  *   POST /api/orders/{id}/ready {ready}           ready (all picked) or not
  *   POST /api/orders/{id}/cancel {register}       cancelled (a deposit back through that register)
  *   POST /api/orders/{id}/note                    a delivery note, posted (MANAGER)
+ *   POST /api/orders/{id}/confirm                 an order of a customer (the page /shop/) confirmed
  * </pre>
  */
 final class Orders {
@@ -37,7 +38,8 @@ final class Orders {
             String s = q.getOrDefault("q", "").trim();
             return Map.of("rows", Db.rows(c, """
                     select r.id, r.name, r.phone, r.customer_id, cu.name customer, r.pickup_date, r.status, r.deposit,
-                           r.created_by, r.created_at, r.ready_at, r.doc_id, d.doc_type || ' ' || d.doc_no doc_text,
+                           r.created_by, r.created_at, r.ready_at, r.source, r.confirmed_at, r.doc_id,
+                           case when d.id is not null then d.doc_type || ' ' || d.doc_no end doc_text,
                            (select count(*) from mm_reservation_line l where l.reservation_id = r.id) lines,
                            (select nvl(sum(l.qty * l.price), 0) from mm_reservation_line l where l.reservation_id = r.id) total
                     from mm_reservation r
@@ -117,6 +119,13 @@ final class Orders {
                     }
                     return order(c, id);
                 }
+                case "confirm" -> {
+                    try (CallableStatement cs = c.prepareCall("begin mm_core.confirm_order(?); end;")) {
+                        cs.setLong(1, id);
+                        cs.execute();
+                    }
+                    return order(c, id);
+                }
                 case "ready" -> {
                     try (CallableStatement cs = c.prepareCall("begin mm_core.set_ready(?, ?); end;")) {
                         cs.setLong(1, id);
@@ -177,7 +186,8 @@ final class Orders {
     static Map<String, Object> order(Connection c, long id) throws SQLException {
         List<Map<String, Object>> r = Db.rows(c, """
                 select r.id, r.name, r.phone, r.customer_id, cu.name customer, r.pickup_date, r.status, r.deposit,
-                       r.notes, r.created_by, r.created_at, r.ready_at, r.doc_id, d.doc_type || ' ' || d.doc_no doc_text,
+                       r.notes, r.created_by, r.created_at, r.ready_at, r.source, r.confirmed_at, r.doc_id,
+                       case when d.id is not null then d.doc_type || ' ' || d.doc_no end doc_text,
                        d.status doc_status
                 from mm_reservation r
                 left join mm_customer cu on cu.id = r.customer_id

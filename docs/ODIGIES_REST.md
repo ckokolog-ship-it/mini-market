@@ -153,7 +153,19 @@ commit;
 | `POST /api/orders/{id}/pick` `{"item_id", "qty"}`, `.../ready` `{"ready"}` | τι μαζεύτηκε από μια γραμμή· «έτοιμη» (όλα μαζεύτηκαν) ή όχι |
 | `POST /api/orders/{id}/cancel` `{"register"}` | ακύρωση· αν έχει προκαταβολή, επιστρέφεται από αυτό το ταμείο |
 | `POST /api/orders/{id}/note` | δελτίο αποστολής (με πίστωση) για παραγγελία πελάτη χονδρικής, καταχωρημένο (MANAGER) |
+| `POST /api/orders/{id}/confirm` | online παραγγελία πελάτη (`source` = `O`): επιβεβαιώθηκε με τηλέφωνο (`confirmed_at`) |
 | `POST /api/pos/{ταμείο}/pay` `{"payment": "CASH" ή "CARD", "given"}` | καταχώριση: ο αριθμός, το σύνολο και τα ρέστα στο `paid`. Αν τα χρήματα που δόθηκαν δεν φτάνουν, απαντά 400 και δεν καταχωρίζεται τίποτα |
+
+**Η σελίδα των πελατών, χωρίς login** (`/shop/`, [ODIGIES_WEB.md](ODIGIES_WEB.md)):
+
+| Endpoint | Τι |
+|---|---|
+| `GET /api/shop/info` | το όνομα του μαγαζιού (η πρώτη γραμμή της κεφαλίδας των αποδείξεων) |
+| `GET /api/shop/categories` | οι κατηγορίες που έχουν είδη |
+| `GET /api/shop/items?q=&category=&limit=&offset=` | `code`, `name`, `category`, `unit`, `price`, `available` (`Y`/`N`): μόνο ενεργά είδη με τιμή, χωρίς serial· όχι κόστος, όχι απόθεμα |
+| `POST /api/shop/orders` `{"name", "phone", "notes", "lines": [{"code", "qty"}]}` | νέα παραγγελία για σήμερα: απαντά με τον κωδικό της (`token`, 48 χαρακτήρες) και την κατάστασή της. Έως 40 γραμμές, ποσότητα έως 99, 3 ανοιχτές ανά τηλέφωνο (`MM-188`), `MM_SHOP_ORDERS` αποστολές ανά διεύθυνση στα 10 λεπτά (429 `too_many`) |
+| `GET /api/shop/orders/{token}` | `state`: `sent`, `confirmed`, `ready`, `delivered`, `cancelled`· οι γραμμές και το σύνολο |
+| `POST /api/shop/orders/{token}/cancel` | ακύρωση από τον πελάτη, μόνο πριν από την επιβεβαίωση (`MM-188`) |
 
 Παραδείγματα, από PowerShell:
 ```powershell
@@ -183,6 +195,7 @@ http://127.0.0.1:8090/api/reports/vat?from=2026-10-01&to=2026-10-31
 | 404 | δεν υπάρχει το είδος, το id ή το endpoint |
 | 405 | οτιδήποτε άλλο εκτός από `GET` και `POST` |
 | 413 | σώμα πάνω από 64 KB |
+| 429 | πολλές online παραγγελίες από την ίδια διεύθυνση (`too_many`) |
 | 423 | ο λογαριασμός κλειδώθηκε (`MM-178`) |
 | 500 | άλλο λάθος της βάσης· τη λεπτομέρεια τη γράφει μόνο η κονσόλα της υπηρεσίας |
 
@@ -196,6 +209,7 @@ http://127.0.0.1:8090/api/reports/vat?from=2026-10-01&to=2026-10-31
 | `MM_TNS_ADMIN` | — | ο φάκελος του `tnsnames.ora` (το `run_api.ps1` βάζει τον φάκελο του domain) |
 | `MM_WALLET` | `MM_TNS_ADMIN\forms_wallet` | ο φάκελος του wallet |
 | `MM_DB_USER`, `MM_DB_PASSWORD` | — | χωρίς wallet, μόνο για βάση δοκιμών (τα tests) |
+| `MM_SHOP_ORDERS` | `10` | πόσες online παραγγελίες δέχεται από μία διεύθυνση στα 10 λεπτά |
 | `MM_API_CORS` | `http://localhost` | τα origins άλλων σελίδων που μπορούν να το καλούν (η εφαρμογή Android), με κόμματα· `none`: κανένα |
 
 ## Tests

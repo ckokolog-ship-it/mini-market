@@ -811,6 +811,27 @@ async function posPage(params) {
   if (params && params.get('order') && st && st.z) loadOrder(Number(params.get('order')));
 }
 
+// -- the poster of the door: a QR of the page of the orders of the customers (/shop/), A4, printed
+function posterPage() {
+  const base = (server || location.origin).replace(/\/+$/, '');
+  const url = base + '/shop/';
+  const addr = el('input', { name: 'base', value: base, class: 'w-wide' });
+  const box = el('div', { class: 'poster' });
+  const draw = () => {
+    const u = addr.value.trim().replace(/\/+$/, '') + '/shop/';
+    box.replaceChildren(el('div', { class: 'poster-title' }, 'Παράγγειλε από το κινητό σου'),
+      el('div', { class: 'poster-text' }, 'Σύνδεσε το κινητό στο WiFi του μαγαζιού και σκάναρε:'),
+      qrSvg(u), el('div', { class: 'poster-url' }, u),
+      el('div', { class: 'poster-text' }, 'Σε παίρνουμε τηλέφωνο για επιβεβαίωση και την ετοιμάζουμε για σήμερα.'));
+  };
+  addr.addEventListener('change', draw);
+  show(el('div', { class: 'no-print' }, el('h1', {}, 'Αφίσα για τις παραγγελίες'),
+    el('div', { class: 'panel row' }, el('label', {}, 'Η διεύθυνση που βλέπουν τα κινητά', addr),
+      el('button', { type: 'button', class: 'primary', onclick: () => window.print() }, 'Εκτύπωση'),
+      el('a', { href: url, target: '_blank', rel: 'noopener' }, 'Άνοιγμα της σελίδας'))), box);
+  draw();
+}
+
 // -- the receipt on a printer of receipts (80 mm, its driver in Windows: the paper 80 mm wide): a page of
 // its own size (a named @page: the A4 of the labels stays), what the till prints
 const nfQty = new Intl.NumberFormat('el-GR', { maximumFractionDigits: 3 });
@@ -899,12 +920,14 @@ async function ordersPage(params) {
       r.rows.map((x) => el('tr', { class: 'click', onclick: () => { location.hash = '#/order/' + x.id; } },
         el('td', {}, x.id), el('td', { class: 'wrap' }, x.name + (x.customer ? ' · ' + x.customer : '')), el('td', {}, day(x.pickup_date)),
         num(x.lines, qty), num(x.total),
-        el('td', {}, x.status === 'O' ? (x.doc_id ? 'στο ταμείο' : x.ready_at ? 'έτοιμη' : 'μαζεύεται') : ORDER_ST[x.status]),
+        el('td', {}, x.status === 'O' ? (x.doc_id ? 'στο ταμείο' : x.ready_at ? 'έτοιμη' : x.source === 'O' && !x.confirmed_at ? 'online · προς επιβεβαίωση' : 'μαζεύεται') : ORDER_ST[x.status],
+          x.source === 'O' ? el('span', { class: 'badge' }, 'online') : null),
         el('td', { class: 'hide-phone' }, x.created_by || ''))))
       : el('p', { class: 'muted' }, 'Καμία παραγγελία.'));
   } catch (e) { fail(e); }
   show(el('h1', {}, 'Παραγγελίες'), form,
-    el('p', {}, el('a', { href: all ? '#/orders' : '#/orders?all=1' }, all ? 'Μόνο οι ανοιχτές' : 'Και οι παλιές (90 ημερών)')), out);
+    el('p', { class: 'row' }, el('a', { href: all ? '#/orders' : '#/orders?all=1' }, all ? 'Μόνο οι ανοιχτές' : 'Και οι παλιές (90 ημερών)'),
+      el('a', { href: '#/poster' }, 'Αφίσα με QR για τις παραγγελίες των πελατών')), out);
   name.focus();
 }
 
@@ -934,7 +957,9 @@ async function orderPage(id) {
     const open = o.status === 'O' && !o.doc_id;
     title.textContent = `Παραγγελία ${o.id}: ${o.name}`;
     head.replaceChildren(el('dl', { class: 'kv' },
-      [['Τηλέφωνο', o.phone], ['Για', day(o.pickup_date)], ['Πελάτης', o.customer], ['Σημείωση', o.notes],
+      [['Τηλέφωνο', el('a', { href: 'tel:' + o.phone }, o.phone)],
+        ['Από', o.source === 'O' ? (o.confirmed_at ? 'online · επιβεβαιώθηκε ' + day(o.confirmed_at) : 'online · προς επιβεβαίωση: τηλεφώνησε στον πελάτη') : null],
+        ['Για', day(o.pickup_date)], ['Πελάτης', o.customer], ['Σημείωση', o.notes],
         ['Κατάσταση', o.status === 'O' ? (o.doc_id ? `στο ταμείο (${o.doc_text || 'πρόχειρη απόδειξη'})` : o.ready_at ? 'έτοιμη' : 'μαζεύεται') : ORDER_ST[o.status] + (o.doc_text ? ' · ' + o.doc_text : '')],
         ['Προκαταβολή', o.deposit > 0 ? money(o.deposit) : null], ['Έγραψε', o.created_by], ['Σύνολο', money(o.total)]]
         .filter(([, v]) => v !== null && v !== undefined && v !== '')
@@ -957,6 +982,7 @@ async function orderPage(id) {
       })) : el('p', { class: 'muted' }, 'Κανένα είδος ακόμα: σάρωσε ή ψάξε.'));
     const btn = (text, fn, cls) => el('button', { type: 'button', class: cls || null, onclick: fn }, text);
     actions.replaceChildren(...(open ? [
+      o.source === 'O' && !o.confirmed_at ? btn('Επιβεβαιώθηκε (μίλησα με τον πελάτη)', () => run('confirm', {}), 'primary') : null,
       o.ready_at ? btn('Όχι έτοιμη', () => run('ready', { ready: false }))
         : btn('Έτοιμη (όλα μαζεύτηκαν)', () => run('ready', { ready: true }), 'primary'),
       btn('Στο ταμείο', () => { location.hash = '#/pos?order=' + o.id; }),
@@ -1309,6 +1335,7 @@ function render() {
   switch (p[0]) {
     case 'pos': return posPage(params);
     case 'orders': return ordersPage(params);
+    case 'poster': return posterPage();
     case 'docs': return need('MANAGER', () => docsPage(params));
     case 'doc': return need('MANAGER', () => docPage(p[1]));
     case 'payments': return need('MANAGER', () => paymentsPage());

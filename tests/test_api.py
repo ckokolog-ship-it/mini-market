@@ -484,6 +484,53 @@ def test_the_office(api, env, users):
     assert post(api, '/api/payments', {'kind': 'X', 'partner_id': c, 'amount': 1}, status=400)['error'] == 'bad_kind'
 
 
+def test_the_shop_of_the_customers(api, env, users):
+    """the page of the customers, no login: the items (no cost, no stock, no cards), an order of a name and
+    a phone (its token, not its number), at most 3 open a phone, its status, the confirm of the shop, a
+    cancel only before it"""
+    db, ids = env
+    a, b = 'TST%sA' % ids['tag'], 'TST%sB' % ids['tag']
+    info = get(api, '/api/shop/info', token=None)
+    assert info['name']
+    cats = get(api, '/api/shop/categories', token=None)['rows']
+    assert cats and all(c['items'] > 0 for c in cats)
+    r = get(api, '/api/shop/items?q=%s' % b, token=None)
+    assert [x['code'] for x in r['rows']] == [b]
+    x = r['rows'][0]
+    assert set(x) == {'code', 'name', 'category', 'unit', 'price', 'available'} and x['available'] in ('Y', 'N')
+    assert get(api, '/api/shop/items?q=CRD05', token=None)['total'] == 0                  # no card with a PIN
+    phone = '69%08d' % (int(ids['tag'], 16) % 10 ** 8)
+    order = {'name': 'Test πελάτης', 'phone': phone, 'notes': 'στις 6', 'lines': [{'code': a, 'qty': 1}, {'code': b, 'qty': 2}, {'code': b, 'qty': 1}]}
+    o = post(api, '/api/shop/orders', order, token=None)
+    assert len(o['token']) == 48 and o['state'] == 'sent' and o['pickup_date'] == datetime.date.today().isoformat()
+    assert sorted((y['code'], y['qty']) for y in o['lines']) == [(a, 1), (b, 3)] and o['total'] == 19.18
+    staff = get(api, '/api/orders/%d' % o['id'], token='CASHIER')
+    assert (staff['source'], staff['confirmed_at'], staff['created_by']) == ('O', None, 'online')
+    # wrong: no lines, a bad phone, an item not there, too many; a token wrong
+    assert post(api, '/api/shop/orders', {**order, 'lines': []}, token=None, status=400)['error'] == 'bad_lines'
+    assert post(api, '/api/shop/orders', {**order, 'phone': 'abc'}, token=None, status=400)['error'] == 'MM-145'
+    assert post(api, '/api/shop/orders', {**order, 'lines': [{'code': 'CRD05', 'qty': 1}]}, token=None, status=404)['error'] == 'not_found'
+    assert post(api, '/api/shop/orders', {**order, 'lines': [{'code': a, 'qty': 500}]}, token=None, status=400)['error'] == 'bad_number'
+    assert get(api, '/api/shop/orders/%s' % ('0' * 48), 404, token=None)['error'] == 'not_found'
+    assert get(api, '/api/shop/orders/%d' % o['id'], 404, token=None)['error'] == 'not_found'        # not by its number
+    o2 = post(api, '/api/shop/orders', order, token=None)
+    o3 = post(api, '/api/shop/orders', order, token=None)
+    assert post(api, '/api/shop/orders', order, token=None, status=400)['error'] == 'MM-188'         # 3 open a phone
+    assert post(api, '/api/shop/orders/%s/cancel' % o3['token'], token=None)['state'] == 'cancelled'
+    # the shop confirms (a call): the customer sees it, cannot cancel it any more; ready
+    s = post(api, '/api/orders/%d/confirm' % o['id'], token='CASHIER')
+    assert s['confirmed_at'] is not None
+    assert get(api, '/api/shop/orders/%s' % o['token'], token=None)['state'] == 'confirmed'
+    assert post(api, '/api/shop/orders/%s/cancel' % o['token'], token=None, status=400)['error'] == 'MM-188'
+    post(api, '/api/orders/%d/ready' % o['id'], {'ready': True}, token='CASHIER')
+    assert get(api, '/api/shop/orders/%s' % o['token'], token=None)['state'] == 'ready'
+    post(api, '/api/orders/%d/cancel' % o2['id'], token='CASHIER')
+    assert get(api, '/api/shop/orders/%s' % o2['token'], token=None)['state'] == 'cancelled'
+    # the page itself, no login
+    r = NO_PROXY.open(api + '/shop/', timeout=30)
+    assert r.status == 200 and b'shop.js' in r.read() and 'script-src' in r.headers['Content-Security-Policy']
+
+
 def test_the_receipt_to_print(api, env, users):
     """a receipt as printed: the header and the footer of the shop (a manager sets them), its lines, its
     VAT, the PIN of its card sold today (the print in MM_PIN_LOG, by the user of the login)"""

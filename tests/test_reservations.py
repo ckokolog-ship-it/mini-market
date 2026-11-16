@@ -207,3 +207,37 @@ def test_an_order_picked_ready_then_a_delivery_note(z):
     db.proc('reserve', y, ids['b'], 1)
     db.proc('take_deposit', y, ids['reg'], 1)
     db.fails(187, 'deliver_note', y, rtype=int)
+
+
+def test_an_order_of_a_customer_online(z):
+    """an order of the page /shop/: source O, its token, by 'online', for today; at most 3 open of a phone;
+    the shop confirms it (once: its time stays); the customer cancels it only before that"""
+    db, ids, _ = z
+    phone = '6977%06d' % (int(ids['tag'], 16) % 10 ** 6)
+    tok = lambda k: ('%048x' % (int(ids['tag'], 16) * 10 + k))[-48:]                      # noqa: E731
+    db.fails(188, 'online_order', 'Test online', phone, None, 'short', rtype=int)       # a token too short
+    r = db.fn('online_order', int, 'Test online', phone, 'στις 6', tok(1))
+    db.proc('reserve', r, ids['b'], 2)
+    db.commit()
+    assert db.one('select source, public_token, created_by, pickup_date, confirmed_at from mm_reservation '
+                  'where id = :r', r=r) == ('O', tok(1), 'online', datetime.datetime.combine(datetime.date.today(),
+                                                                                                datetime.time()), None)
+    r2 = db.fn('online_order', int, 'Test online', phone, None, tok(2))
+    r3 = db.fn('online_order', int, 'Test online', phone, None, tok(3))
+    db.commit()
+    db.fails(188, 'online_order', 'Test online', phone, None, tok(4), rtype=int)        # 3 open already
+    db.proc('cancel_online', tok(3))
+    db.commit()
+    assert db.one('select status from mm_reservation where id = :r', r=r3)[0] == 'C'
+    r4 = db.fn('online_order', int, 'Test online', phone, None, tok(4))                 # room again
+    db.proc('confirm_order', r)
+    db.commit()
+    t = db.one('select confirmed_at from mm_reservation where id = :r', r=r)[0]
+    assert t is not None
+    db.proc('confirm_order', r)
+    assert db.one('select confirmed_at from mm_reservation where id = :r', r=r)[0] == t
+    db.fails(188, 'cancel_online', tok(1))                                               # confirmed: a call
+    db.fails(150, 'cancel_online', '0' * 48)
+    for x in (r, r2, r4):
+        db.proc('cancel_reservation', x, None)
+    db.commit()

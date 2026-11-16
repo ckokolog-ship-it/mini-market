@@ -10,7 +10,8 @@ import java.util.Map;
 
 /**
  * The pages of the shop (step 8): index.html, app.js, codes.js (the barcodes and QR codes of the
- * labels), scan.js and zxing.min.js (the camera as a scanner), app.css from the jar (resources/web), at http://host:8090/. They speak to /api/ with the
+ * labels), scan.js and zxing.min.js (the camera as a scanner), app.css from the jar; and /shop/ (shop.html,
+ * shop.js: the page of the customers, no login) (resources/web), at http://host:8090/. They speak to /api/ with the
  * token of their login. Only these files, only
  * GET; a Content-Security-Policy of this server only (no script, style or connection elsewhere).
  */
@@ -20,6 +21,8 @@ final class Web {
             "app.js", "text/javascript; charset=utf-8",
             "codes.js", "text/javascript; charset=utf-8",
             "scan.js", "text/javascript; charset=utf-8",
+            "shop.html", "text/html; charset=utf-8",
+            "shop.js", "text/javascript; charset=utf-8",
             "zxing.min.js", "text/javascript; charset=utf-8",
             "app.css", "text/css; charset=utf-8");
     private static final String CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
@@ -40,14 +43,17 @@ final class Web {
                 ex.sendResponseHeaders(405, -1);
                 return;
             }
-            if ("/".equals(path) || "/web".equals(path)) {
-                ex.getResponseHeaders().set("Location", "/web/");
+            if ("/".equals(path) || "/web".equals(path) || "/shop".equals(path)) {
+                ex.getResponseHeaders().set("Location", "/shop".equals(path) ? "/shop/" : "/web/");
                 ex.sendResponseHeaders(302, -1);
                 return;
             }
             String name = path.startsWith("/web/") ? path.substring("/web/".length()) : null;
             if ("".equals(name)) {
                 name = "index.html";
+            }
+            if ("/shop/".equals(path)) {                  // the page of the customers (no login)
+                name = "shop.html";
             }
             String type = name == null ? null : FILES.get(name);
             InputStream in = type == null ? null : Web.class.getResourceAsStream("/web/" + name);
