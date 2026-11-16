@@ -1002,6 +1002,8 @@ async function printReceipt(reg, id, extra = {}) {
 // -- the orders: written on a phone (a call, the shop), picked from the shelves, ready; at the till all
 // of it at once (Ταμείο, «Παραγγελία»); a customer on credit: a delivery note (a manager) ----------
 const ORDER_ST = { O: 'ανοιχτή', D: 'παραδόθηκε', C: 'ακυρώθηκε' };
+// myDATA of a document (MM_DOC.MYDATA_STATE)
+const MYDATA_ST = { '': 'δεν διαβιβάστηκε', Q: 'περιμένει διαβίβαση', S: 'διαβιβάστηκε', E: 'απέτυχε', X: 'ακυρώθηκε στο myDATA' };
 async function ordersPage(params) {
   const all = params.get('all') === '1';
   const name = el('input', { name: 'name', required: true, autocomplete: 'off' });
@@ -1273,7 +1275,10 @@ async function docPage(id) {
       [d.side === 'S' ? 'Πελάτης' : 'Προμηθευτής', d.partner], ['Πληρωμή', { CREDIT: 'πίστωση', CASH: 'μετρητά', CARD: 'κάρτα' }[d.payment]],
       ['Από', d.ref_text], ['Στο τιμολόγιο', d.invoice_text],
       ['Δελτία του', d.notes_in.length ? d.notes_in.map(docText).join(', ') : null],
-      ['Καθαρό', money(d.net)], ['ΦΠΑ', money(d.vat)], ['Σύνολο', money(d.total)]]
+      ['Καθαρό', money(d.net)], ['ΦΠΑ', money(d.vat)], ['Σύνολο', money(d.total)],
+      ['myDATA', d.mydata_type && d.status !== 'D' ? MYDATA_ST[d.mydata_state || ''] + (d.mydata_mark ? ' · MARK ' + d.mydata_mark : '')
+        + (d.mydata_cancel_mark ? ' · ακύρωση ' + d.mydata_cancel_mark : '') : null],
+      ['Λάθος myDATA', d.mydata_state === 'E' || d.mydata_state === 'Q' ? d.mydata_error : null]]
       .filter(([, v]) => v !== null && v !== undefined && v !== '').flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
     addForm.hidden = !draft;
     lines.replaceChildren(d.lines.length ? table([['#'], ['Είδος'], ['Ποσότητα', 'num'], ['Τιμή', 'num'], ['Έκπτ. %', 'num hide-phone'], ['Σύνολο', 'num'], ['']],
@@ -1303,7 +1308,17 @@ async function docPage(id) {
         ? btn('Επιστροφή', ask('Πρόχειρο δελτίο επιστροφής με τις γραμμές του;', async () => {
           try { location.hash = '#/doc/' + (await api(`docs/${id}/credit`, {})).id; toast('Κράτησε ό,τι γύρισε και καταχώρισέ το· μετά «Τιμολόγιο από αυτό» για το πιστωτικό'); } catch (e) { fail(e); }
         })) : null,
-      d.status === 'P' ? btn('Ακύρωση', ask('Ακύρωση του παραστατικού;', () => run('cancel', {})), 'danger') : null,
+      // myDATA (an invoice or a credit note of a sale): sent now; its XML; a sent one: cancelled there first
+      d.status === 'P' && d.mydata_type && d.mydata_state !== 'S' && d.mydata_state !== 'X'
+        ? btn('Διαβίβαση στο myDATA', ask('Διαβίβαση στην ΑΑΔΕ (myDATA);', async () => {
+          if (await run('mydata', {})) toast(d.mydata_state === 'S' ? 'Διαβιβάστηκε: MARK ' + d.mydata_mark : (d.mydata_error || 'Δεν διαβιβάστηκε'), d.mydata_state !== 'S');
+        }), 'primary') : null,
+      d.status === 'P' && d.mydata_type ? btn('XML myDATA', async () => {
+        try { mydataXml.replaceChildren(el('pre', { class: 'xml' }, (await api(`docs/${id}/mydata`)).xml)); } catch (e) { fail(e); }
+      }) : null,
+      d.status === 'P' && d.mydata_state === 'S'
+        ? btn('Ακύρωση (και στο myDATA)', ask('Ακύρωση στην ΑΑΔΕ (myDATA) και εδώ;', () => run('mydata/cancel', {})), 'danger')
+        : d.status === 'P' ? btn('Ακύρωση', ask('Ακύρωση του παραστατικού;', () => run('cancel', {})), 'danger') : null,
     ].filter(Boolean));
     // a draft invoice: one more note of its partner, of its kind of note
     extra.replaceChildren();
@@ -1336,7 +1351,8 @@ async function docPage(id) {
   }, el('label', { class: 'grow' }, 'Είδος (Enter)', code), camera(code), el('label', {}, 'Ποσότητα', n), el('label', {}, 'Τιμή', price),
   el('label', {}, 'Έκπτ. %', disc), el('button', { class: 'primary', type: 'submit' }, 'Βάλε γραμμή'));
   try { await kinds(); } catch (e) { /* the buttons without it */ }
-  show(title, head, addForm, found, lines, extra, actions, el('p', {}, el('a', { href: '#/docs' }, 'Όλα τα παραστατικά')));
+  const mydataXml = el('div');
+  show(title, head, addForm, found, lines, extra, actions, mydataXml, el('p', {}, el('a', { href: '#/docs' }, 'Όλα τα παραστατικά')));
   await run('');
   if (d && d.status === 'D') code.focus();
 }

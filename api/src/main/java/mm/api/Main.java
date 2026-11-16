@@ -32,6 +32,19 @@ public final class Main {
         Web.register(server);
         server.setExecutor(Executors.newFixedThreadPool(8));
         server.start();
+        // myDATA: the documents waiting (Q) sent by the minute (MyData; nothing without an account)
+        long every = Long.parseLong(env("MM_MYDATA_EVERY", "60"));
+        Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "mydata");
+            t.setDaemon(true);
+            return t;
+        }).scheduleWithFixedDelay(() -> {
+            try (java.sql.Connection c = db.connection()) {
+                MyData.sendWaiting(c);
+            } catch (Exception e) {
+                System.err.println("== myDATA: " + e.getMessage());
+            }
+        }, every, every, java.util.concurrent.TimeUnit.SECONDS);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             server.stop(1);
             db.close();

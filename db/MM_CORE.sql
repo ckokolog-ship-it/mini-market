@@ -133,6 +133,14 @@ create or replace package mm_core as
   procedure post_count(p_count_id number);
   procedure cancel_count(p_count_id number);
 
+  -- myDATA of AADE (mm-api MyData.java sends them): a posted invoice or credit note of a sale to be
+  -- sent (state Q); what AADE answered: sent (its MARK, UID, QR), failed (the error), its
+  -- cancellation sent (X). MYDATA_AUTO Y in MM_SETTING: post_doc queues them by itself
+  procedure mydata_queue(p_doc_id number);
+  procedure mydata_sent(p_doc_id number, p_mark number, p_uid varchar2, p_qr varchar2);
+  procedure mydata_failed(p_doc_id number, p_error varchar2);
+  procedure mydata_cancelled(p_doc_id number, p_cancel_mark number);
+
   -- the backup of the database (db/backup.ps1) says how it went: p_ok Y (p_text its file) or N (p_text
   -- the error); MM_BACKUP_STATE tells the pages when the last good one is too old
   procedure backup_done(p_ok varchar2, p_text varchar2);
@@ -626,6 +634,7 @@ create or replace package body mm_core as
   function post_doc(p_doc_id number) return number is
     d mm_doc%rowtype := draft(p_doc_id);
     t mm_doc_type%rowtype;
+    auto_ varchar2(400);
     no_ number;
     z number;
     lines number;
@@ -718,6 +727,13 @@ create or replace package body mm_core as
               case when t.stock_sign > 0 then -(d.total - d.deposit) else d.total - d.deposit end, p_doc_id);
     end if;
     update mm_reservation set status = 'D' where doc_id = p_doc_id;
+    -- myDATA: an invoice of a sale to be sent at once, when the shop wants it so (MM_SETTING MYDATA_AUTO Y)
+    if t.mydata_type is not null then
+      select max(value) into auto_ from mm_setting where name = 'MYDATA_AUTO';
+    end if;
+    if t.mydata_type is not null and auto_ = 'Y' then
+      update mm_doc set mydata_state = 'Q', mydata_error = null where id = p_doc_id;
+    end if;
     return no_;
   end;
 
@@ -746,6 +762,11 @@ create or replace package body mm_core as
       select doc_type || ' ' || doc_no into zs from mm_doc where id = d.invoice_id;
       fail(85, 'Το δελτίο είναι στο ' || zs || ': ακύρωσε πρώτα εκείνο');
     end if;
+    -- myDATA: one sent is cancelled there first (its MARK); one waiting to be sent: not any more
+    if d.mydata_state = 'S' then
+      fail(89, 'Το παραστατικό έχει διαβιβαστεί στο myDATA (MARK ' || d.mydata_mark || '): πρώτα η ακύρωσή του εκεί');
+    end if;
+    update mm_doc set mydata_state = null where id = p_doc_id and mydata_state in ('Q', 'E');
     update mm_doc set invoice_id = null where invoice_id = p_doc_id;   -- its notes free again
     select count(*) into lines from mm_serial where in_doc_id = p_doc_id and status <> 'A';
     if lines > 0 then
@@ -1716,6 +1737,53 @@ create or replace package body mm_core as
     c mm_count%rowtype := open_count(p_count_id);
   begin
     update mm_count set status = 'C' where id = p_count_id;
+  end;
+
+  procedure mydata_queue(p_doc_id number) is
+    d mm_doc%rowtype;
+    t mm_doc_type%rowtype;
+    afm varchar2(20);
+  begin
+    begin
+      select * into d from mm_doc where id = p_doc_id for update;
+    exception
+      when no_data_found then fail(3, 'Δεν υπάρχει παραστατικό ' || p_doc_id);
+    end;
+    t := doc_type_row(d.doc_type);
+    if t.mydata_type is null then
+      fail(89, 'Το ' || t.name || ' δεν διαβιβάζεται από το μαγαζί στο myDATA');
+    end if;
+    if d.status <> 'P' then
+      fail(89, 'Διαβιβάζεται μόνο καταχωρημένο παραστατικό');
+    end if;
+    if d.mydata_state in ('S', 'X') then
+      fail(89, 'Έχει ήδη διαβιβαστεί στο myDATA (MARK ' || d.mydata_mark || ')');
+    end if;
+    select max(afm) into afm from mm_customer where id = d.customer_id;
+    if afm is null then
+      fail(89, 'Ο πελάτης του παραστατικού δεν έχει ΑΦΜ: το myDATA τον θέλει');
+    end if;
+    update mm_doc set mydata_state = 'Q', mydata_error = null where id = p_doc_id;
+  end;
+
+  procedure mydata_sent(p_doc_id number, p_mark number, p_uid varchar2, p_qr varchar2) is
+  begin
+    update mm_doc set mydata_state = 'S', mydata_mark = p_mark, mydata_uid = p_uid, mydata_qr = p_qr,
+                      mydata_error = null, mydata_at = sysdate
+    where id = p_doc_id;
+  end;
+
+  procedure mydata_failed(p_doc_id number, p_error varchar2) is
+  begin
+    update mm_doc set mydata_state = 'E', mydata_error = substr(p_error, 1, 1000), mydata_at = sysdate
+    where id = p_doc_id and nvl(mydata_state, 'Q') <> 'S';
+  end;
+
+  procedure mydata_cancelled(p_doc_id number, p_cancel_mark number) is
+  begin
+    update mm_doc set mydata_state = 'X', mydata_cancel_mark = p_cancel_mark, mydata_error = null,
+                      mydata_at = sysdate
+    where id = p_doc_id and mydata_state = 'S';
   end;
 
   procedure backup_done(p_ok varchar2, p_text varchar2) is

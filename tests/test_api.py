@@ -15,6 +15,7 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -22,6 +23,7 @@ import urllib.request
 import pytest
 
 oracledb = pytest.importorskip('oracledb')
+import fake_aade  # noqa: E402
 import test_core  # noqa: E402
 from test_core import DSN  # noqa: E402
 
@@ -30,6 +32,7 @@ JAR = os.path.join(ROOT, 'api', 'target', 'mm-api.jar')
 pytestmark = pytest.mark.skipif(not DSN or not shutil.which('java'), reason='MM_DSN or java missing')
 env = test_core.env
 NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+AADE = None                                  # myDATA: the little AADE of the tests (fake_aade.py)
 
 
 def free_port():
@@ -53,9 +56,14 @@ def api():
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0))
         port = s.getsockname()[1]
+    global AADE
+    AADE = fake_aade.Aade()                                # myDATA: a little AADE of the tests
+    conf = os.path.join(tempfile.mkdtemp(prefix='mmaade-'), 'mydata.properties')
+    with open(conf, 'w') as f:
+        f.write('url=%s\nuser=%s\nkey=%s\n' % (AADE.url, fake_aade.USER, fake_aade.KEY))
     e = dict(os.environ, MM_DB_URL='jdbc:oracle:thin:@' + where, MM_DB_USER=user, MM_DB_PASSWORD=pw,
              MM_API_PORT=str(port), MM_API_BIND='127.0.0.1',
-             MM_API_CORS='http://localhost,http://localhost:%d' % APP_PORT)
+             MM_API_CORS='http://localhost,http://localhost:%d' % APP_PORT, MM_MYDATA_CONFIG=conf, MM_MYDATA_EVERY='2')
     p = subprocess.Popen(['java', '-jar', JAR], env=e, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     base = 'http://127.0.0.1:%d' % port
     try:
@@ -71,6 +79,8 @@ def api():
     finally:
         p.terminate()                       # by its own handle (its PID), nothing else
         p.wait(timeout=20)
+        AADE.stop()
+        shutil.rmtree(os.path.dirname(conf), ignore_errors=True)
 
 
 PW = 'Kodikos-2026'

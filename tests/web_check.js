@@ -301,6 +301,13 @@ async function waitText(page, sel, text) {
   await page.click('button:has-text("Καταχώριση")');
   await waitText(page, '.kv', 'καταχωρημένο');
   ok(true, 'its invoice, posted');
+  // myDATA: the invoice not sent yet; sent without the ΑΦΜ of the shop (the tests): refused, said why
+  ok((await page.textContent('.kv')).includes('δεν διαβιβάστηκε'), 'the invoice: myDATA, not sent yet');
+  const errs0 = errors.length;
+  await page.click('button:has-text("Διαβίβαση στο myDATA")');
+  await waitText(page, '#toast', 'ΑΦΜ');
+  if (errors.slice(errs0).every((e) => /status of 400/.test(e))) errors.splice(errs0);   // (that refusal: a 400, meant)
+  ok((await page.textContent('.kv')).includes('δεν διαβιβάστηκε'), 'myDATA refused (no ΑΦΜ): nothing sent, it says why');
   await page.click('button:has-text("Επιστροφή")');
   await waitText(page, 'h1', 'Δελτίο επιστροφής');
   ok((await page.textContent('.kv')).includes('πρόχειρο'), 'goods back: a draft return note of its lines');
