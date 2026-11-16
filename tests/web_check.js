@@ -159,6 +159,24 @@ async function waitText(page, sel, text) {
   await waitText(page, 'main', 'Ρέστα: 5,20');
   await waitText(page, 'main', 'Τελευταίες αποδείξεις');
   ok(await page.isHidden('input[name=given]'), 'paid: no receipt open');
+  // its print: a receipt of 80 mm, alone on its page (window.print counted, not a dialog in the test)
+  await page.evaluate(() => { window.print = () => { window.__printed = (window.__printed || 0) + 1; }; });
+  await page.click('button:has-text("Εκτύπωση απόδειξης")');
+  await page.waitForFunction(() => window.__printed === 1);
+  ok((await page.textContent('#receipt')).includes('ΑΠΟΔΕΙΞΗ ΛΙΑΝΙΚΗΣ') && (await page.textContent('#receipt')).includes('24,80'), 'the receipt: its title, its total');
+  ok((await page.textContent('#receipt')).includes('Ρέστα'), 'the receipt: the change');
+  await page.emulateMedia({ media: 'print' });
+  ok(await page.isHidden('main') && await page.isVisible('#receipt'), 'the print: the receipt alone');
+  if (SHOTS) await page.locator('#receipt').screenshot({ path: SHOTS + '/receipt.png' });    // (as printed: before
+  // page.pdf, whose afterprint ends the print of the receipt)
+  const rpdf = (await page.pdf({ preferCSSPageSize: true, printBackground: true })).toString('latin1');
+  const box = /\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/.exec(rpdf);
+  ok(box && Math.abs(Number(box[1]) - 226.8) < 1.5 && Number(box[2]) > 150, 'the print: a page 80 mm wide: ' + (box && box[1] + ' x ' + box[2]));
+  await page.emulateMedia({ media: 'screen' });
+  await page.evaluate(() => document.body.classList.remove('printing-receipt'));
+  await page.click('button[aria-label^="Εκτύπωση ΑΛΠ"]');
+  await page.waitForFunction(() => window.__printed === 2);
+  ok(true, 'a receipt printed again from the last ones');
   // an order: written, an item by scan, the bread by a search, picked, ready; to the till, all of it
   await page.goto(BASE + '/web/#/orders');
   await page.waitForSelector('input[name=name]');

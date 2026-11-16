@@ -482,3 +482,37 @@ def test_the_office(api, env, users):
     pp = post(api, '/api/payments', {'kind': 'P', 'partner_id': ids['supplier'], 'amount': 7})
     assert (pp['kind'], pp['method']) == ('P', 'BANK')
     assert post(api, '/api/payments', {'kind': 'X', 'partner_id': c, 'amount': 1}, status=400)['error'] == 'bad_kind'
+
+
+def test_the_receipt_to_print(api, env, users):
+    """a receipt as printed: the header and the footer of the shop (a manager sets them), its lines, its
+    VAT, the PIN of its card sold today (the print in MM_PIN_LOG, by the user of the login)"""
+    db, ids = env
+    test_core.close_open_z(db, ids['reg'])
+    cat = db.one('select min(id) from mm_category')[0]
+    db.cur.execute("insert into mm_item (code, name, category_id, vat_code, price, serial_tracked) "
+                   "values (:c, 'Test card print', :cat, 'D', 15, 'Y')", c='TST%sP' % ids['tag'], cat=cat)
+    card = db.one('select id from mm_item where code = :c', c='TST%sP' % ids['tag'])[0]
+    db.fn('load_serial', int, card, 'PRT-%s-1' % ids['tag'], '123412341234')
+    db.commit()
+    assert post(api, '/api/pos/settings', {'header': 'x'}, token='CASHIER', status=403)['error'] == 'forbidden'
+    s = post(api, '/api/pos/settings', {'header': 'MINI MARKET TEST\nΑΦΜ 999999999', 'footer': 'Ευχαριστούμε!'})
+    assert s == {'header': 'MINI MARKET TEST\nΑΦΜ 999999999', 'footer': 'Ευχαριστούμε!'}
+    assert post(api, '/api/pos/settings', {'header': 'x' * 401}, status=400)['error'] == 'too_long'
+    pos = '/api/pos/tst'
+    post(api, pos + '/open', {'cash': 0}, token='CASHIER')
+    post(api, pos + '/scan', {'code': 'TST%sB' % ids['tag'], 'qty': 2}, token='CASHIER')
+    post(api, pos + '/scan', {'code': 'TST%sP' % ids['tag']}, token='CASHIER')
+    paid = post(api, pos + '/pay', {'payment': 'CASH', 'given': 20}, token='CASHIER')['paid']
+    r = get(api, '%s/receipt/%d' % (pos, paid['id']), token='CASHIER')
+    assert (r['doc_no'], r['total'], r['register'], r['status']) == (paid['doc_no'], 19.52, 'TST', 'P')
+    assert r['header'].startswith('MINI MARKET TEST') and r['footer'] == 'Ευχαριστούμε!'
+    assert [x['qty'] for x in r['lines']] == [2, 1]
+    assert {v['vat_code']: v['total'] for v in r['vat_rows']} == {'B': 4.52, 'D': 15}
+    assert [(c['serial'], c['pin']) for c in r['cards']] == [('PRT-%s-1' % ids['tag'], '123412341234')]
+    assert db.one("select username, reason from mm_pin_log where serial_id = (select id from mm_serial where serial = :s) "
+                  "order by id desc fetch first 1 rows only", s='PRT-%s-1' % ids['tag']) == (users['CASHIER'].upper(), 'RECEIPT')
+    assert get(api, '%s/receipt/%d' % (pos, 999999999), 404, token='CASHIER')['error'] == 'not_found'
+    assert get(api, '/api/pos/t1/receipt/%d' % paid['id'], 404, token='CASHIER')['error'] == 'not_found'   # another register
+    post(api, pos + '/close', token='CASHIER')
+    assert post(api, '/api/pos/settings', {'header': None, 'footer': None}) == {'header': None, 'footer': None}

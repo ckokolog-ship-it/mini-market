@@ -203,7 +203,7 @@ final class Api {
             return Map.of("ok", true, "username", u.username());
         }
         if ("pos".equals(p[0])) {
-            return Pos.post(c, p, in);
+            return Pos.post(c, u, p, in);
         }
         if ("orders".equals(p[0])) {
             return Orders.post(c, u, p, in);
@@ -290,7 +290,7 @@ final class Api {
                 }
             }
             case "pos" -> {
-                return Pos.get(c, p);
+                return Pos.get(c, u, p);
             }
             case "orders" -> {
                 return Orders.get(c, p, q);
