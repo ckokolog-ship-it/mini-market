@@ -229,3 +229,50 @@ def test_invoice_with_many_cards_and_their_serials(card):
     finally:
         db.cur.execute('update mm_item set max_per_sale = null where id = :i', i=ids['card'])
         db.commit()
+
+
+def test_scratch_tickets_and_gift_cards_outside_vat(card):
+    """a scratch ticket: a serial, no PIN; a gift card: outside VAT (D, 0%) as the demo has them: in a
+    receipt no VAT, its own row D in the VAT of the Z"""
+    db, ids = card
+    close_open_z(db, ids['reg'])
+    z = db.fn('open_z', int, ids['reg'])
+    cat = db.one('select min(id) from mm_category')[0]
+    v = db.cur.var(int)
+    db.cur.execute("insert into mm_item (code, name, category_id, vat_code, price, cost, serial_tracked) "
+                   "values (:c, 'Test scratch', :cat, 'D', 2, 1.86, 'Y') returning id into :v",
+                   c=f"TST{ids['tag']}K", cat=cat, v=v)
+    item = v.getvalue()[0]
+    sid = db.fn('load_serial', int, item, f"SKR-{ids['tag']}-1", None)
+    db.fn('load_serial', int, item, f"SKR-{ids['tag']}-2", None)
+    db.commit()
+    assert db.one('select pin_enc from mm_serial where id = :s', s=sid)[0] is None
+    d = db.fn('new_doc', int, 'ALP', p_register_id=ids['reg'])
+    db.fn('sell_serial', int, d, None, f"SKR-{ids['tag']}-1")              # the ticket scanned
+    db.fn('sell_serial', int, d, item)                                     # one more, the oldest left
+    db.fn('add_line', int, d, ids['b'], 1)                                 # and bread (13%)
+    db.fn('post_doc', int, d)
+    db.commit()
+    net, vat, total = (float(x) for x in db.one('select net, vat, total from mm_doc where id = :d', d=d))
+    assert (total, vat) == (6.26, 0.26) and net == 6.0                     # 4 outside VAT + 2,26 with 13%
+    db.fn('close_z', int, ids['reg'])
+    db.commit()
+    db.cur.execute('select vat_code, net, vat, total from mm_z_vat where z_id = :z order by vat_code', z=z)
+    rows = [(c, float(n), float(x), float(t)) for c, n, x, t in db.cur]
+    assert ('D', 4.0, 0.0, 4.0) in rows and ('B', 2.0, 0.26, 2.26) in rows
+    assert db.stock(item) == 0
+
+
+def test_the_demo_has_them(env):
+    db, _ = env
+    db.cur.execute("select i.code, i.vat_code, c.name, i.serial_tracked from mm_item i "
+                   "join mm_category c on c.id = i.category_id where i.code in ('GPL15', 'NFX25', 'APL100', 'SKR05') "
+                   "order by i.code")
+    rows = db.cur.fetchall()
+    assert [r[0] for r in rows] == ['APL100', 'GPL15', 'NFX25', 'SKR05']
+    assert {r[1] for r in rows} == {'D'} and {r[3] for r in rows} == {'Y'}
+    assert {r[2] for r in rows} == {'Κάρτες δώρου', 'Σκρατς'}
+    # the scratch tickets of the demo: no PIN, even without MM_PIN
+    assert db.one("select count(*) from mm_serial s join mm_item i on i.id = s.item_id "
+                  "where i.code like 'SKR%' and s.pin_enc is not null")[0] == 0
+    assert db.one("select count(*) from mm_serial s join mm_item i on i.id = s.item_id where i.code = 'SKR01'")[0] >= 20
