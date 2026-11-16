@@ -427,6 +427,34 @@ def test_reservations_form(cur, env):
     assert 'απόδειξη' in msgs(cur)
     run(cur, "ui.post_query('RL');", RL__ITEM_ID=str(ids['b']))
     assert item(cur, 'RL.ITEM_TEXT').startswith(f"TST{ids['tag']}B ")
+    # an order (from the pages, or here): who wrote it, a line picked and back, ready and not, a delivery
+    # note for a customer on credit
+    run(cur, 'ui.init;')                                                     # who logged in (g_user)
+    run(cur, "ui.press('CTL.NEWRES');", CTL__R_NAME='Test Φόρμα 2', CTL__R_PHONE='6912345678', CTL__R_DATE=today)
+    r2 = db.one("select max(id) from mm_reservation where name = 'Test Φόρμα 2'")[0]
+    assert db.one('select created_by from mm_reservation where id = :r', r=r2)[0] == LOGIN['admin'].lower()
+    run(cur, "ui.press('CTL.RESERVE');", RES__ID=str(r2), CTL__ITEM_ID=str(ids['b']), CTL__QTY='3')
+    line = db.one('select id from mm_reservation_line where reservation_id = :r', r=r2)[0]
+    picked = 'select picked from mm_reservation_line where id = :l'
+    run(cur, "ui.press('CTL.PICK');", RES__ID=str(r2), RL__ID=str(line), RL__ITEM_ID=str(ids['b']))
+    assert float(db.one(picked, l=line)[0]) == 3
+    run(cur, "ui.press('CTL.PICK');", RES__ID=str(r2), RL__ID=str(line), RL__ITEM_ID=str(ids['b']))
+    assert float(db.one(picked, l=line)[0]) == 0                              # again: back
+    run(cur, "ui.press('CTL.READY');", RES__ID=str(r2))
+    assert db.one('select ready_at from mm_reservation where id = :r', r=r2)[0] is not None
+    assert float(db.one(picked, l=line)[0]) == 3 and 'Έτοιμη' in msgs(cur)
+    run(cur, "ui.post_query('RES');", RES__READY_AT=today)
+    assert item(cur, 'RES.READY_TEXT') == 'ναι'
+    run(cur, "ui.press('CTL.READY');", RES__ID=str(r2))
+    assert db.one('select ready_at from mm_reservation where id = :r', r=r2)[0] is None
+    run(cur, "ui.press('CTL.NOTE');", RES__ID=str(r2))
+    assert 'MM-187' in msgs(cur)                                              # no customer: a message
+    db.cur.execute('update mm_reservation set customer_id = :c where id = :r', c=ids['customer'], r=r2)
+    db.commit()
+    run(cur, "ui.press('CTL.NOTE');", RES__ID=str(r2))
+    st, doc = db.one('select status, doc_id from mm_reservation where id = :r', r=r2)
+    assert st == 'D' and db.one('select doc_type, status from mm_doc where id = :d', d=doc) == ('DAP', 'P')
+    assert 'δελτίο αποστολής' in msgs(cur)
 
 
 @needs_db
