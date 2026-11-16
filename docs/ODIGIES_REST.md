@@ -37,6 +37,51 @@
 
 **Προσοχή στο wallet:** όποιος το έχει συνδέεται στη βάση ως `mm`, οπότε φύλαξέ το όπως έναν κωδικό. Στο `tnsnames.ora` το host πρέπει να είναι το όνομα ή η IP του PC της βάσης, όχι `localhost`.
 
+## Χωρίς παράθυρο: Windows service ή Docker
+
+Το `run_api.ps1` τρέχει όσο είναι ανοιχτό το παράθυρό του. Για να τρέχει μόνιμα, υπάρχουν δύο τρόποι, με την ίδια θύρα. Τρέχει **ένας από τους δύο** κάθε φορά.
+
+### Windows service (προτείνεται για το PC του μαγαζιού)
+
+Σε **PowerShell ως διαχειριστής** (δεξί κλικ, «Εκτέλεση ως διαχειριστής»):
+
+```bat
+cd C:\Users\chris\eclipse-workspace\mini-market\api
+powershell -ExecutionPolicy Bypass -File install_service.ps1
+```
+
+- **Τι κάνει:** χτίζει το jar και το αντιγράφει στο `api\service`. Εγκαθιστά το service **«Mini market API»** (`mm-api`, φαίνεται στο `services.msc`) και το ξεκινά. Στο τέλος δείχνει την απάντηση του `/api/health`.
+- **Η εκκίνηση:**
+  - ξεκινά με τα Windows (λίγο μετά την εκκίνηση), **χωρίς να συνδεθεί κανείς**·
+  - αν υπάρχει το service της βάσης `OracleServiceFREE`, περιμένει πρώτα εκείνο·
+  - αν πέσει, ξαναξεκινά μόνο του σε 10, 30 και 60 δευτερόλεπτα.
+- **Logs:** `api\service\logs\mm-api.out.log` και `mm-api.err.log`. Κρατιούνται 5 αρχεία των 10 MB.
+- **Firewall:** με `-Bind 0.0.0.0` (η προεπιλογή εδώ) ανοίγει η θύρα 8090 μόνο για **ιδιωτικό** δίκτυο (κανόνας «mm-api 8090»). Με `-Bind 127.0.0.1` ακούει μόνο το ίδιο το PC.
+- **Ο runner:** το service τρέχει μέσω του **WinSW 2.12.0** (MIT, github.com/winsw/winsw). Την πρώτη φορά κατεβαίνει, και αν το SHA-256 του δεν είναι το αναμενόμενο, δεν χρησιμοποιείται.
+- **Μετά από `git pull`:** τρέχεις ξανά το ίδιο. Σταματά το service, χτίζει το νέο jar, και το ξεκινά.
+- **Οι άλλες εντολές:**
+  - `install_service.ps1 -Status`: πώς είναι, και το `/api/health`·
+  - `install_service.ps1 -Uninstall`: αφαιρεί το service και τον κανόνα του firewall.
+- Τρέχει ως `LocalSystem` και διαβάζει το wallet του domain, όπως το `run_api.ps1`.
+
+### Docker
+
+Με το **Docker Desktop** ανοιχτό:
+
+```bat
+cd C:\Users\chris\eclipse-workspace\mini-market\api
+powershell -ExecutionPolicy Bypass -File run_docker.ps1
+```
+
+- **Τι κάνει:** χτίζει το jar, και το `Dockerfile` του προσθέτει μόνο ένα Java runtime. Ξεκινά το container `mm-api` (`docker-compose.yml`), που ξαναξεκινά μαζί με το Docker.
+- **Η βάση:**
+  - το wallet του domain μπαίνει στο container μόνο για ανάγνωση·
+  - το `tnsnames.ora` του domain αντιγράφεται στο `api\docker\tns`, και ένα `localhost` γίνεται `host.docker.internal` (το PC).
+- **Ασφάλεια:** το container τρέχει ως απλός χρήστης (όχι root), και το Docker ελέγχει την υγεία του με το `/api/health`.
+- **Οι άλλες εντολές:** `run_docker.ps1 -Logs` (τα logs) και `run_docker.ps1 -Down` (σταμάτημα).
+- **Προσοχή:** το Docker Desktop ξεκινά μόνο όταν **συνδεθεί κάποιος στα Windows** (Settings, General, «Start Docker Desktop when you sign in»). Μετά από διακοπή ρεύματος, το mm-api δεν ξεκινά μέχρι να κάνει κάποιος login. Γι' αυτό, για το PC του μαγαζιού, προτείνεται το service.
+- Αν τρέχει το service, το `run_docker.ps1` σταματά με μήνυμα: πρώτα `install_service.ps1 -Uninstall`.
+
 ## Login και ρόλοι
 
 | Ρόλος | Τι μπορεί |
@@ -141,6 +186,7 @@ http://127.0.0.1:8090/api/reports/vat?from=2026-10-01&to=2026-10-31
 | `MM_TNS_ADMIN` | — | ο φάκελος του `tnsnames.ora` (το `run_api.ps1` βάζει τον φάκελο του domain) |
 | `MM_WALLET` | `MM_TNS_ADMIN\forms_wallet` | ο φάκελος του wallet |
 | `MM_DB_USER`, `MM_DB_PASSWORD` | — | χωρίς wallet, μόνο για βάση δοκιμών (τα tests) |
+| `MM_API_CORS` | `http://localhost` | τα origins άλλων σελίδων που μπορούν να το καλούν (η εφαρμογή Android), με κόμματα· `none`: κανένα |
 
 ## Tests
 

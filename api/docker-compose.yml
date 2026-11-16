@@ -1,0 +1,19 @@
+# docker-compose.yml -- mm-api in Docker (run_docker.ps1 starts it): port 8090 of this computer (the
+# phones too), started again with Docker. The wallet of the Forms read-only; docker/tns (made by
+# run_docker.ps1) has the MM_DB of the container: the database of this computer (host.docker.internal).
+# The Windows service (install_service.ps1) and this use the same port: one of the two at a time.
+services:
+  mm-api:
+    build: .
+    image: mm-api:latest
+    container_name: mm-api
+    restart: unless-stopped
+    ports:
+      - "${MM_API_PUBLISH:-0.0.0.0}:${MM_API_PORT:-8090}:8090"
+    environment:
+      MM_API_CORS: "${MM_API_CORS:-http://localhost}"
+    volumes:
+      - "${MM_WALLET_DIR:?the folder of the wallet: run_docker.ps1}:/wallet:ro"
+      - "./docker/tns:/tns:ro"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
