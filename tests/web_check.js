@@ -51,10 +51,13 @@ async function waitText(page, sel, text) {
   ok((await page.inputValue('input[name=password]')) === '', 'the password does not stay');
   await page.fill('input[name=password]', PW);
   await page.click('button[type=submit]');
-  await page.waitForSelector('#nav a');
+  await page.waitForSelector('#nav a', { state: 'attached' });
   ok((await page.textContent('#who')).includes(MGR), 'logged in: who');
   const nav = await page.$$eval('#nav a', (as) => as.map((a) => a.textContent));
   ok(nav.includes('Πελάτες') && nav.includes('ΦΠΑ') && nav.includes('Απογραφή'), 'the menu of a manager');
+  const groups = await page.$$eval('#nav summary', (x) => x.map((y) => y.textContent));
+  ok(groups.join(',') === 'Πωλήσεις,Αποθήκη,Γραφείο,Αναφορές', 'the groups of the menu: ' + groups.join(','));
+  ok(await page.isVisible('#nav') && await page.isHidden('#menu'), 'a desk: the menu a column, no ☰');
 
   // the items: a search, an item, a barcode
   await page.fill('input[name=q]', 'Ψωμί');
@@ -205,7 +208,7 @@ async function waitText(page, sel, text) {
     await lp.fill('input[name=username]', MGR);
     await lp.fill('input[name=password]', PW);
     await lp.click('button[type=submit]');
-    await lp.waitForSelector('#nav a');
+    await lp.waitForSelector('#nav a', { state: 'attached' });
     await lp.goto(BASE + '/web/#/labels');
     await lp.waitForSelector('input[name=q]');
     await lp.click('button:has-text("Καθάρισε")');
@@ -293,9 +296,23 @@ async function waitText(page, sel, text) {
   await p2.fill('input[name=username]', CASHIER);
   await p2.fill('input[name=password]', PW);
   await p2.click('button[type=submit]');
-  await p2.waitForSelector('#nav a');
+  await p2.waitForSelector('#nav a', { state: 'attached' });
   const nav2 = await p2.$$eval('#nav a', (as) => as.map((a) => a.textContent));
   ok(nav2.join(',') === 'Ταμείο,Παραγγελίες,Είδη,Ετικέτες,Απογραφή', 'the menu of a cashier: ' + nav2.join(','));
+  // the menu on a phone: hidden, ☰ opens it, a group opens (the other closes), a page closes it
+  ok(await p2.isHidden('#nav'), 'a phone: the menu hidden');
+  await p2.click('#menu');
+  await p2.waitForSelector('#nav', { state: 'visible' });
+  ok(await p2.isVisible('#nav a:has-text("Ετικέτες")'), 'a phone: the group of the page (the items) open');
+  await p2.click('#nav summary:has-text("Πωλήσεις")');                 // another group: this one closes
+  ok(await p2.isHidden('#nav a:has-text("Ετικέτες")'), 'one group open at a time');
+  await p2.click('#nav a:has-text("Ταμείο")');
+  await p2.waitForSelector('h1:has-text("Ταμείο")');
+  ok(await p2.isHidden('#nav'), 'a phone: a page chosen, the menu closed');
+  await p2.click('#menu');
+  ok(await p2.isVisible('#nav a:has-text("Ταμείο")') && await p2.isHidden('#nav a:has-text("Είδη")'), 'the group of the page open');
+  if (SHOTS) await p2.screenshot({ path: SHOTS + '/phone_menu.png' });
+  await p2.click('#menu');
   await p2.goto(BASE + '/web/#/reports/sales');
   await p2.waitForSelector('h1:has-text("Δεν επιτρέπεται")');
   ok(true, 'a cashier: no reports');

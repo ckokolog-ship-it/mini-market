@@ -9,19 +9,14 @@ import { canScan, codeOf, scanOnce } from './scan.js';
 const $ = (sel) => document.querySelector(sel);
 const main = () => $('#main');
 const RANK = { CASHIER: 1, MANAGER: 2, ADMIN: 3 };
-const PAGES = [
-  ['#/pos', 'Ταμείο', 'CASHIER'],
-  ['#/orders', 'Παραγγελίες', 'CASHIER'],
-  ['#/items', 'Είδη', 'CASHIER'],
-  ['#/labels', 'Ετικέτες', 'CASHIER'],
-  ['#/docs', 'Τιμολόγια', 'MANAGER'],
-  ['#/payments', 'Εισπράξεις', 'MANAGER'],
-  ['#/partners/customers', 'Πελάτες', 'MANAGER'],
-  ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER'],
-  ['#/reports/sales', 'Πωλήσεις', 'MANAGER'],
-  ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
-  ['#/reports/min-stock', 'Ελάχιστο απόθεμα', 'MANAGER'],
-  ['#/counts', 'Απογραφή', 'CASHIER'],
+// the menu: its groups and their pages (by role: CASHIER the till, the store; MANAGER the office too)
+const MENU = [
+  ['Πωλήσεις', [['#/pos', 'Ταμείο', 'CASHIER'], ['#/orders', 'Παραγγελίες', 'CASHIER']]],
+  ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER']]],
+  ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
+    ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
+  ['Αναφορές', [['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
+    ['#/reports/min-stock', 'Ελάχιστο απόθεμα', 'MANAGER']]],
 ];
 
 let session = null;
@@ -1189,12 +1184,39 @@ async function paymentsPage() {
 }
 
 // -- the pages, by the address (#/...) -------------------------------------------------------------
+// the pages of a page: where its group is (an item is of the items, a ledger of its own list ...)
+const SECTION = { item: '#/items', partner: '#/partners/', ledger: '#/partners/', count: '#/counts', order: '#/orders', doc: '#/docs' };
 function navBar() {
   $('#top').hidden = false;
   $('#who').textContent = `${session.username} (${session.role})`;
-  $('#nav').replaceChildren(...PAGES.filter(([, , r]) => can(r)).map(([h, t]) =>
-    el('a', { href: h, class: location.hash.startsWith(h) ? 'on' : null }, t)));
+  const hash = location.hash || '#/items';
+  const first = hash.slice(2).split(/[/?]/)[0];
+  const here = (h) => hash.startsWith(h) || (SECTION[first] && h.startsWith(SECTION[first]));
+  let open = null;
+  try { open = sessionStorage.getItem('mm.menu'); } catch (e) { open = null; }
+  $('#nav').replaceChildren(...MENU.map(([group, pages]) => {
+    const mine = pages.filter(([, , r]) => can(r));
+    if (!mine.length) return null;
+    const current = mine.some(([h]) => here(h));
+    const d = el('details', { name: 'menu', open: current || (!MENU.some(([, ps]) => ps.some(([h]) => here(h))) && open === group) },
+      el('summary', {}, group),
+      mine.map(([h, t]) => el('a', { href: h, class: here(h) ? 'on' : null, 'aria-current': here(h) ? 'page' : null }, t)));
+    d.addEventListener('toggle', () => { if (d.open) { try { sessionStorage.setItem('mm.menu', group); } catch (e) { /* */ } } });
+    return d;
+  }).filter(Boolean));
+  document.body.classList.remove('menu-open');
+  $('#menu').setAttribute('aria-expanded', 'false');
 }
+$('#menu').addEventListener('click', () => {
+  const on = document.body.classList.toggle('menu-open');
+  $('#menu').setAttribute('aria-expanded', String(on));
+});
+$('#nav').addEventListener('click', (ev) => {        // a page chosen (the same one too): the drawer closed
+  if (ev.target.closest('a')) {
+    document.body.classList.remove('menu-open');
+    $('#menu').setAttribute('aria-expanded', 'false');
+  }
+});
 function render() {
   if (APP && !server) {
     serverPage();
