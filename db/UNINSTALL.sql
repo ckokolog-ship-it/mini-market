@@ -18,6 +18,7 @@ drop view if exists mm_sales_day;
 drop view if exists mm_vat_day;
 drop view if exists mm_min_stock;
 drop view if exists mm_check;
+drop view if exists mm_backup_state;
 drop view if exists mm_serial_check;
 drop view if exists mm_doc_serials;
 drop view if exists mm_item_avail;

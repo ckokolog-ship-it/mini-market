@@ -568,3 +568,35 @@ def test_the_receipt_to_print(api, env, users):
     assert get(api, '/api/pos/t1/receipt/%d' % paid['id'], 404, token='CASHIER')['error'] == 'not_found'   # another register
     post(api, pos + '/close', token='CASHIER')
     assert post(api, '/api/pos/settings', {'header': None, 'footer': None}) == {'header': None, 'footer': None}
+
+
+def test_the_state_of_the_backup(api, env, users):
+    """backup.ps1 tells the database (mm_core.backup_done); /api/backup: NEVER, OK, OLD (more than 2 days),
+    FAILED (the last try after the last good one); a manager only"""
+    db, ids = env
+    db.cur.execute("select name, value from mm_setting where name like 'BACKUP\\_%' escape '\\'")
+    kept = list(db.cur)
+    try:
+        db.cur.execute("delete from mm_setting where name like 'BACKUP\\_%' escape '\\'")
+        db.commit()
+        assert get(api, '/api/backup')['state'] == 'NEVER'
+        db.proc('backup_done', 'Y', 'mm_20261116_2315.dmp')
+        db.commit()
+        r = get(api, '/api/backup')
+        assert (r['state'], r['ok_file'], r['days']) == ('OK', 'mm_20261116_2315.dmp', 0)
+        db.cur.execute("update mm_setting set value = to_char(sysdate - 3, 'YYYY-MM-DD HH24:MI:SS') where name = 'BACKUP_OK_AT'")
+        db.commit()
+        assert get(api, '/api/backup')['state'] == 'OLD'
+        db.proc('backup_done', 'N', "expdp failed: ORA-39002 'x'")
+        db.commit()
+        r = get(api, '/api/backup')
+        assert (r['state'], r['error']) == ('FAILED', "expdp failed: ORA-39002 'x'")
+        db.proc('backup_done', 'Y', 'mm_next.dmp')                     # a good one after it: OK again
+        db.commit()
+        assert get(api, '/api/backup')['state'] == 'OK'
+        assert get(api, '/api/backup', 403, token='CASHIER')['error'] == 'forbidden'
+    finally:
+        db.cur.execute("delete from mm_setting where name like 'BACKUP\\_%' escape '\\'")
+        for name, value in kept:
+            db.cur.execute('insert into mm_setting (name, value) values (:n, :v)', n=name, v=value)
+        db.commit()

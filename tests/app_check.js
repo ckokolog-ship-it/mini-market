@@ -29,8 +29,8 @@ function ok(cond, what) {
   ok(true, 'the app: asks the address of the shop');
   await page.fill('input[name=server]', BAD);                       // nothing listens there
   await page.click('button[type=submit]');
-  await page.waitForSelector('[role=alert]:not(:empty)');
-  ok((await page.textContent('[role=alert]')).includes('Δεν απαντά'), 'a wrong address: it says so');
+  await page.waitForSelector('main [role=alert]:not(:empty)');
+  ok((await page.textContent('main [role=alert]')).includes('Δεν απαντά'), 'a wrong address: it says so');
   await page.fill('input[name=server]', API.replace('http://', ''));
   await page.click('button[type=submit]');
   await page.waitForSelector('input[name=username]');

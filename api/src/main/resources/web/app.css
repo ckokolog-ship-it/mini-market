@@ -40,6 +40,9 @@ header { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px 16px; p
   body.menu-open #top:not([hidden]) ~ #nav { display: block; }
 }
 main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+/* a warning to a manager on every page (the backup not done) */
+.notice { margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px; background: var(--bad); color: #fff; font-weight: 600; }
+@media (min-width: 900px) { #top:not([hidden]) ~ .notice { margin-left: 236px; } }
 h1 { font-size: 20px; margin: 4px 0 12px; }
 h2 { font-size: 16px; margin: 18px 0 8px; }
 .muted { color: var(--muted); }
@@ -115,7 +118,7 @@ label.check { flex-direction: row; align-items: center; gap: 6px; padding-bottom
 @media print {
   @page { size: A4; margin: 0; }
   body { background: #fff; }
-  header, #nav, .no-print, #toast { display: none !important; }
+  header, #nav, .no-print, #toast, #notice { display: none !important; }
   main { max-width: none; padding: 0; margin: 0; }
   .sheets { overflow: visible; }
   .sheet { margin: 0; box-shadow: none; break-after: page; }

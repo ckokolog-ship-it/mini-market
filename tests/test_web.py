@@ -36,6 +36,9 @@ def test_the_pages_in_a_browser(api, env, users):
         db.proc('adjust_stock', ids['b'], k % 4 + 1, 'TST web %d' % k)
     db.commit()
     test_core.close_open_z(db, ids['reg'])                 # the till: the Z of TST opened in the page
+    db.cur.execute("delete from mm_setting where name like 'BACKUP\\_%' escape '\\'")
+    db.proc('backup_done', 'N', 'expdp: test')            # the last backup failed: a manager sees it
+    db.commit()
     labels = tempfile.mkdtemp(prefix='mmlabels-')
     e = dict(os.environ, BASE=api, MGR=users['MANAGER'], CASHIER=users['CASHIER'], PW=test_api.PW,
              ITEM='TST%sA' % ids['tag'], ITEM_B=str(ids['b']), XSS=XSS, SHOTS=os.environ.get('MM_WEB_SHOTS', ''),
@@ -48,6 +51,8 @@ def test_the_pages_in_a_browser(api, env, users):
         read_labels(labels, 'TST%sA' % ids['tag'])
     finally:
         shutil.rmtree(labels, ignore_errors=True)
+        db.cur.execute("delete from mm_setting where name like 'BACKUP\\_%' escape '\\'")
+        db.commit()
 
 
 def read_labels(folder, item):

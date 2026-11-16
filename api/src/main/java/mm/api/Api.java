@@ -31,6 +31,7 @@ import java.util.Optional;
  *   /api/ledger/{item|customer|supplier}/{id}  a ledger (MM_LEDGER): carry-over, moves, totals;
  *                                              with ?limit=&offset= a page of its moves, its carry_in, carry_out
  *   /api/reports/sales   /api/reports/vat   /api/reports/min-stock
+ *   /api/backup                                the last backup (db/backup.ps1): state OK, OLD, FAILED, NEVER (MANAGER)
  *   /api/reports/trial-items|trial-customers|trial-suppliers?from=&to=&all=1   the trial balances
  *                                              (ισοζύγια): a row each with the totals of its ledger, no moves
  *   GET /api/counts   GET /api/counts/{id}      the counts of the stock; one with its lines
@@ -347,6 +348,12 @@ final class Api {
                         default -> throw new Http.Fail(404, "not_found", "ledger: item, customer or supplier");
                     };
                     return ledger(c, what, Http.id(p[2]), q);
+                }
+            }
+            case "backup" -> {
+                need(u, "MANAGER");
+                if (n == 1) {
+                    return Db.rows(c, "select state, days, ok_at, ok_file, failed_at, error from mm_backup_state").get(0);
                 }
             }
             case "reports" -> {

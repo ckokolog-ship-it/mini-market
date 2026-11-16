@@ -114,7 +114,7 @@ function camera(input, done) {
   }, '📷');
 }
 function show(...kids) {
-  main().replaceChildren(...kids);
+  main().replaceChildren(...kids.filter((k) => k !== null && k !== undefined && k !== false));   // (else "null" as text)
 }
 
 // -- the REST service ------------------------------------------------------------------------------
@@ -221,7 +221,31 @@ function bellStart() {
   bellCheck();
   bell.timer = setInterval(bellCheck, 30000);
 }
+// -- the backup (db/backup.ps1): a manager sees on every page when the last good one is too old or the
+// last one failed; asked at the login and every 30 minutes
+const backupCheck = { timer: null };
+async function backupNotice() {
+  const box = $('#notice');
+  if (!session || !can('MANAGER')) { box.hidden = true; return; }
+  let r;
+  try { r = await api('backup'); } catch (e) { return; }
+  const text = {
+    NEVER: 'Δεν έχει γίνει ακόμα backup της βάσης: backup.ps1 -Install στο PC του μαγαζιού.',
+    OLD: `Το τελευταίο backup της βάσης έγινε πριν από ${Math.floor(r.days)} μέρες (${day(r.ok_at)}): backup.ps1 -Status στο PC του μαγαζιού.`,
+    FAILED: `Το τελευταίο backup της βάσης απέτυχε (${day(r.failed_at)}): ${r.error || ''}`,
+  }[r.state];
+  box.textContent = text || '';
+  box.hidden = !text;
+}
+function backupStart() {
+  if (backupCheck.timer) return;
+  backupNotice();
+  backupCheck.timer = setInterval(backupNotice, 30 * 60000);
+}
 function bellStop() {
+  clearInterval(backupCheck.timer);
+  backupCheck.timer = null;
+  $('#notice').hidden = true;
   clearInterval(bell.timer);
   Object.assign(bell, { timer: null, seen: null, count: 0 });
   bellBadge();
@@ -1432,6 +1456,7 @@ function render() {
   }
   navBar();
   bellStart();
+  backupStart();
   const [path, query] = (location.hash.slice(1) || '/items').split('?');
   const params = new URLSearchParams(query || '');
   const p = path.split('/').filter(Boolean).map(decodeURIComponent);

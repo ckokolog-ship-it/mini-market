@@ -88,6 +88,16 @@ function New-BackupDir([string]$d) {
   }
 }
 
+# the database told how the backup went (mm_core.backup_done: the pages of a manager warn when the last
+# good one is old or the last one failed); never an error of its own (the database may be the problem)
+function Write-State([string]$ok, [string]$text) {
+  try {
+    $t = ($text -replace "[\r\n]+", ' ' -replace "'", "''")
+    if ($t.Length -gt 380) { $t = $t.Substring(0, 380) }
+    [void](Sql "exec mm_core.backup_done('$ok', '$t')`ncommit;")
+  } catch { Write-Host "== [!] the state of the backup not written to the database: $($_.Exception.Message)" }
+}
+
 function Write-History([string]$line) {
   Add-Content -Path $history -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm') + '  ' + $line) -Encoding ASCII
 }
@@ -112,10 +122,10 @@ function Pump([string]$tool, [string[]]$params, [string]$log) {
 # a backup now: its name (mm_<stamp>.dmp in $Dir)
 function Invoke-Backup([string]$prefix = 'mm') {
   New-BackupDir $Dir
-  $pump = Get-PumpDir
   $name = $prefix + '_' + (Get-Date -Format 'yyyyMMdd_HHmm')
   Write-Host "== expdp: $name.dmp (the schema of $Alias, consistent as of now)"
   try {
+    $pump = Get-PumpDir
     [void](Pump 'expdp' @('directory=DATA_PUMP_DIR', "dumpfile=$name.dmp", "logfile=$name.log",
       'flashback_time=systimestamp', 'reuse_dumpfiles=yes') (Join-Path $pump "$name.log"))
     # copied, then removed there (if the rights of the folder of the database allow it)
@@ -125,6 +135,7 @@ function Invoke-Backup([string]$prefix = 'mm') {
     }
   } catch {
     Write-History "FAILED  $name  $($_.Exception.Message)"
+    Write-State 'N' $_.Exception.Message
     throw
   }
   $file = Join-Path $Dir "$name.dmp"
@@ -147,6 +158,7 @@ function Invoke-Backup([string]$prefix = 'mm') {
   }
   Remove-Old $Dir
   Write-History "OK      $name.dmp  $mb MB$where"
+  Write-State 'Y' "$name.dmp"
   return $file
 }
 
@@ -239,6 +251,7 @@ if ($Restore) {
     $bad = @(Sql "exec dbms_utility.compile_schema(user, false)`nselect count(*) from user_objects where status <> 'VALID';")
     $n = [int]($bad | Select-Object -Last 1)
     Write-History "RESTORE $([IO.Path]::GetFileName($Restore))  (before it: $([IO.Path]::GetFileName($before)))  invalid objects: $n"
+    Write-State 'Y' ([IO.Path]::GetFileName($before))      # (the settings came back with the backup: the last good one again)
     if ($warn) { Write-Host "== [!] impdp: completed with errors, see $pump\$name.log" }
     if ($n) { Write-Host "== [!] $n objects of MM not valid: INSTALL.sql again (the data stays)" }
     Write-Host "== restored from $Restore"

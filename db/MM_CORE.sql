@@ -133,6 +133,10 @@ create or replace package mm_core as
   procedure post_count(p_count_id number);
   procedure cancel_count(p_count_id number);
 
+  -- the backup of the database (db/backup.ps1) says how it went: p_ok Y (p_text its file) or N (p_text
+  -- the error); MM_BACKUP_STATE tells the pages when the last good one is too old
+  procedure backup_done(p_ok varchar2, p_text varchar2);
+
 end mm_core;
 /
 
@@ -1712,6 +1716,24 @@ create or replace package body mm_core as
     c mm_count%rowtype := open_count(p_count_id);
   begin
     update mm_count set status = 'C' where id = p_count_id;
+  end;
+
+  procedure backup_done(p_ok varchar2, p_text varchar2) is
+    procedure put(p_name varchar2, p_value varchar2) is
+    begin
+      merge into mm_setting s using (select p_name name, substr(p_value, 1, 400) value from dual) v
+      on (s.name = v.name)
+      when matched then update set s.value = v.value
+      when not matched then insert (name, value) values (v.name, v.value);
+    end;
+  begin
+    if p_ok = 'Y' then
+      put('BACKUP_OK_AT', to_char(sysdate, 'YYYY-MM-DD HH24:MI:SS'));
+      put('BACKUP_OK_FILE', p_text);
+    else
+      put('BACKUP_FAILED_AT', to_char(sysdate, 'YYYY-MM-DD HH24:MI:SS'));
+      put('BACKUP_ERROR', p_text);
+    end if;
   end;
 
 end mm_core;

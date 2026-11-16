@@ -125,6 +125,7 @@ commit;
 | `/api/reports/sales` | πωλήσεις ανά ημέρα |
 | `/api/reports/vat` | ΦΠΑ ανά μήνα και συντελεστή |
 | `/api/reports/min-stock` | είδη κάτω από το ελάχιστο απόθεμα |
+| `/api/backup` | το τελευταίο backup (`db/backup.ps1`): `state` (`OK`, `OLD` πάνω από 2 μέρες, `FAILED`, `NEVER`), `days`, `ok_at`, `ok_file`, `failed_at`, `error` (MANAGER) |
 | `/api/reports/trial-items`, `trial-customers`, `trial-suppliers` `?from=&to=&all=1` | τα ισοζύγια: `rows` (`id`, `code`, `name`, `unit`, `open_bal`, `debit`, `credit`, `close_bal`) και `totals`· χωρίς `all=1` μόνο όσα έχουν κάτι |
 | `GET /api/counts`, `GET /api/counts/{id}` | οι απογραφές (ανοιχτές και των 90 ημερών)· μία με τις γραμμές της (μετρήθηκαν, σύστημα, διαφορά, συσκευή) |
 | `POST /api/counts` `{"name": "..."}` | νέα απογραφή (MANAGER) |
