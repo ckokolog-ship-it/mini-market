@@ -47,6 +47,17 @@ create or replace package mm_ledger as
     cum_debit      number,           -- ... with it
     cum_credit     number);
   type t_rrows is table of t_rrow;
+  -- a row of a trial balance (ισοζύγιο): an item, a customer or a supplier, its totals as its ledger
+  type t_trow is record (
+    id         number,
+    code       varchar2(40),     -- the code of an item, the ΑΦΜ of a customer or a supplier
+    name       varchar2(200),
+    unit       varchar2(10),
+    open_bal   number,           -- from the carry-over (before p_from)
+    debit      number,           -- the period
+    credit     number,
+    close_bal  number);          -- at the end of p_to
+  type t_trows is table of t_trow;
 
   function item_rows(p_item_id number, p_from date, p_to date) return t_rows pipelined;
   -- p_kind: C a customer, S a supplier
@@ -56,6 +67,12 @@ create or replace package mm_ledger as
                  p_open out number, p_debit out number, p_credit out number, p_close out number);
   -- the rows of a report: the moves (only the carry-over when there are none)
   function report_rows(p_what varchar2, p_id number, p_from date, p_to date) return t_rrows pipelined;
+  -- the trial balance (ισοζύγιο) of the items (I), the customers (C) or the suppliers (S) for a period:
+  -- one row each, with the totals of its ledger (fill) but not its moves; p_all 'N': only those with
+  -- something (a carry-over, a move, a balance), 'Y': all. From the totals of the months (as the
+  -- carry-over of a ledger): the balance as of a day = the months before its month + the moves of its
+  -- days before it; a trial balance = that at p_from and after p_to, two half months of moves read
+  function trial_rows(p_what varchar2, p_from date, p_to date, p_all varchar2 default 'N') return t_trows pipelined;
   -- 'Καρτέλα πελάτη: <name>' ...
   function title(p_what varchar2, p_id number) return varchar2;
   -- the words of the reports: DATE, DOC, DESCR, DEBIT, CREDIT, BALANCE (by p_what), FROM_CARRY,
@@ -291,6 +308,67 @@ create or replace package body mm_ledger as
       out_(open_);
       pipe row (r);
     end if;
+    return;
+  end;
+
+  function trial_rows(p_what varchar2, p_from date, p_to date, p_all varchar2 default 'N') return t_trows pipelined is
+    r t_trow;
+    f date := trunc(p_from);
+    t1 date := trunc(p_to) + 1;          -- the day after the period
+    sign_ number := case p_what when 'S' then -1 else 1 end;
+  begin
+    if p_what is null or p_what not in ('I', 'C', 'S') then
+      fail(73, 'Ισοζύγιο ειδών (I), πελατών (C) ή προμηθευτών (S)');
+    end if;
+    if p_from is null or p_to is null or p_from > p_to then
+      fail(72, 'Το διάστημα θέλει «από» και «έως», με το «από» πριν από το «έως»');
+    end if;
+    -- d0/c0: the debit and the credit before f; d1/c1: before t1 (each: the months before its month,
+    -- and the moves of its month before it)
+    for x in (
+      with mv as (
+        select item_id id, qty_in d, qty_out c,
+               case when month < trunc(f, 'MM') then 1 else 0 end in0, case when month < trunc(t1, 'MM') then 1 else 0 end in1
+        from mm_item_month where p_what = 'I' and month < trunc(t1, 'MM')
+        union all
+        select item_id, greatest(qty, 0), greatest(-qty, 0),
+               case when move_at >= trunc(f, 'MM') and move_at < f then 1 else 0 end,
+               case when move_at >= trunc(t1, 'MM') and move_at < t1 then 1 else 0 end
+        from mm_stock_move
+        where p_what = 'I' and ((move_at >= trunc(f, 'MM') and move_at < f) or (move_at >= trunc(t1, 'MM') and move_at < t1))
+        union all
+        select partner_id, debit, credit,
+               case when month < trunc(f, 'MM') then 1 else 0 end, case when month < trunc(t1, 'MM') then 1 else 0 end
+        from mm_partner_month where kind = p_what and month < trunc(t1, 'MM')
+        union all
+        select partner_id, debit, credit,
+               case when ldate >= trunc(f, 'MM') and ldate < f then 1 else 0 end,
+               case when ldate >= trunc(t1, 'MM') and ldate < t1 then 1 else 0 end
+        from mm_partner_event
+        where kind = p_what and ((ldate >= trunc(f, 'MM') and ldate < f) or (ldate >= trunc(t1, 'MM') and ldate < t1))),
+      tot as (
+        select id, sum(in0 * d) d0, sum(in0 * c) c0, sum(in1 * d) d1, sum(in1 * c) c1 from mv group by id),
+      who as (
+        select id, code, name, unit, 1 o from mm_item where p_what = 'I' and is_model = 'N'
+        union all
+        select id, afm, name, null, 2 from mm_customer where p_what = 'C'
+        union all
+        select id, afm, name, null, 3 from mm_supplier where p_what = 'S')
+      select w.id, w.code, w.name, w.unit, nvl(t.d0, 0) d0, nvl(t.c0, 0) c0, nvl(t.d1, 0) d1, nvl(t.c1, 0) c1
+      from who w left join tot t on t.id = w.id
+      order by case when p_what = 'I' then w.code end, upper(w.name), w.id) loop
+      r.id := x.id;
+      r.code := x.code;
+      r.name := x.name;
+      r.unit := x.unit;
+      r.open_bal := sign_ * (x.d0 - x.c0);
+      r.debit := x.d1 - x.d0;
+      r.credit := x.c1 - x.c0;
+      r.close_bal := sign_ * (x.d1 - x.c1);
+      if p_all = 'Y' or r.open_bal <> 0 or r.debit <> 0 or r.credit <> 0 or r.close_bal <> 0 then
+        pipe row (r);
+      end if;
+    end loop;
     return;
   end;
 

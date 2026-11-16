@@ -15,7 +15,7 @@
 # password. The log of each one: <Out>\<name>.log.
 # This file is ASCII on purpose: Windows PowerShell 5 reads a file without BOM as ANSI.
 param(
-  [string[]]$Reports = @('MM_LEDGER_I', 'MM_LEDGER_P', 'MM_SALES', 'MM_VAT', 'MM_MIN_STOCK'),
+  [string[]]$Reports = @('MM_LEDGER_I', 'MM_LEDGER_P', 'MM_SALES', 'MM_VAT', 'MM_MIN_STOCK', 'MM_TRIAL_I', 'MM_TRIAL_C', 'MM_TRIAL_S'),
   [string]$UserId = '/@MM_DB',
   [string]$OracleHome = 'C:\Oracle\Middleware\Oracle_Home',
   [string]$Domain = 'C:\Oracle\Middleware\Oracle_Home\user_projects\domains\forms_domain',

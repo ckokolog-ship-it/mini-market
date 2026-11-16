@@ -31,6 +31,8 @@ import java.util.Optional;
  *   /api/ledger/{item|customer|supplier}/{id}  a ledger (MM_LEDGER): carry-over, moves, totals;
  *                                              with ?limit=&offset= a page of its moves, its carry_in, carry_out
  *   /api/reports/sales   /api/reports/vat   /api/reports/min-stock
+ *   /api/reports/trial-items|trial-customers|trial-suppliers?from=&to=&all=1   the trial balances
+ *                                              (ισοζύγια): a row each with the totals of its ledger, no moves
  *   GET /api/counts   GET /api/counts/{id}      the counts of the stock; one with its lines
  *   POST /api/counts {name}                     a new count                    (MANAGER)
  *   POST /api/counts/{id}/scan {code, qty, mode ADD|SET, device}   a scan of a phone
@@ -533,7 +535,24 @@ final class Api {
             case "min-stock" -> out.put("rows", Db.rows(c, """
                     select category, code, name, unit, stock, min_stock, missing, supplier
                     from mm_min_stock order by category, code"""));
-            default -> throw new Http.Fail(404, "not_found", "reports: sales, vat or min-stock");
+            case "trial-items", "trial-customers", "trial-suppliers" -> {
+                String what = switch (name) {
+                    case "trial-items" -> "I";
+                    case "trial-customers" -> "C";
+                    default -> "S";
+                };
+                out.put("from", f.toString());
+                out.put("to", t.toString());
+                List<Map<String, Object>> rows = Db.rows(c, """
+                        select id, code, name, unit, open_bal, debit, credit, close_bal
+                        from table(mm_ledger.trial_rows(?, ?, ?, ?))""", what, f, t, "1".equals(q.get("all")) ? "Y" : "N");
+                out.put("rows", rows);
+                out.put("totals", Db.rows(c, """
+                        select nvl(sum(open_bal), 0) open_bal, nvl(sum(debit), 0) debit, nvl(sum(credit), 0) credit,
+                               nvl(sum(close_bal), 0) close_bal
+                        from table(mm_ledger.trial_rows(?, ?, ?, 'N'))""", what, f, t).get(0));
+            }
+            default -> throw new Http.Fail(404, "not_found", "reports: sales, vat, min-stock, trial-items, trial-customers or trial-suppliers");
         }
         return out;
     }

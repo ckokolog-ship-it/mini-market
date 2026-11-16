@@ -7,6 +7,10 @@ the .rdf: build_reports.ps1 on Windows):
   MM_SALES      the sales of each day, by month (P_FROM, P_TO)
   MM_VAT        the VAT of the sales and of the purchases, by month and rate (P_FROM, P_TO)
   MM_MIN_STOCK  the items under their minimum stock, by category
+  MM_TRIAL_I    the trial balance (ισοζύγιο) of the items: a row each, by category, the totals of its
+                ledger (from the carry-over, in, out, the stock at the end), no moves (P_FROM, P_TO)
+  MM_TRIAL_C    ... of the customers (from the carry-over, debit, credit, balance; the grand totals)
+  MM_TRIAL_S    ... of the suppliers
 
 The parameters: P_KIND (I, C, S), P_ID, P_FROM and P_TO (DD/MM/YYYY). The rows: mm_ledger.report_rows
 of the database (db/MM_LEDGER.sql). On every page, on top "from the carry-over" (από μεταφορά): the
@@ -250,7 +254,36 @@ TABLES = {
               ('MISSING', 4.90, 0.70, 'end', None), ('SUPPLIER', 5.70, 1.60, 'start', None)],
         sums=[('CODE', 'count')],
         words=('SUBTOTAL_CAT', 'GRAND_CAT')),
+    # the trial balances (mm_ledger.trial_rows, db/MM_LEDGER.sql): only those with something
+    'MM_TRIAL_I': dict(
+        title='TRIAL_I', params=PERIOD,
+        query=("select c.name category, t.code, t.name, t.unit, mm_report.qty(t.open_bal) open_q, "
+               "mm_report.qty(t.debit) in_q, mm_report.qty(t.credit) out_q, mm_report.qty(t.close_bal) end_q\n"
+               "from table(mm_ledger.trial_rows('I', to_date(:P_FROM, 'DD/MM/YYYY'), to_date(:P_TO, 'DD/MM/YYYY'))) t\n"
+               "join mm_item i on i.id = t.id join mm_category c on c.id = i.category_id\norder by c.name, t.code"),
+        items=[('CATEGORY', 'vchar2', 60), ('CODE', 'vchar2', 40), ('NAME', 'vchar2', 200), ('UNIT', 'vchar2', 10),
+               ('OPEN_Q', 'vchar2', 30), ('IN_Q', 'vchar2', 30), ('OUT_Q', 'vchar2', 30), ('END_Q', 'vchar2', 30)],
+        brk=['CATEGORY'],
+        cols=[('CODE', 0.00, 1.00, 'start', None), ('NAME', 1.05, 2.35, 'start', None), ('UNIT', 3.45, 0.40, 'start', None),
+              ('OPEN_Q', 3.90, 0.80, 'end', None), ('IN_Q', 4.75, 0.80, 'end', None),
+              ('OUT_Q', 5.60, 0.80, 'end', None), ('END_Q', 6.45, 0.85, 'end', None)],
+        sums=[('CODE', 'count')],
+        words=('SUBTOTAL_CAT', 'GRAND_CAT')),
 }
+for _k, _who in (('C', 'CUSTOMERS'), ('S', 'SUPPLIERS')):
+    TABLES['MM_TRIAL_' + _k] = dict(
+        title='TRIAL_' + _k, params=PERIOD, subtotals=False,
+        query=("select mm_report.label('%s') grp, t.code afm, t.name partner, t.open_bal, t.debit, t.credit, "
+               "t.close_bal\nfrom table(mm_ledger.trial_rows('%s', to_date(:P_FROM, 'DD/MM/YYYY'), "
+               "to_date(:P_TO, 'DD/MM/YYYY'))) t" % (_who, _k)),
+        items=[('GRP', 'vchar2', 40), ('AFM', 'vchar2', 40), ('PARTNER', 'vchar2', 200), ('OPEN_BAL', 'number', 22),
+               ('DEBIT', 'number', 22), ('CREDIT', 'number', 22), ('CLOSE_BAL', 'number', 22)],
+        brk=['GRP'],
+        cols=[('AFM', 0.00, 0.80, 'start', None), ('PARTNER', 0.85, 2.45, 'start', None),
+              ('OPEN_BAL', 3.35, 0.95, 'end', MONEY), ('DEBIT', 4.35, 0.95, 'end', MONEY),
+              ('CREDIT', 5.35, 0.95, 'end', MONEY), ('CLOSE_BAL', 6.30, 1.00, 'end', MONEY)],
+        sums=[('OPEN_BAL', 'sum'), ('DEBIT', 'sum'), ('CREDIT', 'sum'), ('CLOSE_BAL', 'sum')],
+        words=('GRAND', 'GRAND'))
 
 
 def build_table(name, t):
@@ -276,7 +309,7 @@ def build_table(name, t):
         if n in brk:
             out += item(n, dt, w, '        ')
     # the subtotals: in the break group, reset at it
-    for n, fn in t['sums']:
+    for n, fn in (t['sums'] if t.get('subtotals', True) else []):
         out.append('        <summary %s/>' % attrs(dict(name='CS_S_' + n, source=n, function=fn, width=22, precision=14,
                                                         scale=2, reset='G_BRK', compute='report')))
     out += ['      </group>', '      <group name="G_ROWS">']
@@ -287,7 +320,7 @@ def build_table(name, t):
     for n, fn in t['sums']:
         out.append('    <summary %s/>' % attrs(dict(name='CS_G_' + n, source=n, function=fn, width=22, precision=14,
                                                     scale=2, reset='report', compute='report')))
-    words = ['TITLE', 'PERIOD', 'PAGE', t['words'][0], t['words'][1]] + [c[0] for c in t['cols']]
+    words = list(dict.fromkeys(['TITLE', 'PERIOD', 'PAGE', t['words'][0], t['words'][1]] + [c[0] for c in t['cols']]))
     for w in words:
         out.append('    <formula %s/>' % attrs(dict(name='CF_' + w, source='cf_%sformula' % w.lower(),
                                                     datatype='character', width=200)))
@@ -325,12 +358,13 @@ def build_table(name, t):
             '            <generalLayout verticalElasticity="expand"/>']
     for n, x, w, a, mask in t['cols']:
         out.append(field('F_' + n, n, x, ROW_H * 1.3, w, align=a, mask=mask, pad='              '))
-    out += ['          </repeatingFrame>',
-            '          <frame name="M_SUB">',
-            '            ' + geo(0, ROW_H * 2.6, 7.30, ROW_H * 1.6)]
-    out += total_row('S', t['words'][0], ROW_H * 2.8, '            ')
-    out += ['          </frame>',
-            '        </repeatingFrame>',
+    out.append('          </repeatingFrame>')
+    if t.get('subtotals', True):       # (one group, as the trial balance of the customers: the grand totals only)
+        out += ['          <frame name="M_SUB">',
+                '            ' + geo(0, ROW_H * 2.6, 7.30, ROW_H * 1.6)]
+        out += total_row('S', t['words'][0], ROW_H * 2.8, '            ')
+        out.append('          </frame>')
+    out += ['        </repeatingFrame>',
             '        <frame name="M_GRAND">',
             '          ' + geo(0, ROW_H * 5.2, 7.30, ROW_H * 1.6)]
     out += total_row('G', t['words'][1], ROW_H * 5.4, '          ')

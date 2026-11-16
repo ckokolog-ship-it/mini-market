@@ -61,6 +61,9 @@ create or replace package body mm_report as
       when 'SALES' then 'Πωλήσεις ανά ημέρα'
       when 'VAT' then 'ΦΠΑ πωλήσεων και αγορών'
       when 'MIN_STOCK' then 'Είδη κάτω από το ελάχιστο απόθεμα'
+      when 'TRIAL_I' then 'Ισοζύγιο ειδών'
+      when 'TRIAL_C' then 'Ισοζύγιο πελατών'
+      when 'TRIAL_S' then 'Ισοζύγιο προμηθευτών'
       else p_report end;
   end;
 
@@ -99,6 +102,19 @@ create or replace package body mm_report as
       when 'GRAND' then 'Γενικό σύνολο'
       when 'GRAND_CAT' then 'Είδη συνολικά'
       when 'PAGE' then 'Σελίδα'
+      -- the trial balances (ισοζύγια: mm_ledger.trial_rows)
+      when 'OPEN_Q' then 'Από μεταφορά'
+      when 'IN_Q' then 'Εισαγωγές'
+      when 'OUT_Q' then 'Εξαγωγές'
+      when 'END_Q' then 'Απόθεμα'
+      when 'AFM' then 'ΑΦΜ'
+      when 'PARTNER' then 'Επωνυμία'
+      when 'OPEN_BAL' then 'Από μεταφορά'
+      when 'DEBIT' then 'Χρέωση'
+      when 'CREDIT' then 'Πίστωση'
+      when 'CLOSE_BAL' then 'Υπόλοιπο'
+      when 'CUSTOMERS' then 'Πελάτες'
+      when 'SUPPLIERS' then 'Προμηθευτές'
       else p_key end;
   end;
 

@@ -16,7 +16,8 @@ const MENU = [
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
   ['Αναφορές', [['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
-    ['#/reports/min-stock', 'Ελάχιστο απόθεμα', 'MANAGER']]],
+    ['#/reports/min-stock', 'Ελάχιστο απόθεμα', 'MANAGER'], ['#/reports/trial-items', 'Ισοζύγιο ειδών', 'MANAGER'],
+    ['#/reports/trial-customers', 'Ισοζύγιο πελατών', 'MANAGER'], ['#/reports/trial-suppliers', 'Ισοζύγιο προμηθευτών', 'MANAGER']]],
 ];
 
 let session = null;
@@ -344,19 +345,25 @@ async function ledgerPage(what, id, params) {
 
 // -- the reports -----------------------------------------------------------------------------------
 async function reportPage(name, params) {
-  const titles = { sales: 'Πωλήσεις ανά ημέρα', vat: 'ΦΠΑ πωλήσεων και αγορών', 'min-stock': 'Είδη κάτω από το ελάχιστο απόθεμα' };
+  const titles = { sales: 'Πωλήσεις ανά ημέρα', vat: 'ΦΠΑ πωλήσεων και αγορών', 'min-stock': 'Είδη κάτω από το ελάχιστο απόθεμα',
+    'trial-items': 'Ισοζύγιο ειδών', 'trial-customers': 'Ισοζύγιο πελατών', 'trial-suppliers': 'Ισοζύγιο προμηθευτών' };
+  if (!titles[name]) { show(el('h1', {}, 'Δεν υπάρχει αυτή η αναφορά')); return; }
+  const trial = name.startsWith('trial-');
+  const all = el('input', { type: 'checkbox', name: 'all', checked: params.get('all') === '1' });
   const from = el('input', { type: 'date', value: params.get('from') || isoYearStart() });
   const to = el('input', { type: 'date', value: params.get('to') || isoToday() });
   const out = el('div');
   const go = async () => {
     try {
-      const r = await api(`reports/${name}?from=${from.value}&to=${to.value}`);
-      out.replaceChildren(name === 'sales' ? salesTable(r.rows) : name === 'vat' ? vatTable(r.rows) : minTable(r.rows));
+      const r = await api(`reports/${name}?from=${from.value}&to=${to.value}` + (trial && all.checked ? '&all=1' : ''));
+      out.replaceChildren(trial ? trialTable(name, r, from.value, to.value) : name === 'sales' ? salesTable(r.rows) : name === 'vat' ? vatTable(r.rows) : minTable(r.rows));
     } catch (e) { fail(e); }
   };
   const form = name === 'min-stock' ? null
     : el('form', { class: 'panel row', onsubmit: (ev) => { ev.preventDefault(); go(); } },
-      el('label', {}, 'Από', from), el('label', {}, 'Έως', to), el('button', { class: 'primary', type: 'submit' }, 'Εμφάνιση'));
+      el('label', {}, 'Από', from), el('label', {}, 'Έως', to),
+      trial ? el('label', { class: 'check' }, all, 'Και όσα έχουν μηδέν παντού') : null,
+      el('button', { class: 'primary', type: 'submit' }, 'Εμφάνιση'));
   show(el('h1', {}, titles[name]), form, out);
   go();
 }
@@ -415,6 +422,27 @@ function vatTable(rows) {
     byMonth(rows, (x) => x.month.slice(5) + '/' + x.month.slice(0, 4),
       (x) => [el('td', {}, x.vat_code + ' ' + x.vat_rate + '%'), num(x.s_net), num(x.s_vat), num(x.p_net), num(x.p_vat), num(x.payable)],
       sums, (s) => sums.map((k) => num(s[k]))));
+}
+// a trial balance (ισοζύγιο): a row each, the totals of its ledger (no moves); a row opens its ledger for
+// the same period. The items in quantities (no total of them: kilos and pieces), the partners in euros
+function trialTable(name, r, f, t) {
+  const item = name === 'trial-items';
+  const who = { 'trial-items': 'item', 'trial-customers': 'customer', 'trial-suppliers': 'supplier' }[name];
+  const fmt = item ? qty : money;
+  const head = item ? [['Κωδικός'], ['Περιγραφή'], ['Μ.Μ.', 'hide-phone'], ['Από μεταφορά', 'num'], ['Εισαγωγές', 'num'], ['Εξαγωγές', 'num'], ['Απόθεμα', 'num']]
+    : [['ΑΦΜ', 'hide-phone'], ['Επωνυμία'], ['Από μεταφορά', 'num'], ['Χρέωση', 'num'], ['Πίστωση', 'num'], ['Υπόλοιπο', 'num']];
+  if (!r.rows.length) return el('p', { class: 'muted' }, 'Καμία κίνηση και κανένα υπόλοιπο σε αυτό το διάστημα.');
+  const rows = r.rows.map((x) => el('tr', { class: 'click', onclick: () => { location.hash = `#/ledger/${who}/${x.id}?from=${f}&to=${t}`; } },
+    item ? el('td', {}, x.code) : el('td', { class: 'hide-phone' }, x.code || ''), el('td', { class: 'wrap' }, x.name),
+    item ? el('td', { class: 'hide-phone' }, x.unit || '') : null,
+    num(x.open_bal, fmt), num(x.debit, fmt), num(x.credit, fmt), num(x.close_bal, fmt)));
+  if (!item) {
+    const s = r.totals;
+    rows.push(el('tr', { class: 'total' }, el('td', { class: 'hide-phone' }), el('td', {}, 'Σύνολα'),
+      num(s.open_bal), num(s.debit), num(s.credit), num(s.close_bal)));
+  }
+  return el('div', {}, el('p', { class: 'muted' }, `${day(r.from)} - ${day(r.to)} · ${r.rows.length} ` + (item ? 'είδη' : name === 'trial-customers' ? 'πελάτες' : 'προμηθευτές')),
+    table(head, rows));
 }
 function minTable(rows) {
   if (!rows.length) return el('p', { class: 'muted' }, 'Κανένα είδος κάτω από το ελάχιστο.');
