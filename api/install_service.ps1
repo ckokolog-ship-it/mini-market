@@ -165,8 +165,13 @@ if (-not $svc) {
   & $exe install
   if ($LASTEXITCODE) { throw 'the install of the service failed (the messages above)' }
 } else {
-  & $exe refresh
-  if ($LASTEXITCODE) { throw 'the refresh of the service failed (the messages above)' }
+  # (WinSW 2 has no "refresh": its settings of the service itself, as the start or the dependency,
+  # change by an uninstall and an install; the service is stopped here already)
+  & $exe uninstall
+  if ($LASTEXITCODE) { throw 'the uninstall of the old service failed (the messages above)' }
+  for ($k = 0; $k -lt 15 -and (Get-Svc $name); $k++) { Start-Sleep -Seconds 1 }   # gone (services.msc closed)
+  & $exe install
+  if ($LASTEXITCODE) { throw 'the install of the service failed (the messages above)' }
 }
 
 # the network: the port open for private networks only (as the WiFi of the shop)
