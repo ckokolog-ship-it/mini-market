@@ -127,6 +127,8 @@ commit;
 | `/api/reports/vat` | ΦΠΑ ανά μήνα και συντελεστή |
 | `/api/reports/min-stock` | είδη κάτω από το ελάχιστο απόθεμα |
 | `POST /api/docs/from-min-stock` `{"supplier_id"}` | οι παραγγελίες στους προμηθευτές από το ελάχιστο απόθεμα: πρόχειρα δελτία παραλαβής (`mm_core.order_missing`)· `lines` πόσες γραμμές μπήκαν, `drafts` τα πρόχειρα (MANAGER) |
+| `GET /api/expiry?days=` | οι λήξεις: όσα έληξαν και όσα λήγουν μέσα σε `days` ημέρες (προεπιλογή `EXPIRY_DAYS`, αλλιώς 7), με όσα μένουν από κάθε παραλαβή (`left_`, FIFO) (MANAGER) |
+| `POST /api/expiry/withdraw` `{"line_id", "qty"}` | απόσυρση από το απόθεμα (`qty`: προεπιλογή όσα μένουν) |
 | `GET /api/chart?days=&to=` | το γράφημα πωλήσεων (7 έως 364 ημέρες, έως μια ημέρα· προεπιλογή 30 έως σήμερα): `days` (ανά ημέρα: `total`, `receipts`, `last_year` την ίδια μέρα της εβδομάδας πέρσι), `hours` (0-23: αποδείξεις λιανικής και ποσό), `sums` (`total`, `last_year`, `receipts`, `avg_receipt`) (MANAGER) |
 | `GET /api/day?date=` | η σύνοψη μιας ημέρας (προεπιλογή σήμερα): `zs` τα Ζ των ταμείων, `sales`, `vat` ανά συντελεστή, `top` τα 10 είδη, `scratch` (δελτία, κέρδη), `orders`, `mydata` (`day` ανά κατάσταση, `waiting`, `failed`), `min_stock`, `backup` (MANAGER) |
 | `GET /api/scratch` | τα σκρατς: οι εκδόσεις (είδος, δελτία ανά πακέτο, διαθέσιμα), τα πακέτα (δελτία, πουλημένα, μένουν), τα κέρδη ανά ημέρα (MANAGER) |
@@ -157,7 +159,7 @@ commit;
 | `GET /api/docs?type=&status=&q=&limit=&offset=`, `GET /api/docs/{id}` | τα παραστατικά εκτός από τις αποδείξεις, σε σελίδες· ένα με τις γραμμές του, και για τιμολόγιο τα δελτία του (`notes_in`), για δελτίο το τιμολόγιό του (`invoice_text`) |
 | `GET /api/docs/notes?type=&customer_id=&supplier_id=` | τα καταχωρημένα δελτία χωρίς τιμολόγιο |
 | `POST /api/docs` `{"doc_type", "customer_id" ή "supplier_id", "payment", "doc_date"}` ή `{"from_note", "doc_date"}` | νέο πρόχειρο· ή το πρόχειρο τιμολόγιο ενός δελτίου |
-| `POST /api/docs/{id}/lines` `{"code", "qty", "price", "discount"}`, `.../lines/{line}` `{"qty", ...}` | γραμμή (σε πώληση, κάρτες με serials: οι παλαιότερες)· αλλαγή, με `qty` 0 σβήνει |
+| `POST /api/docs/{id}/lines` `{"code", "qty", "price", "discount", "expires"}`, `.../lines/{line}` `{"qty", ..., "expires"}` | γραμμή (σε πώληση, κάρτες με serials: οι παλαιότερες)· αλλαγή, με `qty` 0 σβήνει· `expires` (YYYY-MM-DD, κενό: καμία): η ημερομηνία λήξης μιας γραμμής παραλαβής (DPA, TAD) |
 | `POST /api/docs/{id}/notes` `{"note_id"}` | κι άλλο δελτίο στο πρόχειρο τιμολόγιο |
 | `POST /api/docs/{id}/post`, `.../cancel`, `.../delete`, `.../credit` | καταχώριση, ακύρωση, σβήσιμο πρόχειρου, επιστροφή (πρόχειρο δελτίο επιστροφής) |
 | `GET /api/payments?kind=R\|P&q=`, `POST /api/payments` `{"kind", "partner_id", "amount", "method", "pay_date", "notes", "register"}`, `POST /api/payments/{id}/cancel` | εισπράξεις (R) και πληρωμές (P): η λίστα, νέα, ακύρωση |

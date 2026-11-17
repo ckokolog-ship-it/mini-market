@@ -33,7 +33,7 @@ async function waitText(page, sel, text) {
     // (the 401 of the wrong password, as the browser writes every failed request: expected)
     if (m.type() === 'error' && !/status of 401/.test(m.text())) errors.push(m.text());
   });
-  page.on('dialog', (d) => d.accept());
+  page.on('dialog', (d) => (d.type() === 'prompt' ? d.accept(d.defaultValue()) : d.accept()));   // (OK, as a person)
 
   // the address of the server: to the pages; their headers
   const r = await page.goto(BASE + '/');
@@ -303,6 +303,23 @@ async function waitText(page, sel, text) {
   const prev = new URL(page.url().replace('#/', '')).searchParams.get('date');
   await waitText(page, 'main h1', prev.split('-').reverse().join('/'));
   ok(true, 'the summary: the day before, ' + prev);
+  // the expiry: a line of a draft receipt, its date in the page; the expired one in the list, taken out
+  await page.goto(BASE + '/web/#/doc/' + process.env.DOC_DRAFT);
+  const expIn = `input[aria-label="Λήξη ${process.env.YOGURT}"]`;
+  await page.waitForSelector(expIn);
+  await page.fill(expIn, '2030-01-31');
+  await page.dispatchEvent(expIn, 'change');
+  await page.waitForFunction((sel) => document.querySelector(sel) && document.querySelector(sel).value === '2030-01-31', expIn);
+  ok(await page.isVisible('input[name=expires]'), 'a receipt of goods: the date of expiry of each line');
+  await page.goto(BASE + '/web/#/expiry');
+  await waitText(page, 'main', process.env.YOGURT);
+  const yrow = `main tbody tr:has-text("${process.env.YOGURT}")`;
+  ok((await page.textContent(yrow)).includes('έληξε πριν 1 ημέρα') && (await page.$$(yrow + '.expired')).length === 1,
+    'the expiry: the expired one, all 3 of it left');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/expiry.png', fullPage: true });
+  await page.click(yrow + ' button:has-text("Απόσυρση")');                        // (the prompt: its 3)
+  await waitText(page, '#toast', 'Αποσύρθηκαν 3');
+  ok((await page.$$(yrow)).length === 0, 'the expired one taken out of the stock');
   // the charts of the sales: 30 days with a year before, the hours; a day's tooltip; the numbers as a table
   await page.goto(BASE + '/web/#/chart?days=30');
   await page.waitForSelector('svg.chart path.ch-bar');

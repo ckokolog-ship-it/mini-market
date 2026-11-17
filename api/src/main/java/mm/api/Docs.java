@@ -21,8 +21,10 @@ import java.util.Map;
  *   GET  /api/docs/{id}                            one: its lines; an invoice its notes, a note its invoice
  *   POST /api/docs {doc_type, customer_id|supplier_id, payment, doc_date}   a new draft
  *   POST /api/docs {from_note, doc_date}           a new draft invoice of a note (invoice_from)
- *   POST /api/docs/{id}/lines {code, qty, price, discount}   a line (a card of a sale: qty of them)
- *   POST /api/docs/{id}/lines/{line} {qty, price, discount}  a line changed; qty 0: out
+ *   POST /api/docs/{id}/lines {code, qty, price, discount, expires}   a line (a card of a sale: qty of them);
+ *                                                  expires YYYY-MM-DD: goods received (DPA, TAD)
+ *   POST /api/docs/{id}/lines/{line} {qty, price, discount, expires}  a line changed; qty 0: out; expires
+ *                                                  "" or null: none (only the fields given change)
  *   POST /api/docs/{id}/notes {note_id}            one more note into the draft invoice
  *   POST /api/docs/{id}/post | cancel | delete     posted (its number), cancelled, a draft deleted
  *   POST /api/docs/{id}/credit                     goods back: a draft return note of its lines
@@ -151,7 +153,7 @@ final class Docs {
         Map<String, Object> out = new LinkedHashMap<>(h.get(0));
         out.put("lines", Db.rows(c, """
                 select l.id, l.line_no, i.id item_id, i.code, i.name, i.unit, i.serial_tracked, l.qty, l.price,
-                       l.discount, l.vat_rate, l.net, l.vat, l.total,
+                       l.discount, l.vat_rate, l.net, l.vat, l.total, l.expires,
                        (select listagg(s.serial, ', ') within group (order by s.serial) from mm_serial s
                         where s.out_line_id = l.id or s.in_line_id = l.id) serials
                 from mm_doc_line l join mm_item i on i.id = l.item_id
@@ -167,6 +169,31 @@ final class Docs {
             throw new Http.Fail(409, "not_draft", "Το παραστατικό δεν είναι πρόχειρο");
         }
         return d;
+    }
+
+    /** the date of expiry of a line, when the body has one ("" or null: none) */
+    private static void expires(Connection c, long line, Map<String, Object> in) throws SQLException {
+        if (!in.containsKey("expires")) {
+            return;
+        }
+        Object v = in.get("expires");
+        java.sql.Date d = null;
+        if (v != null && !String.valueOf(v).isBlank()) {
+            try {
+                d = java.sql.Date.valueOf(java.time.LocalDate.parse(String.valueOf(v).trim()));
+            } catch (java.time.format.DateTimeParseException e) {
+                throw new Http.Fail(400, "bad_date", "expires: YYYY-MM-DD");
+            }
+        }
+        try (CallableStatement cs = c.prepareCall("begin mm_core.set_expiry(?, ?); end;")) {
+            cs.setLong(1, line);
+            if (d == null) {
+                cs.setNull(2, Types.DATE);
+            } else {
+                cs.setDate(2, d);
+            }
+            cs.execute();
+        }
     }
 
     private static void call(Connection c, String sql, Object... binds) throws SQLException {
@@ -280,8 +307,9 @@ final class Docs {
                     } else if ("Y".equals(tracked) && ((BigDecimal) d.get("stock_sign")).intValue() == 1) {
                         throw new Http.Fail(400, "serials", "Κάρτες με serials φορτώνονται από τη φόρμα «Τιμολόγια» (το serial και το PIN της καθεμιάς)");
                     } else {
-                        fn(c, "begin ? := mm_core.add_line(?, ?, ?, ?, ?); end;", id, v, qty,
+                        long line = fn(c, "begin ? := mm_core.add_line(?, ?, ?, ?, ?); end;", id, v, qty,
                                 Http.decimal(in, "price", null), Http.decimal(in, "discount", BigDecimal.ZERO));
+                        expires(c, line, in);
                     }
                     return doc(c, id);
                 }
@@ -320,7 +348,11 @@ final class Docs {
             if (l.isEmpty()) {
                 throw new Http.Fail(404, "not_found", "no such line in the document");
             }
+            expires(c, line, in);
             BigDecimal qty = Http.decimal(in, "qty", null);
+            if (qty == null && !in.containsKey("price") && !in.containsKey("discount")) {
+                return doc(c, id);                      // its date of expiry only
+            }
             if (qty != null && qty.signum() == 0) {
                 call(c, "begin mm_core.delete_line(?); end;", line);
             } else {

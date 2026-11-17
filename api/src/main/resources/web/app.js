@@ -12,7 +12,7 @@ const RANK = { CASHIER: 1, MANAGER: 2, ADMIN: 3 };
 // the menu: its groups and their pages (by role: CASHIER the till, the store; MANAGER the office too)
 const MENU = [
   ['Πωλήσεις', [['#/pos', 'Ταμείο', 'CASHIER'], ['#/orders', 'Παραγγελίες', 'CASHIER']]],
-  ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER']]],
+  ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER'], ['#/expiry', 'Λήξεις', 'MANAGER']]],
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
   ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/chart', 'Γράφημα πωλήσεων', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
@@ -677,8 +677,11 @@ async function dayPage(params) {
         pair('Απέτυχαν (όλες οι ημέρες)', my.failed, my.failed > 0)))),
       box('Αποθήκη και backup', el('table', { class: 'pairs' }, el('tbody', {},
         pair('Είδη κάτω από το ελάχιστο', r.min_stock, r.min_stock > 0),
+        pair('Έληξαν (μένουν στο απόθεμα)', r.expiry.expired, r.expiry.expired > 0),
+        pair(`Λήγουν σε ${r.expiry.days} ημέρες`, r.expiry.soon, r.expiry.soon > 0),
         pair('Backup', (BACKUP_STATE[b.state] || b.state) + (b.ok_at ? ' · ' + day(b.ok_at) : ''), b.state !== 'OK'))),
-      r.min_stock > 0 ? el('p', { class: 'no-print' }, el('a', { href: '#/reports/min-stock' }, 'Τα είδη κάτω από το ελάχιστο ›')) : null)),
+      r.min_stock > 0 ? el('p', { class: 'no-print' }, el('a', { href: '#/reports/min-stock' }, 'Τα είδη κάτω από το ελάχιστο ›')) : null,
+      r.expiry.expired + r.expiry.soon > 0 ? el('p', { class: 'no-print' }, el('a', { href: '#/expiry' }, 'Οι λήξεις ›')) : null)),
     box('Τα 10 είδη με τις περισσότερες πωλήσεις', top));
 }
 
@@ -818,6 +821,45 @@ async function chartPage(params) {
   window.addEventListener('resize', draw);
   tableBox.append(table([['Ημέρα'], ['Φέτος', 'num'], ['Πέρσι', 'num'], ['Αποδείξεις', 'num']],
     r.days.slice().reverse().map((x) => el('tr', {}, el('td', {}, day(x.day)), num(x.total), num(x.last_year), el('td', { class: 'num' }, x.receipts)))));
+}
+
+// -- the expiry of the goods: the receipts with a date, what is left of each (FIFO: the oldest goes
+// first), expired and expiring in N days; one taken out of the stock (a move by hand, its reason the date)
+async function expiryPage(params) {
+  const sel = el('select', { name: 'days' });
+  const out = el('div');
+  const draw = (r) => {
+    const opts = [...new Set([r.days, 7, 14, 30, 60])].sort((a, b) => a - b);
+    sel.replaceChildren(...opts.map((v) => el('option', { value: v, selected: v === r.days }, `${v} ημέρες`)));
+    const when = (x) => (x.days_left < 0 ? `έληξε πριν ${-x.days_left} ${-x.days_left === 1 ? 'ημέρα' : 'ημέρες'}`
+      : x.days_left === 0 ? 'λήγει σήμερα' : `σε ${x.days_left} ${x.days_left === 1 ? 'ημέρα' : 'ημέρες'}`);
+    out.replaceChildren(r.rows.length ? table([['Λήξη'], ['Πότε'], ['Κωδικός', 'hide-phone'], ['Είδος'], ['Μένουν', 'num'], ['Παραλαβή', 'hide-phone'], ['Προμηθευτής', 'hide-phone'], ['']],
+      r.rows.map((x) => el('tr', { class: x.days_left < 0 ? 'expired' : null },
+        el('td', {}, day(x.expires)), el('td', { class: x.days_left < 0 ? 'neg' : null }, (x.days_left < 0 ? '⚠ ' : '') + when(x)),
+        el('td', { class: 'hide-phone' }, x.code), el('td', { class: 'wrap' }, x.name),
+        num(x.left_, qty), el('td', { class: 'hide-phone' }, el('a', { href: '#/doc/' + x.doc_id }, `${x.doc_type} ${x.doc_no} · ${day(x.doc_date)}`)),
+        el('td', { class: 'hide-phone wrap' }, x.supplier || ''),
+        el('td', { class: 'num' }, el('button', {
+          type: 'button',
+          class: x.days_left < 0 ? 'danger' : null,
+          onclick: async () => {
+            const n = prompt(`Απόσυρση από το απόθεμα: ${x.code} ${x.name}, λήξη ${day(x.expires)}. Πόσα;`, String(x.left_));
+            if (n === null || !n.trim()) return;
+            try {
+              const w = await api('expiry/withdraw', { line_id: x.line_id, qty: Number(n.replace(',', '.')) });
+              toast(`Αποσύρθηκαν ${qty(w.withdrawn)} ${x.code}`);
+              draw(w);
+            } catch (e) { fail(e); }
+          },
+        }, 'Απόσυρση')))))
+      : el('p', { class: 'muted' }, `Τίποτα δεν λήγει τις επόμενες ${r.days} ημέρες, και τίποτα δεν έχει λήξει.`));
+  };
+  const load = async () => { try { draw(await api('expiry' + (sel.value ? '?days=' + sel.value : params.get('days') ? '?days=' + params.get('days') : ''))); } catch (e) { fail(e); } };
+  sel.addEventListener('change', load);
+  show(el('h1', {}, 'Λήξεις'), el('p', { class: 'muted' },
+    'Η ημερομηνία λήξης μπαίνει σε κάθε γραμμή της παραλαβής (δελτίο παραλαβής ή τιμολόγιο - δελτίο παραλαβής). Το «Μένουν» είναι εκτίμηση από το απόθεμα: τα παλιότερα φεύγουν πρώτα.'),
+  el('div', { class: 'panel row' }, el('label', {}, 'Λήγουν μέσα σε', sel)), out);
+  await load();
 }
 
 // -- the scratch tickets (σκρατς): bought in packs, sold one by one by the barcode of each (its game 4
@@ -1709,6 +1751,8 @@ async function docPage(id) {
   const n = el('input', { name: 'qty', type: 'number', step: 'any', min: '0', value: '1', class: 'w6' });
   const price = el('input', { name: 'price', type: 'number', step: '0.0001', min: '0', placeholder: 'αυτόματη', class: 'w8' });
   const disc = el('input', { name: 'discount', type: 'number', step: '0.01', min: '0', max: '100', value: '0', class: 'w6' });
+  const exp = el('input', { name: 'expires', type: 'date' });
+  const expBox = el('label', {}, 'Λήξη', exp);
   const found = el('div');
   const extra = el('div');
   let d = null;
@@ -1722,12 +1766,16 @@ async function docPage(id) {
   const addLine = async (c) => {
     const body = { code: c, qty: Number(n.value || 1), discount: Number(disc.value || 0) };
     if (price.value !== '') body.price = Number(price.value);
-    if (await run('lines', body)) { code.value = ''; n.value = '1'; price.value = ''; disc.value = '0'; found.replaceChildren(); }
+    if (receiving() && exp.value) body.expires = exp.value;
+    if (await run('lines', body)) { code.value = ''; n.value = '1'; price.value = ''; disc.value = '0'; exp.value = ''; found.replaceChildren(); }
     code.focus();
   };
+  // goods received from a supplier (DPA, TAD): each line its date of expiry
+  const receiving = () => d && d.side === 'P' && d.stock_sign === 1;
   const draw = () => {
     const draft = d.status === 'D';
     title.textContent = `${d.type_name} ${d.doc_no || '(πρόχειρο)'}`;
+    expBox.hidden = !receiving();
     head.replaceChildren(el('dl', { class: 'kv' }, [
       ['Είδος', `${d.doc_type} ${d.type_name}`], ['Ημερομηνία', day(d.doc_date)], ['Κατάσταση', DOC_ST[d.status]],
       [d.side === 'S' ? 'Πελάτης' : 'Προμηθευτής', d.partner], ['Πληρωμή', { CREDIT: 'πίστωση', CASH: 'μετρητά', CARD: 'κάρτα' }[d.payment]],
@@ -1739,7 +1787,9 @@ async function docPage(id) {
       ['Λάθος myDATA', d.mydata_state === 'E' || d.mydata_state === 'Q' ? d.mydata_error : null]]
       .filter(([, v]) => v !== null && v !== undefined && v !== '').flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
     addForm.hidden = !draft;
-    lines.replaceChildren(d.lines.length ? table([['#'], ['Είδος'], ['Ποσότητα', 'num'], ['Τιμή', 'num'], ['Έκπτ. %', 'num hide-phone'], ['Σύνολο', 'num'], ['']],
+    const withExp = receiving() && (draft || d.lines.some((x) => x.expires));
+    lines.replaceChildren(d.lines.length ? table([['#'], ['Είδος'], ['Ποσότητα', 'num'], ['Τιμή', 'num'], ['Έκπτ. %', 'num hide-phone'],
+      ...(withExp ? [['Λήξη']] : []), ['Σύνολο', 'num'], ['']],
       d.lines.map((x) => {
         const setQ = (q) => run(`lines/${x.id}`, { qty: q });
         const q = draft && x.serial_tracked !== 'Y'
@@ -1747,7 +1797,11 @@ async function docPage(id) {
           : qty(x.qty);
         return el('tr', {}, el('td', {}, x.line_no),
           el('td', { class: 'wrap' }, `${x.code} ${x.name}`, x.serials ? el('div', { class: 'muted' }, x.serials) : null),
-          el('td', { class: 'num' }, q), num(x.price, (v) => nf2.format(v)), num(x.discount, qty, 'num hide-phone'), num(x.total),
+          el('td', { class: 'num' }, q), num(x.price, (v) => nf2.format(v)), num(x.discount, qty, 'num hide-phone'),
+          withExp ? el('td', {}, draft
+            ? el('input', { type: 'date', value: x.expires ? x.expires.slice(0, 10) : '', 'aria-label': 'Λήξη ' + x.code, onchange: (ev) => run(`lines/${x.id}`, { expires: ev.target.value }) })
+            : day(x.expires)) : null,
+          num(x.total),
           el('td', { class: 'num' }, draft ? el('button', { type: 'button', class: 'danger', 'aria-label': 'Σβήσε ' + x.code, onclick: () => setQ(0) }, '×') : null));
       })) : el('p', { class: 'muted' }, draft ? 'Καμία γραμμή ακόμα.' : ''));
     const btn = (text, fn, cls) => el('button', { type: 'button', class: cls || null, onclick: fn }, text);
@@ -1809,7 +1863,7 @@ async function docPage(id) {
       } catch (e) { fail(e); }
     },
   }, el('label', { class: 'grow' }, 'Είδος (Enter)', code), camera(code), el('label', {}, 'Ποσότητα', n), el('label', {}, 'Τιμή', price),
-  el('label', {}, 'Έκπτ. %', disc), el('button', { class: 'primary', type: 'submit' }, 'Βάλε γραμμή'));
+  el('label', {}, 'Έκπτ. %', disc), expBox, el('button', { class: 'primary', type: 'submit' }, 'Βάλε γραμμή'));
   try { await kinds(); } catch (e) { /* the buttons without it */ }
   const mydataXml = el('div');
   show(title, head, addForm, found, lines, extra, actions, mydataXml, el('p', {}, el('a', { href: '#/docs' }, 'Όλα τα παραστατικά')));
@@ -1956,6 +2010,7 @@ function render() {
     case 'scratch': return need('MANAGER', () => scratchPage());
     case 'day': return need('MANAGER', () => dayPage(params));
     case 'chart': return need('MANAGER', () => chartPage(params));
+    case 'expiry': return need('MANAGER', () => expiryPage(params));
     case 'count': return countPage(p[1]);
     default: return itemsPage(params);
   }

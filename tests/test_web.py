@@ -5,6 +5,7 @@ of test_api.py, its manager and cashier; tests/web_check.js with Playwright (Chr
 
 Without MM_DSN, java, node or Playwright, skipped. The screenshots: MM_WEB_SHOTS=<folder>.
 """
+import datetime
 import os
 import re
 import shutil
@@ -55,10 +56,23 @@ def test_the_pages_in_a_browser(api, env, users):
     db.commit()
     db.cur.execute('update mm_item set min_stock = stock + 3 where id = :i', i=ids['b'])
     db.commit()
+    # the expiry: an item of its own, 3 of it received with a date of yesterday (expired, all left); a
+    # draft receipt of it, its date set in the page
+    cat = db.one('select min(id) from mm_category')[0]
+    db.cur.execute("insert into mm_item (code, name, category_id, vat_code, price, cost) "
+                   "values (:c, 'Test γιαούρτι', :cat, 'B', 1.20, 0.70)", c='TST%sY' % ids['tag'], cat=cat)
+    yog = db.one('select id from mm_item where code = :c', c='TST%sY' % ids['tag'])[0]
+    got = db.fn('new_doc', int, 'DPA', p_supplier_id=ids['supplier'], p_payment='CREDIT')
+    db.proc('set_expiry', db.fn('add_line', int, got, yog, 3), datetime.date.today() - datetime.timedelta(days=1))
+    db.fn('post_doc', int, got)
+    draft = db.fn('new_doc', int, 'DPA', p_supplier_id=ids['supplier'], p_payment='CREDIT')
+    db.fn('add_line', int, draft, yog, 6)
+    db.commit()
     labels = tempfile.mkdtemp(prefix='mmlabels-')
     e = dict(os.environ, BASE=api, MGR=users['MANAGER'], CASHIER=users['CASHIER'], PW=test_api.PW,
              ITEM='TST%sA' % ids['tag'], ITEM_B=str(ids['b']), XSS=XSS, SHOTS=os.environ.get('MM_WEB_SHOTS', ''),
-             LABELS=labels, DOC_SENT=str(sent), SENT_MARK=str(mark))
+             LABELS=labels, DOC_SENT=str(sent), SENT_MARK=str(mark),
+             YOGURT='TST%sY' % ids['tag'], DOC_DRAFT=str(draft))
     try:
         r = subprocess.run(['node', os.path.join(HERE, 'web_check.js')], env=e, capture_output=True, text=True, timeout=180)
         print(r.stdout, r.stderr)

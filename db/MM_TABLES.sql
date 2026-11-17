@@ -389,6 +389,9 @@ begin
   add_col('MM_DOC', 'MYDATA_CANCEL_MARK', 'mydata_cancel_mark number(20)');
   -- the points of the retail customers (κάρτα πελάτη, mm_core.post_doc): the card (its barcode, EAN-13
   -- 2990...) and the points now; a receipt: the points it used (as its discount)
+  -- the date a line of goods received expires (a delivery note or an invoice of purchase that brings
+  -- stock: DPA, TAD; mm_core.set_expiry); what is left of each: MM_EXPIRY (MM_REPORT.sql)
+  add_col('MM_DOC_LINE', 'EXPIRES', 'expires date');
   add_col('MM_CUSTOMER', 'CARD', 'card varchar2(20) constraint mm_customer_card_uk unique');
   add_col('MM_CUSTOMER', 'POINTS', 'points number(10) default 0 not null');
   add_col('MM_DOC', 'POINTS_USED', 'points_used number(10) default 0 not null '

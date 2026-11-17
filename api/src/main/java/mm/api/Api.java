@@ -32,6 +32,7 @@ import java.util.Optional;
  *                                              with ?limit=&offset= a page of its moves, its carry_in, carry_out
  *   /api/reports/sales   /api/reports/vat   /api/reports/min-stock
  *   /api/scratch/...                           the scratch tickets in packs: see Scratch (MANAGER)
+ *   /api/expiry?days=   POST /api/expiry/withdraw   the goods expiring, expired; one taken out (Expiry.java)
  *   /api/chart?to=&days=                       the charts of the sales: by day (and a year before), by hour
  *                                              (MANAGER, Chart.java)
  *   /api/day?date=                             the summary of a day: its Z, sales, VAT, items, scratch, orders,
@@ -228,6 +229,10 @@ final class Api {
             need(u, "MANAGER");
             return Scratch.post(c, p, in);
         }
+        if ("expiry".equals(p[0])) {
+            need(u, "MANAGER");
+            return Expiry.post(c, p, in);
+        }
         if ("customers".equals(p[0]) && n == 3 && "card".equals(p[2])) {   // a card for the points
             need(u, "MANAGER");
             long id = Http.id(p[1]);
@@ -369,6 +374,12 @@ final class Api {
                 need(u, "MANAGER");
                 if (n == 1) {
                     return Scratch.get(c);
+                }
+            }
+            case "expiry" -> {
+                need(u, "MANAGER");
+                if (n == 1) {
+                    return Expiry.get(c, q);
                 }
             }
             case "chart" -> {
