@@ -39,10 +39,19 @@ def test_the_pages_in_a_browser(api, env, users):
     db.cur.execute("delete from mm_setting where name like 'BACKUP\\_%' escape '\\'")
     db.proc('backup_done', 'N', 'expdp: test')            # the last backup failed: a manager sees it
     db.commit()
+    # an invoice sent to myDATA (the little AADE of the tests): its print, with its MARK and QR
+    db.cur.execute("delete from mm_setting where name like 'MYDATA%'")
+    db.cur.execute("insert into mm_setting (name, value) values ('MYDATA_AFM', '094014201')")
+    db.cur.execute("update mm_customer set afm = '090000045' where id = :c", c=ids['customer'])
+    sent = db.fn('new_doc', int, 'TDA', p_customer_id=ids['customer'], p_payment='CREDIT')
+    db.fn('add_line', int, sent, ids['b'], 2)
+    db.fn('post_doc', int, sent)
+    db.commit()
+    mark = test_api.post(api, '/api/docs/%d/mydata' % sent)['mydata_mark']
     labels = tempfile.mkdtemp(prefix='mmlabels-')
     e = dict(os.environ, BASE=api, MGR=users['MANAGER'], CASHIER=users['CASHIER'], PW=test_api.PW,
              ITEM='TST%sA' % ids['tag'], ITEM_B=str(ids['b']), XSS=XSS, SHOTS=os.environ.get('MM_WEB_SHOTS', ''),
-             LABELS=labels)
+             LABELS=labels, DOC_SENT=str(sent), SENT_MARK=str(mark))
     try:
         r = subprocess.run(['node', os.path.join(HERE, 'web_check.js')], env=e, capture_output=True, text=True, timeout=180)
         print(r.stdout, r.stderr)
@@ -51,6 +60,8 @@ def test_the_pages_in_a_browser(api, env, users):
         read_labels(labels, 'TST%sA' % ids['tag'])
     finally:
         shutil.rmtree(labels, ignore_errors=True)
+        db.cur.execute("delete from mm_setting where name like 'MYDATA%'")
+        db.cur.execute('update mm_customer set afm = null where id = :c', c=ids['customer'])
         db.cur.execute("delete from mm_setting where name like 'BACKUP\\_%' escape '\\'")
         db.commit()
 

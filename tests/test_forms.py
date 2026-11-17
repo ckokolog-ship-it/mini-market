@@ -681,12 +681,32 @@ def test_invoices_form(cur, env):
     assert db.one('select status from mm_doc where id = :i', i=inv)[0] == 'P'
     run(cur, "ui.post_query('DOC');", DOC__INVOICE_ID=str(inv))
     assert item(cur, 'DOC.INVOICE_TEXT').startswith('TPY ')
+    # myDATA: a delivery note no; an invoice of a customer without ΑΦΜ no; with it: waiting (the mm-api
+    # sends it), its column says so; cancelled while waiting: not to be sent
+    run(cur, "ui.press('CTL.MYDATA');", DOC__ID=str(d))
+    assert 'MM-189' in msgs(cur)
+    run(cur, "ui.press('CTL.MYDATA');", DOC__ID=str(inv))
+    assert 'MM-189' in msgs(cur) and 'ΑΦΜ' in msgs(cur)
+    afm = next(a for a in ('%08d' % (int(ids['tag'], 16) % 10 ** 8 + k) for k in range(500))
+               for a in [a + str(sum(int(x) * 2 ** (8 - j) for j, x in enumerate(a)) % 11 % 10)]
+               if not db.one('select count(*) from mm_customer where afm = :a', a=a)[0])
+    db.cur.execute('update mm_customer set afm = :a where id = :c', a=afm, c=ids['customer'])
+    db.commit()
+    run(cur, "ui.press('CTL.MYDATA');", DOC__ID=str(inv))
+    assert 'αναμονή' in msgs(cur)
+    assert db.one('select mydata_state from mm_doc where id = :i', i=inv)[0] == 'Q'
+    run(cur, "ui.post_query('DOC');", DOC__ID=str(inv))
+    assert item(cur, 'DOC.MYDATA_TEXT') == 'σε αναμονή'
+    run(cur, "ui.post_query('DOC');", DOC__ID=str(d))
+    assert item(cur, 'DOC.MYDATA_TEXT') is None
     run(cur, "ui.press('CTL.CREDIT');", DOC__ID=str(inv))
     assert 'MM-129' in msgs(cur)                                              # cards: no goods back
     run(cur, "ui.press('CTL.CANCELDOC');", DOC__ID=str(d))
     assert 'MM-185' in msgs(cur)                                              # the note: its invoice first
     run(cur, "ui.press('CTL.CANCELDOC');", DOC__ID=str(inv))
-    assert db.one('select status from mm_doc where id = :d', d=inv)[0] == 'C'
+    assert db.one('select status, mydata_state from mm_doc where id = :d', d=inv) == ('C', None)
+    db.cur.execute('update mm_customer set afm = null where id = :c', c=ids['customer'])
+    db.commit()
     run(cur, "ui.press('CTL.CANCELDOC');", DOC__ID=str(d))
     assert db.one('select status from mm_doc where id = :d', d=d)[0] == 'C'
     # an invoice of the second note alone; its goods back: a return note, posted; its credit note

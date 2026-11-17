@@ -520,6 +520,13 @@ PACKAGE BODY ui IS
       forms_ddl('COMMIT');
       show_only(v);
       message('Καταχωρήθηκε με αριθμό ' || to_char(n));
+    -- myDATA: queued; the mm-api (MyData) sends it within a minute, the column myDATA says how it went
+    ELSIF p_item = 'CTL.MYDATA' THEN
+      v := num('DOC.ID');
+      mm_core.mydata_queue(v);
+      forms_ddl('COMMIT');
+      show_only(v);
+      message('Σε αναμονή για το myDATA: το mm-api το στέλνει μέσα σε ένα λεπτό (Αναζήτηση για να δεις το MARK)');
     ELSIF p_item = 'CTL.CANCELDOC' THEN
       v := num('DOC.ID');
       mm_core.cancel_doc(v);
@@ -862,7 +869,10 @@ PACKAGE BODY ui IS
   -- (MM_ITEM.STOCK is reservable and changes all day: not a database item, so the form never
   -- writes it and never sees "record changed by another user" for it)
   PROCEDURE post_query(p_block VARCHAR2) IS
-    n VARCHAR2(200);
+    n VARCHAR2(1000);
+    st_ VARCHAR2(1);
+    mark_ NUMBER;
+    cmark_ NUMBER;
     z VARCHAR2(40);
     r NUMBER;
     s NUMBER;
@@ -904,6 +914,22 @@ PACKAGE BODY ui IS
         SELECT doc_type || ' ' || doc_no INTO n FROM mm_doc WHERE id = id_;
       END IF;
       copy(n, 'DOC.INVOICE_TEXT');
+      -- myDATA (the mm-api sends it): where it is, its MARK, or why not
+      id_ := num('DOC.ID');                 -- (num of the form: not inside a query)
+      SELECT MAX(mydata_state), MAX(mydata_mark), MAX(mydata_error), MAX(mydata_cancel_mark)
+      INTO st_, mark_, n, cmark_ FROM mm_doc WHERE id = id_;
+      IF st_ = 'S' THEN
+        n := 'MARK ' || mark_;
+      ELSIF st_ = 'Q' THEN
+        n := 'σε αναμονή' || CASE WHEN n IS NOT NULL THEN ': ' || n END;
+      ELSIF st_ = 'E' THEN
+        n := 'απέτυχε: ' || n;
+      ELSIF st_ = 'X' THEN
+        n := 'ακυρώθηκε ' || cmark_;
+      ELSE
+        n := NULL;
+      END IF;
+      copy(substr(n, 1, 200), 'DOC.MYDATA_TEXT');
     ELSIF p_block = 'USR' THEN
       n := upper(name_in('USR.USERNAME'));
       SELECT COUNT(*) INTO id_ FROM mm_pin_user WHERE username = n;

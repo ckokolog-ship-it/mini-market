@@ -2,7 +2,7 @@
 // tests/test_web.py: BASE, MGR / CASHIER (users), PW, ITEM (an item code), XSS (its name), SHOTS (a folder).
 const { chromium } = require('playwright');
 
-const { BASE, MGR, CASHIER, PW, ITEM, ITEM_B, XSS, SHOTS, LABELS } = process.env;
+const { BASE, MGR, CASHIER, PW, ITEM, ITEM_B, XSS, SHOTS, LABELS, DOC_SENT, SENT_MARK } = process.env;
 let failed = 0;
 function ok(cond, what) {
   console.log((cond ? 'ok   ' : 'FAIL ') + what);
@@ -301,13 +301,12 @@ async function waitText(page, sel, text) {
   await page.click('button:has-text("Καταχώριση")');
   await waitText(page, '.kv', 'καταχωρημένο');
   ok(true, 'its invoice, posted');
-  // myDATA: the invoice not sent yet; sent without the ΑΦΜ of the shop (the tests): refused, said why
+  // myDATA: the invoice not sent yet; sent (the little AADE of the tests): its MARK
   ok((await page.textContent('.kv')).includes('δεν διαβιβάστηκε'), 'the invoice: myDATA, not sent yet');
-  const errs0 = errors.length;
   await page.click('button:has-text("Διαβίβαση στο myDATA")');
-  await waitText(page, '#toast', 'ΑΦΜ');
-  if (errors.slice(errs0).every((e) => /status of 400/.test(e))) errors.splice(errs0);   // (that refusal: a 400, meant)
-  ok((await page.textContent('.kv')).includes('δεν διαβιβάστηκε'), 'myDATA refused (no ΑΦΜ): nothing sent, it says why');
+  await waitText(page, '#toast', 'Διαβιβάστηκε: MARK');
+  ok((await page.textContent('.kv')).includes('διαβιβάστηκε · MARK'), 'myDATA: sent, its MARK on the page');
+  ok(await page.isVisible('button:has-text("Ακύρωση (και στο myDATA)")'), 'sent: cancelled at AADE first');
   await page.click('button:has-text("Επιστροφή")');
   await waitText(page, 'h1', 'Δελτίο επιστροφής');
   ok((await page.textContent('.kv')).includes('πρόχειρο'), 'goods back: a draft return note of its lines');
@@ -328,6 +327,24 @@ async function waitText(page, sel, text) {
   await page.waitForSelector('tr.cancelled:has-text("TST web")');
   ok(true, 'cancelled');
 
+  // an invoice sent to myDATA (tests/test_web.py): its print on A4, alone, with its MARK and the QR of AADE
+  await page.goto(BASE + '/web/#/doc/' + DOC_SENT);
+  await waitText(page, '.kv', 'MARK ' + SENT_MARK);
+  await page.evaluate(() => { window.print = () => { window.__printed = (window.__printed || 0) + 1; }; });
+  await page.click('main button:text-is("Εκτύπωση")');
+  await page.waitForSelector('#docprint svg.qr', { state: 'attached' });
+  const dp = await page.textContent('#docprint');
+  ok(dp.includes('MARK ' + SENT_MARK) && dp.includes('Τιμολόγιο') && dp.includes('Σύνολο') && dp.includes('ΑΦΜ'),
+    'the print of the invoice: its title, the customer, the total, its MARK');
+  await page.emulateMedia({ media: 'print' });
+  ok(await page.isHidden('main') && await page.isVisible('#docprint'), 'the print of the invoice: alone');
+  if (SHOTS) await page.locator('#docprint').screenshot({ path: SHOTS + '/invoice.png' });
+  const ipdf = (await page.pdf({ preferCSSPageSize: true, printBackground: true })).toString('latin1');
+  const ibox = /\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/.exec(ipdf);
+  ok(ibox && Math.abs(Number(ibox[1]) - 595) < 3 && (ipdf.match(/\/Type \/Page\b/g) || []).length === 1,
+    'the print of the invoice: one page A4: ' + (ibox && ibox[1] + ' x ' + ibox[2]));
+  await page.emulateMedia({ media: 'screen' });
+  await page.evaluate(() => document.body.classList.remove('printing-doc'));
   // the backup failed (tests/test_web.py): a manager sees it on every page
   await waitText(page, '#notice', 'Το τελευταίο backup της βάσης απέτυχε');
   ok(await page.isVisible('#notice') && (await page.textContent('#notice')).includes('expdp: test'), 'the backup failed: the manager sees it');

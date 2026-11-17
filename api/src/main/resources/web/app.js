@@ -993,8 +993,61 @@ async function printReceipt(reg, id, extra = {}) {
     }
     sheet.insertRule(`@page receipt { size: 80mm ${mm}mm; margin: 0; }`, sheet.cssRules.length);
   }
+  document.body.classList.remove('printing-doc');         // (a document before it, with no afterprint)
   document.body.classList.add('printing-receipt');
   const done = () => { document.body.classList.remove('printing-receipt'); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+}
+
+// -- a document of the office on A4 (an invoice, a delivery note ...): the shop (the header of the
+// receipts), the partner, its lines, the VAT by rate, the totals; sent to myDATA: its MARK, UID and the QR
+// of AADE. As the receipt: a box off the screen, alone on the page while printed
+async function printDoc(d) {
+  let shop = { header: '', footer: '' };
+  try { shop = await api('pos/settings'); } catch (e) { /* the shop without a header */ }
+  const lines = (text) => String(text || '').split('\n').filter((x) => x.trim()).map((x) => el('div', {}, x));
+  const vat = {};
+  d.lines.forEach((x) => {
+    const k = String(x.vat_rate);
+    vat[k] = vat[k] || { net: 0, vat: 0 };
+    vat[k].net += x.net;
+    vat[k].vat += x.vat;
+  });
+  const sent = d.mydata_state === 'S' && d.mydata_mark;
+  const box = el('div', { class: 'docprint', id: 'docprint' },
+    el('div', { class: 'dp-head' }, el('div', { class: 'dp-shop' }, lines(shop.header)),
+      el('div', { class: 'dp-title' }, el('div', { class: 'dp-type' }, d.type_name), el('div', {}, `${d.doc_type} ${d.doc_no || ''}`),
+        el('div', {}, day(d.doc_date)), d.status === 'C' ? el('div', { class: 'dp-cancel' }, 'ΑΚΥΡΩΘΗΚΕ') : null)),
+    el('div', { class: 'dp-partner' }, el('div', { class: 'dp-label' }, d.side === 'S' ? 'Πελάτης' : 'Προμηθευτής'),
+      el('div', { class: 'dp-name' }, d.partner || ''), d.partner_afm ? el('div', {}, 'ΑΦΜ ' + d.partner_afm + (d.partner_doy ? ' · ΔΟΥ ' + d.partner_doy : '')) : null,
+      d.partner_address ? el('div', {}, d.partner_address) : null,
+      el('div', {}, 'Πληρωμή: ' + { CREDIT: 'επί πιστώσει', CASH: 'μετρητά', CARD: 'κάρτα' }[d.payment]),
+      d.ref_text ? el('div', {}, 'Σχετικό: ' + d.ref_text) : null,
+      d.notes_in.length ? el('div', {}, 'Δελτία: ' + d.notes_in.map(docText).join(', ')) : null),
+    el('table', { class: 'dp-lines' }, el('thead', {}, el('tr', {}, ['#', 'Κωδικός', 'Περιγραφή', 'Ποσότητα', 'Τιμή', 'Έκπτ. %', 'ΦΠΑ %', 'Καθαρό']
+      .map((h, k) => el('th', { class: k >= 3 ? 'num' : null }, h)))),
+    el('tbody', {}, d.lines.map((x) => el('tr', {}, el('td', {}, x.line_no), el('td', {}, x.code),
+      el('td', {}, x.name, x.serials ? el('div', { class: 'dp-small' }, x.serials) : null), el('td', { class: 'num' }, qty(x.qty)),
+      el('td', { class: 'num' }, nf2.format(x.price)), el('td', { class: 'num' }, x.discount ? qty(x.discount) : ''),
+      el('td', { class: 'num' }, qty(x.vat_rate)), el('td', { class: 'num' }, money(x.net)))))),
+    el('div', { class: 'dp-foot' },
+      el('div', { class: 'dp-mydata' }, sent ? [
+        qrSvg(d.mydata_qr || ('MARK ' + d.mydata_mark)),
+        el('div', {}, el('div', {}, 'MARK ' + d.mydata_mark), d.mydata_uid ? el('div', { class: 'dp-small' }, 'UID ' + d.mydata_uid) : null,
+          el('div', { class: 'dp-small' }, 'Διαβιβάστηκε στο myDATA της ΑΑΔΕ'))] : null),
+      el('table', { class: 'dp-sums' }, el('tbody', {},
+        Object.entries(vat).map(([r, v]) => el('tr', {}, el('td', {}, `ΦΠΑ ${qty(Number(r))}%`), el('td', { class: 'num' }, money(v.net)), el('td', { class: 'num' }, money(v.vat)))),
+        el('tr', { class: 'dp-total' }, el('td', {}, 'Καθαρό'), el('td'), el('td', { class: 'num' }, money(d.net))),
+        el('tr', { class: 'dp-total' }, el('td', {}, 'ΦΠΑ'), el('td'), el('td', { class: 'num' }, money(d.vat))),
+        el('tr', { class: 'dp-total dp-grand' }, el('td', {}, 'Σύνολο'), el('td'), el('td', { class: 'num' }, money(d.total) + ' €'))))),
+    el('div', { class: 'dp-shop dp-footer' }, lines(shop.footer)));
+  const old = $('#docprint');
+  if (old) old.remove();
+  document.body.append(box);
+  document.body.classList.remove('printing-receipt');     // (a receipt before it, with no afterprint)
+  document.body.classList.add('printing-doc');
+  const done = () => { document.body.classList.remove('printing-doc'); window.removeEventListener('afterprint', done); };
   window.addEventListener('afterprint', done);
   window.print();
 }
@@ -1316,6 +1369,7 @@ async function docPage(id) {
       d.status === 'P' && d.mydata_type ? btn('XML myDATA', async () => {
         try { mydataXml.replaceChildren(el('pre', { class: 'xml' }, (await api(`docs/${id}/mydata`)).xml)); } catch (e) { fail(e); }
       }) : null,
+      d.status !== 'D' ? btn('Εκτύπωση', () => printDoc(d)) : null,
       d.status === 'P' && d.mydata_state === 'S'
         ? btn('Ακύρωση (και στο myDATA)', ask('Ακύρωση στην ΑΑΔΕ (myDATA) και εδώ;', () => run('mydata/cancel', {})), 'danger')
         : d.status === 'P' ? btn('Ακύρωση', ask('Ακύρωση του παραστατικού;', () => run('cancel', {})), 'danger') : null,
