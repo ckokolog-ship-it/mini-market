@@ -120,7 +120,7 @@ def test_sales_vat_and_min_stock(env):
     db.commit()
     total = db.one('select total from mm_doc where id = :d', d=d)[0]
     after = db.one('select total, alp_docs from mm_sales_day where day = trunc(sysdate)')
-    assert after == (before[0] + total, before[1] + 1)
+    assert after == (round(before[0] + total, 2), before[1] + 1)          # (cents: floats summed)
     db.proc('cancel_doc', d)                       # cancelled: no sale
     db.commit()
     assert db.one('select nvl(max(total), 0) from mm_sales_day where day = trunc(sysdate)')[0] == before[0]
