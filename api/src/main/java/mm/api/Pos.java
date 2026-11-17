@@ -21,7 +21,8 @@ import java.util.Map;
  *   POST /api/pos/{register}/close             the Z closed: its totals in "closed"
  *   POST /api/pos/{register}/cash {amount, note}   money in (+) or out (-) of the drawer
  *   POST /api/pos/{register}/scan {code, qty}  an item by barcode or code (a card of mobile: one, the
- *                                              oldest), or a card by its serial
+ *                                              oldest), or a card by its serial (a scratch ticket: its barcode)
+ *   POST /api/pos/{register}/prize {amount, ticket}   a prize of a scratch ticket, paid from the drawer
  *   POST /api/pos/{register}/lines/{id} {qty}  the quantity of a line (0: the line out)
  *   POST /api/pos/{register}/void              the draft out (an order in it: open again)
  *   POST /api/pos/{register}/order {id}        an order (Orders), all of its lines, into the receipt
@@ -114,6 +115,18 @@ final class Pos {
                         select vat_code, net, vat, total from mm_z_vat where z_id = ? order by vat_code""", z));
                 extra.put("closed", closed);
                 return with(state(c, reg), extra);
+            }
+            case "prize" -> {                // a prize of a scratch ticket, paid from the drawer
+                if (p.length != 3) {
+                    break;
+                }
+                try (CallableStatement cs = c.prepareCall("begin mm_core.scratch_prize(?, ?, ?); end;")) {
+                    cs.setLong(1, reg);
+                    cs.setBigDecimal(2, Http.decimal(in, "amount", null));
+                    cs.setString(3, Http.text(in, "ticket", false));
+                    cs.execute();
+                }
+                return state(c, reg);
             }
             case "cash" -> {
                 if (p.length != 3) {
@@ -271,6 +284,17 @@ final class Pos {
         if (v == null) {
             Object n = Db.rows(c, "select count(*) n from mm_serial where serial = ? and status = 'A'", code).get(0).get("n");
             if (((BigDecimal) n).signum() == 0) {
+                // sold already (a scratch ticket scanned twice): say so, and where
+                List<Map<String, Object>> sold = Db.rows(c, """
+                        select case d.doc_type when 'ALP' then 'ΑΛΠ' else d.doc_type end || ' ' || d.doc_no doc,
+                               to_char(s.sold_at, 'DD/MM HH24:MI') at_
+                        from mm_serial s left join mm_doc d on d.id = s.out_doc_id
+                        where s.serial = ? and s.status in ('S', 'R') order by s.id desc fetch first 1 rows only""", code);
+                if (!sold.isEmpty()) {
+                    Map<String, Object> x = sold.get(0);
+                    throw new Http.Fail(409, "sold", "Το " + code + " έχει ήδη " + (x.get("at_") == null
+                            ? "μπει σε απόδειξη" : "πουληθεί (" + x.get("doc") + ", " + x.get("at_") + ")"));
+                }
                 throw new Http.Fail(404, "not_found", "Δεν βρέθηκε είδος ή κάρτα: " + code);
             }
             long d = draftOrNew(c, reg);

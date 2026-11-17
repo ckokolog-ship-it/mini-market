@@ -141,6 +141,14 @@ create or replace package mm_core as
   procedure mydata_failed(p_doc_id number, p_error varchar2);
   procedure mydata_cancelled(p_doc_id number, p_cancel_mark number);
 
+  -- the scratch tickets (MM_SCRATCH_GAME): a game (έκδοση) and the item it is sold as, the tickets of a
+  -- pack; a pack loaded from the barcode of one of its tickets (14 digits) or its game and pack (11):
+  -- its tickets 000.. as serials (the barcode of each), into the stock; how many. A prize paid from the
+  -- drawer of the till (a move out, «Κέρδος σκρατς»)
+  procedure scratch_game(p_game varchar2, p_item_id number, p_pack_size number default 300);
+  function load_pack(p_code varchar2, p_count number default null) return number;
+  procedure scratch_prize(p_register_id number, p_amount number, p_ticket varchar2 default null);
+
   -- the backup of the database (db/backup.ps1) says how it went: p_ok Y (p_text its file) or N (p_text
   -- the error); MM_BACKUP_STATE tells the pages when the last good one is too old
   procedure backup_done(p_ok varchar2, p_text varchar2);
@@ -1784,6 +1792,61 @@ create or replace package body mm_core as
     update mm_doc set mydata_state = 'X', mydata_cancel_mark = p_cancel_mark, mydata_error = null,
                       mydata_at = sysdate
     where id = p_doc_id and mydata_state = 'S';
+  end;
+
+  procedure scratch_game(p_game varchar2, p_item_id number, p_pack_size number default 300) is
+    tracked varchar2(1);
+  begin
+    if p_game is null or not regexp_like(p_game, '^[0-9]{4}$') then
+      fail(90, 'Η έκδοση του σκρατς: 4 ψηφία (τα πρώτα του barcode)');
+    end if;
+    select max(serial_tracked) into tracked from mm_item where id = p_item_id;
+    if nvl(tracked, 'N') <> 'Y' then
+      fail(90, 'Το είδος ενός σκρατς είναι είδος με serials (π.χ. «Σκρατς 1 €»)');
+    end if;
+    if p_pack_size is null or p_pack_size not between 1 and 999 then
+      fail(90, 'Δελτία ανά πακέτο: από 1 έως 999');
+    end if;
+    merge into mm_scratch_game g using (select p_game game from dual) v on (g.game = v.game)
+    when matched then update set g.item_id = p_item_id, g.pack_size = p_pack_size
+    when not matched then insert (game, item_id, pack_size) values (p_game, p_item_id, p_pack_size);
+  end;
+
+  function load_pack(p_code varchar2, p_count number default null) return number is
+    code_ varchar2(40) := regexp_replace(p_code, '[^0-9]', '');
+    g mm_scratch_game%rowtype;
+    n number;
+    had number;
+  begin
+    if length(code_) not in (11, 14) then
+      fail(90, 'Το πακέτο: το barcode ενός δελτίου του (14 ψηφία) ή έκδοση και πακέτο (11 ψηφία)');
+    end if;
+    begin
+      select * into g from mm_scratch_game where game = substr(code_, 1, 4);
+    exception
+      when no_data_found then fail(90, 'Η έκδοση ' || substr(code_, 1, 4) || ' δεν έχει δηλωθεί: «Σκρατς» → έκδοση και είδος');
+    end;
+    n := nvl(p_count, g.pack_size);
+    if n not between 1 and 999 then
+      fail(90, 'Δελτία ανά πακέτο: από 1 έως 999');
+    end if;
+    select count(*) into had from mm_serial where item_id = g.item_id and serial like substr(code_, 1, 11) || '___';
+    if had > 0 then
+      fail(90, 'Το πακέτο ' || substr(code_, 5, 7) || ' της έκδοσης ' || g.game || ' έχει ήδη φορτωθεί');
+    end if;
+    for k in 0 .. n - 1 loop
+      insert into mm_serial (item_id, serial, status) values (g.item_id, substr(code_, 1, 11) || lpad(k, 3, '0'), 'A');
+    end loop;
+    stock_move(g.item_id, 'ADJ', n, p_note => 'Σκρατς: πακέτο ' || substr(code_, 5, 7) || ' της έκδοσης ' || g.game);
+    return n;
+  end;
+
+  procedure scratch_prize(p_register_id number, p_amount number, p_ticket varchar2 default null) is
+  begin
+    if p_amount is null or p_amount <= 0 then
+      fail(90, 'Το κέρδος του σκρατς: ένα ποσό πάνω από 0');
+    end if;
+    cash_in_out(p_register_id, -p_amount, 'Κέρδος σκρατς' || case when p_ticket is not null then ' ' || p_ticket end);
   end;
 
   procedure backup_done(p_ok varchar2, p_text varchar2) is

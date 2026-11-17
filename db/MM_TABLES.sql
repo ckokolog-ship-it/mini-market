@@ -757,6 +757,30 @@ select case p.kind when 'R' then 'C' else 'S' end, nvl(p.customer_id, p.supplier
 from mm_payment p
 where p.status = 'P';
 
+-- the scratch tickets (σκρατς): bought in packs (e.g. 300 of 1 €), sold one by one. The barcode of a
+-- ticket: its game (έκδοση, 4 digits), its pack (7) and its number in the pack (3): 14 digits, its serial
+-- (MM_SERIAL) as well, so a scan at the till sells that very ticket. A game: the item it is sold as (an
+-- item with serials, e.g. «Σκρατς 1 €») and how many tickets a pack has (mm_core.load_pack)
+create table if not exists mm_scratch_game (
+  game        varchar2(4)   constraint mm_scratch_game_pk primary key
+                            constraint mm_scratch_game_ck check (regexp_like(game, '^[0-9]{4}$')),
+  item_id     number        not null constraint mm_scratch_game_item_fk references mm_item,
+  pack_size   number(3)     default 300 not null constraint mm_scratch_game_size_ck check (pack_size between 1 and 999),
+  created_at  date          default sysdate not null
+);
+
+-- the packs of the scratch tickets: of each one loaded, its tickets, sold and left
+create or replace view mm_scratch_pack as
+select g.game, substr(s.serial, 5, 7) pack, g.item_id, i.code, i.name, i.price, count(*) tickets,
+       sum(case when s.status = 'S' then 1 else 0 end) sold,
+       sum(case when s.status = 'A' then 1 else 0 end) left_,
+       min(s.created_at) loaded_at, max(s.sold_at) last_sold
+from mm_serial s
+join mm_scratch_game g on g.item_id = s.item_id and g.game = substr(s.serial, 1, 4)
+join mm_item i on i.id = g.item_id
+where regexp_like(s.serial, '^[0-9]{14}$')
+group by g.game, substr(s.serial, 5, 7), g.item_id, i.code, i.name, i.price;
+
 -- the backup (db/backup.ps1, mm_core.backup_done): the last good one and the last failed one; STATE
 -- OK, OLD (the last good one more than 2 days ago: the task of Windows stopped?), FAILED (the last
 -- try failed) or NEVER; the pages of a manager show it when it is not OK
