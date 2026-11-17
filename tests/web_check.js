@@ -303,6 +303,24 @@ async function waitText(page, sel, text) {
   const prev = new URL(page.url().replace('#/', '')).searchParams.get('date');
   await waitText(page, 'main h1', prev.split('-').reverse().join('/'));
   ok(true, 'the summary: the day before, ' + prev);
+  // a transfer (DEN) to a branch: the two warehouses in the form, a line at cost, posted
+  await page.goto(BASE + '/web/#/docs');
+  await page.waitForSelector('select[name=type]');
+  await page.selectOption('select[name=type]', 'DEN');
+  ok(await page.isVisible('select[name=to_warehouse_id]') && !(await page.isVisible('select[name=partner]')),
+    'a transfer: from a warehouse to another, no partner');
+  const branch = await page.$eval('select[name=to_warehouse_id]', (s, code) => [...s.options].find((o) => o.text.startsWith(code)).value, process.env.BRANCH);
+  await page.selectOption('select[name=to_warehouse_id]', branch);
+  await page.click('main form button[type=submit]');
+  await waitText(page, 'main', 'Προς αποθήκη');
+  await page.fill('input[name=code]', CODE_B);
+  await page.press('input[name=code]', 'Enter');
+  await waitText(page, 'thead', 'Κόστος');
+  ok(!(await page.isVisible('input[name=price]')), 'a transfer: its lines at cost, no price to type');
+  await page.click('button:has-text("Καταχώριση")');
+  await waitText(page, '#toast', 'Καταχωρήθηκε');
+  ok((await page.textContent('main')).includes('Αξία στο κόστος'), 'the transfer posted: its value at cost');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/transfer.png', fullPage: true });
   // the expiry: a line of a draft receipt, its date in the page; the expired one in the list, taken out
   await page.goto(BASE + '/web/#/doc/' + process.env.DOC_DRAFT);
   const expIn = `input[aria-label="Λήξη ${process.env.YOGURT}"]`;

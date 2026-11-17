@@ -1560,6 +1560,9 @@ async function printDoc(d) {
       el('div', { class: 'dp-title' }, el('div', { class: 'dp-type' }, order ? 'Παραγγελία προς προμηθευτή' : d.type_name),
         order ? null : el('div', {}, `${d.doc_type} ${d.doc_no || ''}`),
         el('div', {}, day(d.doc_date)), d.status === 'C' ? el('div', { class: 'dp-cancel' }, 'ΑΚΥΡΩΘΗΚΕ') : null)),
+    d.side === 'T' ? el('div', { class: 'dp-partner' }, el('div', { class: 'dp-label' }, 'Ενδοδιακίνηση'),
+      el('div', { class: 'dp-name' }, `Από: ${d.warehouse} ${d.warehouse_name}`), el('div', { class: 'dp-name' }, `Προς: ${d.to_warehouse} ${d.to_warehouse_name}`),
+      el('div', {}, 'Στην τιμή κόστους κάθε παραλαβής (FIFO), χωρίς ΦΠΑ')) :
     el('div', { class: 'dp-partner' }, el('div', { class: 'dp-label' }, d.side === 'S' ? 'Πελάτης' : 'Προμηθευτής'),
       el('div', { class: 'dp-name' }, d.partner || ''), d.partner_afm ? el('div', {}, 'ΑΦΜ ' + d.partner_afm + (d.partner_doy ? ' · ΔΟΥ ' + d.partner_doy : '')) : null,
       d.partner_address ? el('div', {}, d.partner_address) : null,
@@ -1779,13 +1782,30 @@ async function docsPage(params) {
   const pay = el('select', { name: 'payment' }, [['CREDIT', 'Πίστωση'], ['CASH', 'Μετρητά'], ['CARD', 'Κάρτα']]
     .map(([v, t]) => el('option', { value: v }, t)));
   const date = el('input', { name: 'doc_date', type: 'date', value: isoToday() });
+  // a transfer (DEN): from a warehouse to another, no partner, no payment
+  const fromWh = el('select', { name: 'warehouse_id' });
+  const toWh = el('select', { name: 'to_warehouse_id' });
+  let whs = [];
+  try { whs = (await api('warehouses')).rows.filter((w) => w.active === 'Y'); } catch (e) { whs = []; }
+  fromWh.replaceChildren(...options(whs, 'id', (w) => `${w.code} ${w.name}`, whs.length ? whs[0].id : ''));
+  toWh.replaceChildren(...options(whs, 'id', (w) => `${w.code} ${w.name}`, whs.length > 1 ? whs[1].id : '', '— αποθήκη —'));
   const fill = async () => {
     const t = types.find((x) => x.code === type.value);
+    const transfer = t.side === 'T';
+    partnerBox.hidden = transfer;
+    payBox.hidden = transfer;
+    fromBox.hidden = !transfer;
+    toBox.hidden = !transfer;
+    if (transfer) return;
     try {
       const rows = await partnersOf(t.side === 'S' ? 'customers' : 'suppliers');
       partner.replaceChildren(...options(rows, 'id', (x) => x.name, partner.value, t.side === 'S' ? '— πελάτης —' : '— προμηθευτής —'));
     } catch (e) { fail(e); }
   };
+  const partnerBox = el('label', { class: 'grow' }, 'Πελάτης / προμηθευτής', partner);
+  const payBox = el('label', {}, 'Πληρωμή', pay);
+  const fromBox = el('label', {}, 'Από αποθήκη', fromWh);
+  const toBox = el('label', {}, 'Προς αποθήκη', toWh);
   type.addEventListener('change', fill);
   const form = el('form', {
     class: 'panel row',
@@ -1793,14 +1813,17 @@ async function docsPage(params) {
       ev.preventDefault();
       const t = types.find((x) => x.code === type.value);
       const body = { doc_type: t.code, payment: pay.value, doc_date: date.value || null };
-      if (partner.value) body[t.side === 'S' ? 'customer_id' : 'supplier_id'] = Number(partner.value);
+      if (t.side === 'T') {
+        body.warehouse_id = Number(fromWh.value);
+        body.to_warehouse_id = toWh.value ? Number(toWh.value) : null;
+      } else if (partner.value) body[t.side === 'S' ? 'customer_id' : 'supplier_id'] = Number(partner.value);
       try {
         const d = await api('docs', body);
         location.hash = '#/doc/' + d.id;
       } catch (e) { fail(e); }
     },
-  }, el('label', {}, 'Είδος', type), el('label', { class: 'grow' }, 'Πελάτης / προμηθευτής', partner),
-  el('label', {}, 'Πληρωμή', pay), el('label', {}, 'Ημερομηνία', date), el('button', { class: 'primary', type: 'submit' }, 'Νέο'));
+  }, el('label', {}, 'Είδος', type), partnerBox, fromBox, toBox,
+  payBox, el('label', {}, 'Ημερομηνία', date), el('button', { class: 'primary', type: 'submit' }, 'Νέο'));
   // the notes not in an invoice yet: an invoice of one of them
   const notes = el('div');
   api('docs/notes').then((r) => notes.replaceChildren(r.rows.length ? el('details', {},
@@ -1846,6 +1869,8 @@ async function docPage(id) {
   const price = el('input', { name: 'price', type: 'number', step: '0.0001', min: '0', placeholder: 'αυτόματη', class: 'w8' });
   const disc = el('input', { name: 'discount', type: 'number', step: '0.01', min: '0', max: '100', value: '0', class: 'w6' });
   const exp = el('input', { name: 'expires', type: 'date' });
+  const priceBox = el('label', {}, 'Τιμή', price);
+  const discBox = el('label', {}, 'Έκπτ. %', disc);
   const expBox = el('label', {}, 'Λήξη', exp);
   const found = el('div');
   const extra = el('div');
@@ -1872,17 +1897,20 @@ async function docPage(id) {
     expBox.hidden = !receiving();
     head.replaceChildren(el('dl', { class: 'kv' }, [
       ['Είδος', `${d.doc_type} ${d.type_name}`], ['Ημερομηνία', day(d.doc_date)], ['Κατάσταση', DOC_ST[d.status]],
-      [d.side === 'S' ? 'Πελάτης' : 'Προμηθευτής', d.partner], ['Πληρωμή', { CREDIT: 'πίστωση', CASH: 'μετρητά', CARD: 'κάρτα' }[d.payment]],
+      ...(d.side === 'T' ? [['Από αποθήκη', `${d.warehouse} ${d.warehouse_name}`], ['Προς αποθήκη', `${d.to_warehouse} ${d.to_warehouse_name}`]]
+        : [[d.side === 'S' ? 'Πελάτης' : 'Προμηθευτής', d.partner], ['Πληρωμή', { CREDIT: 'πίστωση', CASH: 'μετρητά', CARD: 'κάρτα' }[d.payment]]]),
       ['Από', d.ref_text], ['Στο τιμολόγιο', d.invoice_text],
       ['Δελτία του', d.notes_in.length ? d.notes_in.map(docText).join(', ') : null],
-      ['Καθαρό', money(d.net)], ['ΦΠΑ', money(d.vat)], ['Σύνολο', money(d.total)],
+      ...(d.side === 'T' ? [['Αξία στο κόστος', money(d.total)]] : [['Καθαρό', money(d.net)], ['ΦΠΑ', money(d.vat)], ['Σύνολο', money(d.total)]]),
       ['myDATA', d.mydata_type && d.status !== 'D' ? MYDATA_ST[d.mydata_state || ''] + (d.mydata_mark ? ' · MARK ' + d.mydata_mark : '')
         + (d.mydata_cancel_mark ? ' · ακύρωση ' + d.mydata_cancel_mark : '') : null],
       ['Λάθος myDATA', d.mydata_state === 'E' || d.mydata_state === 'Q' ? d.mydata_error : null]]
       .filter(([, v]) => v !== null && v !== undefined && v !== '').flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])));
     addForm.hidden = !draft;
     const withExp = receiving() && (draft || d.lines.some((x) => x.expires));
-    lines.replaceChildren(d.lines.length ? table([['#'], ['Είδος'], ['Ποσότητα', 'num'], ['Τιμή', 'num'], ['Έκπτ. %', 'num hide-phone'],
+    priceBox.hidden = d.side === 'T';                 // (a transfer: at cost, by the layers)
+    discBox.hidden = d.side === 'T';
+    lines.replaceChildren(d.lines.length ? table([['#'], ['Είδος'], ['Ποσότητα', 'num'], [d.side === 'T' ? 'Κόστος' : 'Τιμή', 'num'], ['Έκπτ. %', 'num hide-phone'],
       ...(withExp ? [['Λήξη']] : []), ['Σύνολο', 'num'], ['']],
       d.lines.map((x) => {
         const setQ = (q) => run(`lines/${x.id}`, { qty: q });
@@ -1956,8 +1984,8 @@ async function docPage(id) {
         }
       } catch (e) { fail(e); }
     },
-  }, el('label', { class: 'grow' }, 'Είδος (Enter)', code), camera(code), el('label', {}, 'Ποσότητα', n), el('label', {}, 'Τιμή', price),
-  el('label', {}, 'Έκπτ. %', disc), expBox, el('button', { class: 'primary', type: 'submit' }, 'Βάλε γραμμή'));
+  }, el('label', { class: 'grow' }, 'Είδος (Enter)', code), camera(code), el('label', {}, 'Ποσότητα', n), priceBox,
+  discBox, expBox, el('button', { class: 'primary', type: 'submit' }, 'Βάλε γραμμή'));
   try { await kinds(); } catch (e) { /* the buttons without it */ }
   const mydataXml = el('div');
   show(title, head, addForm, found, lines, extra, actions, mydataXml, el('p', {}, el('a', { href: '#/docs' }, 'Όλα τα παραστατικά')));
