@@ -148,6 +148,9 @@ create or replace package mm_core as
   procedure scratch_game(p_game varchar2, p_item_id number, p_pack_size number default 300);
   function load_pack(p_code varchar2, p_count number default null) return number;
   procedure scratch_prize(p_register_id number, p_amount number, p_ticket varchar2 default null);
+  -- the tickets of a pack not sold, back to the supplier (the barcode of one of them, or game and pack):
+  -- void (X), out of the stock in one move; how many. Not while one of them is in a receipt being written
+  function return_pack(p_code varchar2) return number;
 
   -- an order to the suppliers from the minimum stock (MM_MIN_STOCK): for each supplier (the last one
   -- an item was bought from) a draft delivery note of purchase (DPA: that one, when there is a draft
@@ -1845,6 +1848,35 @@ create or replace package body mm_core as
       insert into mm_serial (item_id, serial, status) values (g.item_id, substr(code_, 1, 11) || lpad(k, 3, '0'), 'A');
     end loop;
     stock_move(g.item_id, 'ADJ', n, p_note => 'Σκρατς: πακέτο ' || substr(code_, 5, 7) || ' της έκδοσης ' || g.game);
+    return n;
+  end;
+
+  function return_pack(p_code varchar2) return number is
+    code_ varchar2(40) := regexp_replace(p_code, '[^0-9]', '');
+    g mm_scratch_game%rowtype;
+    n number;
+    busy number;
+  begin
+    if length(code_) not in (11, 14) then
+      fail(90, 'Το πακέτο: το barcode ενός δελτίου του (14 ψηφία) ή έκδοση και πακέτο (11 ψηφία)');
+    end if;
+    begin
+      select * into g from mm_scratch_game where game = substr(code_, 1, 4);
+    exception
+      when no_data_found then fail(90, 'Η έκδοση ' || substr(code_, 1, 4) || ' δεν έχει δηλωθεί');
+    end;
+    select count(*) into busy from mm_serial
+    where item_id = g.item_id and serial like substr(code_, 1, 11) || '___' and status = 'R';
+    if busy > 0 then
+      fail(90, 'Ένα δελτίο του πακέτου είναι σε απόδειξη που γράφεται: πρώτα εκείνη');
+    end if;
+    update mm_serial set status = 'X'
+    where item_id = g.item_id and serial like substr(code_, 1, 11) || '___' and status = 'A';
+    n := sql%rowcount;
+    if n = 0 then
+      fail(90, 'Το πακέτο ' || substr(code_, 5, 7) || ' της έκδοσης ' || g.game || ' δεν έχει απούλητα δελτία');
+    end if;
+    stock_move(g.item_id, 'ADJ', -n, p_note => 'Σκρατς: επιστροφή του πακέτου ' || substr(code_, 5, 7) || ' της έκδοσης ' || g.game);
     return n;
   end;
 

@@ -18,6 +18,7 @@ import java.util.Map;
  *   POST /api/scratch/games {game, code, pack_size}   a game (έκδοση) and the item it is sold as
  *   POST /api/scratch/packs {code, count}     a pack loaded: the barcode of one of its tickets (14 digits)
  *                                             or its game and pack (11); count: else the size of its game
+ *   POST /api/scratch/returns {code}          its tickets not sold back to the supplier (void, out of the stock)
  * </pre>
  */
 final class Scratch {
@@ -32,7 +33,7 @@ final class Scratch {
                           and s.serial like g.game || '%') left_
                 from mm_scratch_game g join mm_item i on i.id = g.item_id order by g.game"""));
         out.put("packs", Db.rows(c, """
-                select game, pack, code, name, price, tickets, sold, left_, loaded_at, last_sold
+                select game, pack, code, name, price, tickets, sold, left_, returned, loaded_at, last_sold
                 from mm_scratch_pack order by loaded_at desc, game, pack fetch first 100 rows only"""));
         // the prizes paid from the drawers (mm_core.scratch_prize), by day, the last 31 days
         out.put("prizes", Db.rows(c, """
@@ -73,6 +74,19 @@ final class Scratch {
             }
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("loaded", n);
+            out.putAll(get(c));
+            return out;
+        }
+        if (p.length == 2 && "returns".equals(p[1])) {     // the tickets not sold of a pack, back
+            int n;
+            try (CallableStatement cs = c.prepareCall("begin ? := mm_core.return_pack(?); end;")) {
+                cs.registerOutParameter(1, Types.NUMERIC);
+                cs.setString(2, Http.text(in, "code", true));
+                cs.execute();
+                n = cs.getInt(1);
+            }
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("returned", n);
             out.putAll(get(c));
             return out;
         }

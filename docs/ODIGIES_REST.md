@@ -129,6 +129,7 @@ commit;
 | `GET /api/scratch` | τα σκρατς: οι εκδόσεις (είδος, δελτία ανά πακέτο, διαθέσιμα), τα πακέτα (δελτία, πουλημένα, μένουν), τα κέρδη ανά ημέρα (MANAGER) |
 | `POST /api/scratch/games` `{"game", "code", "pack_size"}` | μια έκδοση (4 ψηφία) και το είδος της (με serials) |
 | `POST /api/scratch/packs` `{"code", "count"}` | φόρτωση πακέτου: το barcode ενός δελτίου (14 ψηφία) ή έκδοση και πακέτο (11)· `loaded`: πόσα δελτία |
+| `POST /api/scratch/returns` `{"code"}` | επιστροφή των απούλητων δελτίων ενός πακέτου (άκυρα, έξω από το απόθεμα)· `returned`: πόσα |
 | `POST /api/pos/{ταμείο}/prize` `{"amount", "ticket"}` | κέρδος σκρατς από το συρτάρι (CASHIER)· η σάρωση ενός πουλημένου δελτίου στο `scan`: 409 `sold`, με την απόδειξη |
 | `/api/backup` | το τελευταίο backup (`db/backup.ps1`): `state` (`OK`, `OLD` πάνω από 2 μέρες, `FAILED`, `NEVER`), `days`, `ok_at`, `ok_file`, `failed_at`, `error` (MANAGER) |
 | `/api/reports/trial-items`, `trial-customers`, `trial-suppliers` `?from=&to=&all=1` | τα ισοζύγια: `rows` (`id`, `code`, `name`, `unit`, `open_bal`, `debit`, `credit`, `close_bal`) και `totals`· χωρίς `all=1` μόνο όσα έχουν κάτι |
