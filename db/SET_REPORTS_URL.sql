@@ -1,8 +1,9 @@
 -- SET_REPORTS_URL.sql -- where the forms open the reports: the rwservlet of the Reports Server, with
 -- the key of cgicmd.dat (mm: userid=/@MM_DB, no password in the address), and the format.
---   sqlplus mm/<password>@FREEPDB1 @SET_REPORTS_URL.sql http://192.168.178.165:9012 HTML
+--   sqlplus mm/<password>@FREEPDB1 @SET_REPORTS_URL.sql http://192.168.178.165:9012 PDF
 --   sqlplus mm/<password>@FREEPDB1 @SET_REPORTS_URL.sql http://forms1.home.lan:9012 PDF
--- The format: PDF or HTML (on Windows the Greek of the PDF is still open: HTML).
+-- The format: PDF or HTML (the Greek of the PDF on Windows: uifont.ali in the Oracle_Home, as
+-- reports_server.cmd of PROPOApplication writes it).
 -- The key: reports_server.cmd -Alias MM_DB -Key mm of PROPOApplication (retro\oracle\windows).
 set verify off
 merge into mm_setting s
