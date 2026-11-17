@@ -131,6 +131,7 @@ final class Docs {
         List<Map<String, Object>> h = Db.rows(c, """
                 select d.id, d.doc_type, t.name type_name, t.side, t.stock_sign, t.partner_sign, t.ref_type,
                        d.doc_no, d.doc_date, d.status, d.customer_id, d.supplier_id, nvl(cu.name, s.name) partner,
+                       nvl(cu.afm, s.afm) partner_afm, nvl(cu.doy, s.doy) partner_doy, nvl(cu.address, s.address) partner_address,
                        d.payment, d.net, d.vat, d.total, d.notes, d.ref_doc_id, case when r.id is not null then r.doc_type || ' ' || r.doc_no end ref_text,
                        d.invoice_id, case when i.id is not null then i.doc_type || ' ' || i.doc_no end invoice_text,
                        t.mydata_type, d.mydata_state, d.mydata_mark, d.mydata_uid, d.mydata_qr, d.mydata_error,
