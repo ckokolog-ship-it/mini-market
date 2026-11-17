@@ -15,7 +15,7 @@ const MENU = [
   ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER']]],
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
-  ['Αναφορές', [['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
+  ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
     ['#/reports/min-stock', 'Ελάχιστο απόθεμα', 'MANAGER'], ['#/reports/trial-items', 'Ισοζύγιο ειδών', 'MANAGER'],
     ['#/reports/trial-customers', 'Ισοζύγιο πελατών', 'MANAGER'], ['#/reports/trial-suppliers', 'Ισοζύγιο προμηθευτών', 'MANAGER']]],
 ];
@@ -565,6 +565,83 @@ function minTable(rows) {
     num(x.stock, qty), num(x.min_stock, qty), num(x.missing, qty), el('td', { class: 'hide-phone' }, x.supplier || ''))));
 }
 
+// -- the summary of a day (σύνοψη ημέρας), after the Z: the Z of the registers, the sales and their VAT,
+// the items sold most, the scratch tickets, the orders, myDATA, the minimum stock, the backup. A day back
+// and forth; printed on A4
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function dayShift(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return isoDay(new Date(y, m - 1, d + n));
+}
+const MYDATA_STATE = { '-': 'Δεν στάλθηκαν', Q: 'Σε αναμονή', S: 'Διαβιβάστηκαν', E: 'Απέτυχαν', X: 'Ακυρώθηκαν' };
+const BACKUP_STATE = { OK: 'Εντάξει', OLD: 'Παλιό', FAILED: 'Απέτυχε', NEVER: 'Δεν έγινε ποτέ' };
+async function dayPage(params) {
+  const date = params.get('date') || isoDay(new Date());
+  const go = (d) => { location.hash = '#/day?date=' + d; };
+  const pick = el('input', { type: 'date', name: 'date', value: date, onchange: () => pick.value && go(pick.value) });
+  const out = el('div', { class: 'day-sheet' });
+  const pair = (k, v, bad) => el('tr', { class: bad ? 'neg' : null }, el('th', {}, k), el('td', { class: 'num' }, v));
+  const box = (title, ...kids) => el('section', { class: 'day-box' }, el('h2', {}, title), ...kids);
+  show(el('h1', {}, 'Σύνοψη ημέρας ' + day(date)),
+    el('div', { class: 'panel row no-print' },
+      el('button', { type: 'button', onclick: () => go(dayShift(date, -1)) }, '‹ Προηγούμενη'),
+      el('label', {}, 'Ημέρα', pick),
+      el('button', { type: 'button', onclick: () => go(dayShift(date, 1)) }, 'Επόμενη ›'),
+      el('button', { type: 'button', class: 'primary', onclick: () => window.print() }, 'Εκτύπωση')),
+    out);
+  let r;
+  try { r = await api('day?date=' + date); } catch (e) { fail(e); return; }
+  const zs = r.zs.length
+    ? table([['Ταμείο'], ['Ζ', 'num'], ['Άνοιξε', 'hide-phone'], ['Έκλεισε'], ['Αποδείξεις', 'num'], ['Σύνολο', 'num'], ['Μετρητά', 'num'],
+      ['Κάρτα', 'num'], ['Μπήκαν', 'num hide-phone'], ['Βγήκαν', 'num hide-phone'], ['Συρτάρι', 'num']],
+    r.zs.map((z) => el('tr', {}, el('td', {}, z.register_name), el('td', { class: 'num' }, z.z_no),
+      el('td', { class: 'hide-phone' }, day(z.opened_at)), el('td', {}, z.status === 'O' ? 'ανοιχτό' : day(z.closed_at)),
+      el('td', { class: 'num' }, z.docs), num(z.total), num(z.cash), num(z.card),
+      num(z.money_in, money, 'num hide-phone'), num(z.money_out, money, 'num hide-phone'), num(z.drawer))))
+    : el('p', { class: 'muted' }, 'Κανένα Ζ αυτή την ημέρα.');
+  const s = r.sales;
+  const vat = r.vat.length
+    ? table([['ΦΠΑ'], ['Καθαρή αξία', 'num'], ['ΦΠΑ', 'num'], ['Σύνολο', 'num']],
+      r.vat.map((v) => el('tr', {}, el('td', {}, v.vat_rate + '%'), num(v.net), num(v.vat), num(v.net + v.vat))))
+    : el('p', { class: 'muted' }, 'Καμία πώληση.');
+  const top = r.top.length
+    ? table([['#', 'num'], ['Κωδικός', 'hide-phone'], ['Είδος'], ['Ποσότητα', 'num'], ['Αξία', 'num']],
+      r.top.map((x, i) => el('tr', {}, el('td', { class: 'num' }, i + 1), el('td', { class: 'hide-phone' }, x.code),
+        el('td', { class: 'wrap' }, x.name), num(x.qty, qty), num(x.total))))
+    : el('p', { class: 'muted' }, 'Κανένα είδος δεν πουλήθηκε.');
+  const sc = r.scratch;
+  const o = r.orders;
+  const my = r.mydata;
+  const b = r.backup;
+  out.replaceChildren(
+    box('Ζ ταμείων', zs),
+    el('div', { class: 'day-grid' },
+      box('Πωλήσεις', el('table', { class: 'pairs' }, el('tbody', {},
+        pair('Αποδείξεις λιανικής', `${s.alp_docs} · ${money(s.alp_total)}`),
+        pair('Τιμολόγια', money(s.tpy_total)),
+        pair('Πιστωτικά', money(s.ppy_total)),
+        pair('Σύνολο', money(s.total))))),
+      box('ΦΠΑ πωλήσεων', vat),
+      box('Σκρατς', el('table', { class: 'pairs' }, el('tbody', {},
+        pair('Δελτία που πουλήθηκαν', `${sc.tickets} · ${money(sc.value)}`),
+        pair('Κέρδη που πληρώθηκαν', `${sc.prizes} · ${money(sc.prizes_total)}`),
+        pair('Διαφορά', money(sc.value - sc.prizes_total))))),
+      box('Παραγγελίες', el('table', { class: 'pairs' }, el('tbody', {},
+        pair('Νέες την ημέρα', `${o.new_} (online ${o.online_new})`),
+        pair('Ανοιχτές τώρα', o.open_now),
+        pair('Online χωρίς επιβεβαίωση', o.to_confirm, o.to_confirm > 0)))),
+      box('myDATA', el('table', { class: 'pairs' }, el('tbody', {},
+        ...(my.day.length ? my.day.map((x) => pair('Τιμολόγια ημέρας: ' + (MYDATA_STATE[x.state] || x.state).toLowerCase(), x.n, x.state === 'E'))
+          : [pair('Τιμολόγια ημέρας', 0)]),
+        pair('Σε αναμονή (όλες οι ημέρες)', my.waiting),
+        pair('Απέτυχαν (όλες οι ημέρες)', my.failed, my.failed > 0)))),
+      box('Αποθήκη και backup', el('table', { class: 'pairs' }, el('tbody', {},
+        pair('Είδη κάτω από το ελάχιστο', r.min_stock, r.min_stock > 0),
+        pair('Backup', (BACKUP_STATE[b.state] || b.state) + (b.ok_at ? ' · ' + day(b.ok_at) : ''), b.state !== 'OK'))),
+      r.min_stock > 0 ? el('p', { class: 'no-print' }, el('a', { href: '#/reports/min-stock' }, 'Τα είδη κάτω από το ελάχιστο ›')) : null)),
+    box('Τα 10 είδη με τις περισσότερες πωλήσεις', top));
+}
+
 // -- the scratch tickets (σκρατς): bought in packs, sold one by one by the barcode of each (its game 4
 // digits, its pack 7, its number 3). A pack loaded by a scan of one of its tickets; the games (έκδοση: the
 // item it is sold as, the tickets of a pack); the packs, sold and left; the prizes paid, by day
@@ -912,6 +989,7 @@ async function posPage(params) {
             if (!confirm(`Κλείσιμο του Ζ ${z.z_no};`)) return;
             const r = await run('/close', {});
             if (r && r.closed) toast(`Ζ ${r.closed.z_no} έκλεισε: σύνολο ${money(r.closed.total)}, μετρητά ${money(r.closed.cash)}, κάρτα ${money(r.closed.card)}`);
+            if (r && r.closed && can('MANAGER') && confirm('Να ανοίξει η σύνοψη της ημέρας;')) location.hash = '#/day';
           },
         }, 'Κλείσιμο Ζ'));
     } else {
@@ -1652,6 +1730,7 @@ function render() {
     case 'reports': return need('MANAGER', () => reportPage(p[1], params));
     case 'counts': return countsPage();
     case 'scratch': return need('MANAGER', () => scratchPage());
+    case 'day': return need('MANAGER', () => dayPage(params));
     case 'count': return countPage(p[1]);
     default: return itemsPage(params);
   }

@@ -261,8 +261,21 @@ async function waitText(page, sel, text) {
   await waitText(page, 'main', 'Τελευταίες αποδείξεις');
   if (SHOTS) await page.screenshot({ path: SHOTS + '/pos.png', fullPage: true });
   await page.click('button:has-text("Κλείσιμο Ζ")');
-  await waitText(page, 'main', 'Κλειστό');
-  ok((await page.textContent('#toast')).includes('έκλεισε'), 'the Z closed: its totals');
+  await waitText(page, '#toast', 'έκλεισε');
+  ok(true, 'the Z closed: its totals');
+  // then (a manager, yes to the question) the summary of the day: the Z closed in it, the sales, the
+  // scratch prize paid above; the day before, back
+  await waitText(page, 'main h1', 'Σύνοψη ημέρας');
+  await waitText(page, 'main', 'Τα 10 είδη');
+  const sum = await page.textContent('main');
+  ok(/Ζ ταμείων/.test(sum) && sum.includes('Κέρδη που πληρώθηκαν') && sum.includes(ITEM) && !sum.includes('Κανένα Ζ'),
+    'after the Z: the summary of the day, the Z, the items, the scratch');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/day.png', fullPage: true });
+  await page.click('button:has-text("Προηγούμενη")');
+  await page.waitForFunction(() => /date=\d{4}-\d\d-\d\d/.test(location.hash));
+  const prev = new URL(page.url().replace('#/', '')).searchParams.get('date');
+  await waitText(page, 'main h1', prev.split('-').reverse().join('/'));
+  ok(true, 'the summary: the day before, ' + prev);
 
   // the labels (a sharp screen: each label a picture, read back by tests/test_web.py): the item of
   // the tests by a scan (no barcode: its code in Code 128; its name with HTML: as text), the bread by a
