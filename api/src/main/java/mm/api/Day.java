@@ -15,6 +15,7 @@ import java.util.Map;
  *   GET /api/day?date=YYYY-MM-DD   (default today)
  *     zs        the Z of the registers on that day: receipts, total, cash, card, money in and out, drawer
  *     sales     the sales of the day (MM_SALES_DAY), vat its VAT by rate (MM_VAT_DAY)
+ *     profit    its gross profit: revenue (net), cost (FIFO or LAST: COST_METHOD), profit
  *     top       the 10 items sold most (by value) out of the stock that day (less what came back)
  *     scratch   the scratch tickets sold and their value, the prizes paid
  *     orders    the orders written that day (online of them), the open ones now (online not confirmed)
@@ -51,6 +52,13 @@ final class Day {
                 select alp_docs, alp_total, tpy_total, ppy_total, total from mm_sales_day where day = ?""", d);
         out.put("sales", s.isEmpty() ? Map.of("alp_docs", 0, "alp_total", 0, "tpy_total", 0, "ppy_total", 0, "total", 0)
                 : s.get(0));
+        // the gross profit of the day (the sales less what they cost, as the shop counts its costs)
+        String method = Api.costMethod(c, null);
+        Map<String, Object> profit = new LinkedHashMap<>(Db.rows(c, """
+                select nvl(sum(revenue), 0) revenue, nvl(sum(cost), 0) cost, nvl(sum(profit), 0) profit
+                from (""" + Api.PROFIT + ")", method, method, d, d, d, d).get(0));
+        profit.put("method", method);
+        out.put("profit", profit);
         out.put("vat", Db.rows(c, """
                 select vat_code, vat_rate, sum(s_net) net, sum(s_vat) vat from mm_vat_day where day = ?
                 group by vat_code, vat_rate having sum(s_net) <> 0 or sum(s_vat) <> 0 order by vat_code""", d));

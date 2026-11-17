@@ -171,6 +171,10 @@ create or replace package mm_core as
   procedure set_doc_customer(p_doc_id number, p_customer_id number);
   procedure use_points(p_doc_id number, p_points number);
 
+  -- FIFO (MM_FIFO, MM_FIFO_OUT): built by every move of the stock (stock_move); all of it again from
+  -- the moves, of one item or of all (INSTALL.sql does it, after the demo rows)
+  procedure fifo_rebuild(p_item_id number default null);
+
   -- the backup of the database (db/backup.ps1) says how it went: p_ok Y (p_text its file) or N (p_text
   -- the error); MM_BACKUP_STATE tells the pages when the last good one is too old
   procedure backup_done(p_ok varchar2, p_text varchar2);
@@ -662,16 +666,128 @@ create or replace package body mm_core as
   end;
 
   -- ---------------------------------------------------------------------------------------------
+  -- ---------------------------------------------------------------------------------------------
+  -- FIFO: a move of the stock into the layers (MM_TABLES.sql, MM_FIFO)
+  procedure fifo_take(p_fifo_id number, p_unit number, p_qty number, m mm_stock_move%rowtype) is
+  begin
+    update mm_fifo set left_ = left_ - p_qty where id = p_fifo_id;
+    insert into mm_fifo_out (fifo_id, move_id, doc_line_id, qty, cost)
+    values (p_fifo_id, m.id, m.doc_line_id, p_qty, round(p_qty * p_unit, 4));
+  end;
+
+  -- the cost of a piece that comes in without a cost of its own (a return, a count, a shortage): that of
+  -- the newest layer of the item (so built again from the moves, the same); none yet: the cost of the item
+  function fifo_unit(p_item_id number) return number is
+    v number;
+  begin
+    select max(unit_cost) keep (dense_rank last order by id) into v from mm_fifo where item_id = p_item_id and qty > 0;
+    if v is null then
+      select nvl(cost, 0) into v from mm_item where id = p_item_id;
+    end if;
+    return v;
+  end;
+
+  procedure fifo_apply(m mm_stock_move%rowtype) is
+    r number := abs(m.qty);
+    q number;
+    unit number;
+    neg number;
+    cancel boolean := m.kind = 'DOC' and m.note = 'Ακύρωση';
+  begin
+    -- the cost of the last purchase now (the other way of counting the costs: COST_METHOD LAST)
+    unit := fifo_unit(m.item_id);
+    update mm_stock_move set unit_last = unit where id = m.id;
+    if m.qty > 0 then
+      if cancel then
+        -- a sale cancelled: what its line took, back to its layers (the newest first)
+        for o in (select o.fifo_id, sum(o.qty) q, sum(o.cost) c
+                  from mm_fifo_out o join mm_stock_move s on s.id = o.move_id
+                  where s.doc_id = m.doc_id and s.item_id = m.item_id
+                    and nvl(s.doc_line_id, -1) = nvl(m.doc_line_id, -1)
+                  group by o.fifo_id having sum(o.qty) > 0 order by o.fifo_id desc) loop
+          exit when r <= 0;
+          q := least(r, o.q);
+          update mm_fifo set left_ = left_ + q where id = o.fifo_id;
+          insert into mm_fifo_out (fifo_id, move_id, doc_line_id, qty, cost)
+          values (o.fifo_id, m.id, m.doc_line_id, -q, -round(o.c * q / o.q, 4));
+          r := r - q;
+        end loop;
+      end if;
+      -- a shortage first (sold before it came)
+      for f in (select id, left_ from mm_fifo where item_id = m.item_id and left_ < 0 order by id) loop
+        exit when r <= 0;
+        q := least(r, -f.left_);
+        update mm_fifo set left_ = left_ + q where id = f.id;
+        r := r - q;
+      end loop;
+      if r > 0 then
+        -- its cost: a receipt from a supplier, the net of its line by piece; else that of the newest layer
+        select max(case when t.side = 'P' and l.qty <> 0 then round(l.net / l.qty, 4) end) into unit
+        from mm_doc_line l join mm_doc d on d.id = l.doc_id join mm_doc_type t on t.code = d.doc_type
+        where l.id = m.doc_line_id and l.item_id = m.item_id;
+        if unit is null then
+          unit := fifo_unit(m.item_id);
+        end if;
+        insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_)
+        values (m.item_id, m.id, m.doc_line_id, m.move_at, r, unit, r);
+      end if;
+    else
+      if cancel then
+        -- a receipt cancelled: what is left of the layer it brought
+        for f in (select f.id, f.left_, f.unit_cost from mm_fifo f join mm_stock_move s on s.id = f.move_id
+                  where s.doc_id = m.doc_id and f.item_id = m.item_id
+                    and nvl(f.doc_line_id, -1) = nvl(m.doc_line_id, -1) and f.left_ > 0 order by f.id) loop
+          exit when r <= 0;
+          q := least(r, f.left_);
+          fifo_take(f.id, f.unit_cost, q, m);
+          r := r - q;
+        end loop;
+      end if;
+      for f in (select id, left_, unit_cost from mm_fifo where item_id = m.item_id and left_ > 0 order by id) loop
+        exit when r <= 0;
+        q := least(r, f.left_);
+        fifo_take(f.id, f.unit_cost, q, m);
+        r := r - q;
+      end loop;
+      if r > 0 then
+        -- none left: a shortage, at the cost of the newest layer, until goods come
+        select max(id) into neg from mm_fifo where item_id = m.item_id and qty = 0;
+        if neg is null then
+          unit := fifo_unit(m.item_id);
+          insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_)
+          values (m.item_id, m.id, m.doc_line_id, m.move_at, 0, unit, 0)
+          returning id into neg;
+        end if;
+        select unit_cost into unit from mm_fifo where id = neg;
+        fifo_take(neg, unit, r, m);
+      end if;
+    end if;
+  end;
+
+  procedure fifo_rebuild(p_item_id number default null) is
+  begin
+    delete from mm_fifo_out where fifo_id in (select id from mm_fifo where p_item_id is null or item_id = p_item_id);
+    delete from mm_fifo where p_item_id is null or item_id = p_item_id;
+    for m in (select * from mm_stock_move where p_item_id is null or item_id = p_item_id order by id) loop
+      fifo_apply(m);
+    end loop;
+  end;
+
   procedure stock_move(p_item_id number, p_kind varchar2, p_qty number, p_doc_id number default null,
                        p_line_id number default null, p_note varchar2 default null,
                        p_count_id number default null) is
+    m mm_stock_move%rowtype;
   begin
     if p_qty = 0 then
       return;
     end if;
     insert into mm_stock_move (item_id, kind, qty, doc_id, doc_line_id, note, count_id)
-    values (p_item_id, p_kind, p_qty, p_doc_id, p_line_id, p_note, p_count_id);
+    values (p_item_id, p_kind, p_qty, p_doc_id, p_line_id, p_note, p_count_id)
+    returning id, move_at into m.id, m.move_at;
     update mm_item set stock = stock + p_qty where id = p_item_id;   -- reservable: no row lock
+    m.item_id := p_item_id; m.kind := p_kind; m.qty := p_qty; m.doc_id := p_doc_id;
+    m.doc_line_id := p_line_id; m.note := p_note;
+    fifo_apply(m);                            -- its layers (FIFO)
   end;
 
   function open_z_of(p_register_id number) return number is

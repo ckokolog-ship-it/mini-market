@@ -17,7 +17,8 @@ const MENU = [
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
   ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/chart', 'Γράφημα πωλήσεων', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
     ['#/reports/min-stock', 'Ελάχιστο απόθεμα', 'MANAGER'], ['#/reports/trial-items', 'Ισοζύγιο ειδών', 'MANAGER'],
-    ['#/reports/trial-customers', 'Ισοζύγιο πελατών', 'MANAGER'], ['#/reports/trial-suppliers', 'Ισοζύγιο προμηθευτών', 'MANAGER']]],
+    ['#/reports/trial-customers', 'Ισοζύγιο πελατών', 'MANAGER'], ['#/reports/trial-suppliers', 'Ισοζύγιο προμηθευτών', 'MANAGER'],
+    ['#/reports/profit', 'Μικτό κέρδος', 'MANAGER'], ['#/reports/stock-value', 'Αξία αποθήκης', 'MANAGER']]],
 ];
 
 let session = null;
@@ -51,6 +52,8 @@ const nf2 = new Intl.NumberFormat('el-GR', { minimumFractionDigits: 2, maximumFr
 const nf3 = new Intl.NumberFormat('el-GR', { maximumFractionDigits: 3 });
 const money = (v) => (v === null || v === undefined ? '' : nf2.format(v));
 const qty = (v) => (v === null || v === undefined ? '' : nf3.format(v));
+const nf4 = new Intl.NumberFormat('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+const money4 = (v) => (v === null || v === undefined ? '' : nf4.format(v));      // a cost by piece
 function day(iso) {           // 2026-11-15 or 2026-11-15T09:30 -> 15/11/2026 (09:30)
   if (!iso) return '';
   const [d, t] = String(iso).split('T');
@@ -350,9 +353,16 @@ async function itemPage(code) {
       ['Απόθεμα', qty(x.stock)], ['Δεσμευμένα', qty(x.reserved)], ['Διαθέσιμα', qty(x.available)],
       ['Ελάχιστο', qty(x.min_stock)]];
     if (x.serial_tracked === 'Y') rows.push(['Διαθέσιμες κάρτες', x.cards]);
-    if (can('MANAGER')) rows.splice(6, 0, ['Κόστος', money(x.cost)]);
+    if (can('MANAGER')) rows.splice(6, 0, ['Κόστος (τελευταία αγορά)', money(x.cost)], ['Κόστος FIFO (επόμενο)', x.fifo_next === null ? '' : money4(x.fifo_next)]);
     show(el('h1', {}, x.name),
       el('div', { class: 'panel' }, el('dl', { class: 'kv' }, rows.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v ?? '')]))),
+      can('MANAGER') && x.fifo.length ? el('div', { class: 'panel' }, el('h2', {}, `Το απόθεμα ανά παραλαβή (FIFO): ${money(x.fifo_value)} €`),
+        el('p', { class: 'muted' }, 'Πρώτα φεύγουν τα παλιότερα, με το κόστος τους.'),
+        table([['Παραλαβή'], ['Από'], ['Ποσότητα', 'num'], ['Μένουν', 'num'], ['Κόστος', 'num'], ['Αξία', 'num']],
+          fifoRows(x.fifo).map((f) => el('tr', { class: f.left_ < 0 ? 'expired' : null },
+            el('td', {}, f.left_ < 0 ? 'Έλλειμμα (πουλήθηκαν πριν έρθουν)' : day(f.in_at) + (f.n > 1 ? ' – ' + day(f.last_at) : '')),
+            el('td', {}, f.n > 1 ? `${f.n} κινήσεις` : f.doc_id ? el('a', { href: '#/doc/' + f.doc_id }, `${f.doc_type} ${f.doc_no}`) : 'κίνηση αποθήκης'),
+            num(f.qty, qty), num(f.left_, qty), num(f.unit_cost, money4), num(f.left_ * f.unit_cost))))) : null,
       el('div', { class: 'row' },
         el('button', { onclick: () => history.back() }, 'Πίσω'),
         el('button', { onclick: () => { labelAdd(x, 1); location.hash = '#/labels'; } }, 'Ετικέτα'),
@@ -361,6 +371,19 @@ async function itemPage(code) {
     fail(e);
     show(el('h1', {}, 'Είδη'), el('p', { class: 'muted' }, 'Δεν βρέθηκε: ' + code), el('a', { href: '#/items' }, 'Στα είδη'));
   }
+}
+
+// the layers of an item one after another at the same cost: one row (the same for FIFO), its first and
+// last date, how many
+function fifoRows(layers) {
+  const out = [];
+  for (const f of layers) {
+    const p = out[out.length - 1];
+    if (p && f.left_ > 0 && p.left_ > 0 && f.unit_cost === p.unit_cost) {
+      p.qty += f.qty; p.left_ += f.left_; p.n += 1; p.last_at = f.in_at;
+    } else out.push({ ...f, n: 1, last_at: f.in_at });
+  }
+  return out;
 }
 
 // -- customers and suppliers -----------------------------------------------------------------------
@@ -481,25 +504,42 @@ async function ledgerPage(what, id, params) {
 // -- the reports -----------------------------------------------------------------------------------
 async function reportPage(name, params) {
   const titles = { sales: 'Πωλήσεις ανά ημέρα', vat: 'ΦΠΑ πωλήσεων και αγορών', 'min-stock': 'Είδη κάτω από το ελάχιστο απόθεμα',
-    'trial-items': 'Ισοζύγιο ειδών', 'trial-customers': 'Ισοζύγιο πελατών', 'trial-suppliers': 'Ισοζύγιο προμηθευτών' };
+    'trial-items': 'Ισοζύγιο ειδών', 'trial-customers': 'Ισοζύγιο πελατών', 'trial-suppliers': 'Ισοζύγιο προμηθευτών',
+    profit: 'Μικτό κέρδος', 'stock-value': 'Αξία αποθήκης' };
   if (!titles[name]) { show(el('h1', {}, 'Δεν υπάρχει αυτή η αναφορά')); return; }
   const trial = name.startsWith('trial-');
   const all = el('input', { type: 'checkbox', name: 'all', checked: params.get('all') === '1' });
   const from = el('input', { type: 'date', value: params.get('from') || isoYearStart() });
   const to = el('input', { type: 'date', value: params.get('to') || isoToday() });
   const out = el('div');
+  // the costs (the gross profit, the value of the stock): FIFO or the last purchase; the one of the shop by default
+  const costs = name === 'profit' || name === 'stock-value';
+  const method = el('select', { name: 'method' }, el('option', { value: 'FIFO' }, 'FIFO (πρώτα τα παλιότερα)'),
+    el('option', { value: 'LAST' }, 'Τελευταία τιμή αγοράς'));
+  const makeDefault = el('button', {
+    type: 'button',
+    onclick: async () => {
+      try { await api('reports/cost-method', { method: method.value }); toast('Η μέθοδος κόστους του συστήματος: ' + method.selectedOptions[0].text); go(); } catch (e) { fail(e); }
+    },
+  }, 'Να είναι η μέθοδος του συστήματος');
+  let first = true;
   const go = async () => {
     try {
-      const r = await api(`reports/${name}?from=${from.value}&to=${to.value}` + (trial && all.checked ? '&all=1' : ''));
-      out.replaceChildren(trial ? trialTable(name, r, from.value, to.value) : name === 'sales' ? salesTable(r.rows) : name === 'vat' ? vatTable(r.rows) : minTable(r.rows));
+      const m = costs ? (first ? params.get('method') || '' : method.value) : '';
+      const r = await api(`reports/${name}?from=${from.value}&to=${to.value}` + (trial && all.checked ? '&all=1' : '') + (m ? '&method=' + m : ''));
+      first = false;
+      if (costs) { method.value = r.method; makeDefault.hidden = r.method === r.default_method; }
+      out.replaceChildren(trial ? trialTable(name, r, from.value, to.value) : name === 'sales' ? salesTable(r.rows) : name === 'vat' ? vatTable(r.rows)
+        : name === 'profit' ? profitTable(r) : name === 'stock-value' ? stockValueTable(r) : minTable(r.rows));
       if (name === 'min-stock' && r.rows.length) out.append(orderBox(r.rows));
     } catch (e) { fail(e); }
   };
   const form = name === 'min-stock' ? null
     : el('form', { class: 'panel row', onsubmit: (ev) => { ev.preventDefault(); go(); } },
-      el('label', {}, 'Από', from), el('label', {}, 'Έως', to),
+      name === 'stock-value' ? null : el('label', {}, 'Από', from), name === 'stock-value' ? null : el('label', {}, 'Έως', to),
+      costs ? el('label', {}, 'Μέθοδος κόστους', method) : null,
       trial ? el('label', { class: 'check' }, all, 'Και όσα έχουν μηδέν παντού') : null,
-      el('button', { class: 'primary', type: 'submit' }, 'Εμφάνιση'));
+      el('button', { class: 'primary', type: 'submit' }, 'Εμφάνιση'), costs ? makeDefault : null);
   show(el('h1', {}, titles[name]), form, out);
   go();
 }
@@ -551,6 +591,53 @@ function salesTable(rows) {
   if (!months.length) return el('p', { class: 'muted' }, 'Καμία πώληση στο διάστημα.');
   showMonth(months.length - 1);                       // the last month first
   return box;
+}
+// the gross profit of the items in a period: the net of the sales less what they cost, by the method
+// chosen (FIFO: the oldest first, at their costs; LAST: at the cost of the last purchase then), the cost
+// by the other beside it; the differences of the stock (counts, withdrawals) apart
+const METHOD = { FIFO: 'FIFO', LAST: 'τελευταίας αγοράς' };
+function profitTable(r) {
+  if (!r.rows.length) return el('p', { class: 'muted' }, 'Καμία πώληση στο διάστημα.');
+  const other = r.method === 'LAST' ? 'FIFO' : 'LAST';
+  const otherCost = (x) => (other === 'LAST' ? x.cost_last : x.cost_fifo);
+  const t = r.rows.reduce((a, x) => ({ revenue: a.revenue + x.revenue, cost: a.cost + x.cost, profit: a.profit + x.profit, other: a.other + otherCost(x) }),
+    { revenue: 0, cost: 0, profit: 0, other: 0 });
+  const pct = (p, v) => (v ? nf2.format(p / v * 100) + '%' : '');
+  const fig = (label, value, note) => el('div', { class: 'fig' }, el('div', { class: 'fig-label' }, label), el('div', { class: 'fig-value' }, value),
+    note ? el('div', { class: 'fig-note' }, note) : null);
+  return el('div', {},
+    el('div', { class: 'figs' },
+      fig('Καθαρές πωλήσεις', money(t.revenue) + ' €'),
+      fig(`Κόστος (${METHOD[r.method]})`, money(t.cost) + ' €', `με ${METHOD[other]}: ${money(t.other)} €`),
+      fig('Μικτό κέρδος', money(t.profit) + ' €', `${pct(t.profit, t.revenue)} · με ${METHOD[other]}: ${money(t.revenue - t.other)} €`),
+      fig('Διαφορές αποθήκης (απογραφές, αποσύρσεις)', (r.stock_diff > 0 ? '−' : r.stock_diff < 0 ? '+' : '') + money(Math.abs(r.stock_diff)) + ' €',
+        r.stock_diff > 0 ? 'έλλειμμα: λιγότερα από όσα έπρεπε' : r.stock_diff < 0 ? 'περίσσευμα: περισσότερα από όσα έπρεπε' : null)),
+    table([['Κωδικός', 'hide-phone'], ['Είδος'], ['Ποσότητα', 'num'], ['Πωλήσεις', 'num'], [`Κόστος ${METHOD[r.method]}`, 'num'],
+      [`Κόστος ${METHOD[other]}`, 'num hide-phone muted-col'], ['Κέρδος', 'num'], ['%', 'num hide-phone']],
+    [...r.rows.map((x) => el('tr', {}, el('td', { class: 'hide-phone' }, x.code), el('td', { class: 'wrap' }, x.name),
+      num(x.qty, qty), num(x.revenue), num(x.cost), num(otherCost(x), money, 'num hide-phone muted-col'), num(x.profit),
+      el('td', { class: 'num hide-phone' }, pct(x.profit, x.revenue)))),
+    el('tr', { class: 'total' }, el('td', { class: 'hide-phone' }), el('td', {}, 'Σύνολο'), el('td'), num(t.revenue), num(t.cost),
+      num(t.other, money, 'num hide-phone muted-col'), num(t.profit), el('td', { class: 'num hide-phone' }, pct(t.profit, t.revenue)))]));
+}
+// the value of the stock now: by the method chosen, by the other beside it
+function stockValueTable(r) {
+  const rows = r.rows;
+  if (!rows.length) return el('p', { class: 'muted' }, 'Κανένα απόθεμα.');
+  const sum = (k) => rows.reduce((a, x) => a + x[k], 0);
+  const [mine, theirs] = r.method === 'LAST' ? ['value_last', 'value_fifo'] : ['value_fifo', 'value_last'];
+  const other = r.method === 'LAST' ? 'FIFO' : 'LAST';
+  return el('div', {},
+    el('div', { class: 'figs' },
+      el('div', { class: 'fig' }, el('div', { class: 'fig-label' }, `Αξία αποθήκης (${METHOD[r.method]})`), el('div', { class: 'fig-value' }, money(sum(mine)) + ' €'),
+        el('div', { class: 'fig-note' }, `με ${METHOD[other]}: ${money(sum(theirs))} €`))),
+    table([['Κατηγορία', 'hide-phone'], ['Κωδικός'], ['Είδος'], ['Απόθεμα', 'num'], ['Κόστος FIFO', 'num hide-phone'], ['Τελευταίας αγοράς', 'num hide-phone'],
+      [`Αξία ${METHOD[r.method]}`, 'num'], [`Αξία ${METHOD[other]}`, 'num hide-phone muted-col']],
+    [...rows.map((x) => el('tr', { class: 'click', onclick: () => { location.hash = '#/item/' + encodeURIComponent(x.code); } },
+      el('td', { class: 'hide-phone' }, x.category), el('td', {}, x.code), el('td', { class: 'wrap' }, x.name), num(x.stock, qty),
+      num(x.unit_cost, money4, 'num hide-phone'), num(x.last_cost, money4, 'num hide-phone'), num(x[mine]), num(x[theirs], money, 'num hide-phone muted-col'))),
+    el('tr', { class: 'total' }, el('td', { class: 'hide-phone' }), el('td', {}, 'Σύνολο'), el('td'), el('td'), el('td', { class: 'hide-phone' }),
+      el('td', { class: 'hide-phone' }), num(sum(mine)), num(sum(theirs), money, 'num hide-phone muted-col'))]));
 }
 function vatTable(rows) {
   const sums = ['s_net', 's_vat', 'p_net', 'p_vat', 'payable'];
@@ -660,7 +747,10 @@ async function dayPage(params) {
         pair('Αποδείξεις λιανικής', `${s.alp_docs} · ${money(s.alp_total)}`),
         pair('Τιμολόγια', money(s.tpy_total)),
         pair('Πιστωτικά', money(s.ppy_total)),
-        pair('Σύνολο', money(s.total))))),
+        pair('Σύνολο', money(s.total)),
+        pair('Καθαρές πωλήσεις (χωρίς ΦΠΑ)', money(r.profit.revenue)),
+        pair(`Κόστος τους (${r.profit.method === 'LAST' ? 'τελευταία τιμή αγοράς' : 'FIFO'})`, money(r.profit.cost)),
+        pair('Μικτό κέρδος', money(r.profit.profit) + (r.profit.revenue ? ` (${nf2.format(r.profit.profit / r.profit.revenue * 100)}%)` : ''), r.profit.profit < 0)))),
       box('ΦΠΑ πωλήσεων', vat),
       box('Σκρατς', el('table', { class: 'pairs' }, el('tbody', {},
         pair('Δελτία που πουλήθηκαν', `${sc.tickets} · ${money(sc.value)}`),

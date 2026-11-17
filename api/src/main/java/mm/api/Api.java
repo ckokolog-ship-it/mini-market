@@ -39,6 +39,9 @@ import java.util.Optional;
  *                                              myDATA, minimum stock, backup (MANAGER, Day.java)
  *   /api/backup                              the last backup (db/backup.ps1): state OK, OLD, FAILED, NEVER (MANAGER)
  *   /api/reports/trial-items|trial-customers|trial-suppliers?from=&to=&all=1   the trial balances
+ *   /api/reports/profit?from=&to=&method=   /api/reports/stock-value?method=   the gross profit, the value
+ *                                              of the stock: FIFO or LAST (the cost of the last purchase)
+ *   POST /api/reports/cost-method {method}     the way the shop counts its costs: FIFO or LAST
  *                                              (ισοζύγια): a row each with the totals of its ledger, no moves
  *   GET /api/counts   GET /api/counts/{id}      the counts of the stock; one with its lines
  *   POST /api/counts {name}                     a new count                    (MANAGER)
@@ -228,6 +231,18 @@ final class Api {
         if ("scratch".equals(p[0])) {
             need(u, "MANAGER");
             return Scratch.post(c, p, in);
+        }
+        if ("reports".equals(p[0]) && n == 2 && "cost-method".equals(p[1])) {   // the way the costs are counted
+            need(u, "MANAGER");
+            String m = String.valueOf(Http.text(in, "method", true)).trim().toUpperCase(java.util.Locale.ROOT);
+            if (!"FIFO".equals(m) && !"LAST".equals(m)) {
+                throw new Http.Fail(400, "bad_method", "method: FIFO or LAST");
+            }
+            Db.exec(c, """
+                    merge into mm_setting s using (select 'COST_METHOD' name, ? value from dual) v on (s.name = v.name)
+                    when matched then update set s.value = v.value
+                    when not matched then insert (name, value) values (v.name, v.value)""", m);
+            return Map.of("method", m);
         }
         if ("expiry".equals(p[0])) {
             need(u, "MANAGER");
@@ -460,7 +475,14 @@ final class Api {
                 join mm_vat v on v.code = i.vat_code
                 join mm_item_avail a on a.item_id = i.id
                 where i.id = ?""", v);
-        return rows.get(0);
+        Map<String, Object> out = rows.get(0);
+        // FIFO: its layers with something left (each receipt at its cost), the value of its stock
+        out.put("fifo", Db.rows(c, """
+                select f.in_at, f.qty, f.unit_cost, f.left_, d.id doc_id, d.doc_type, d.doc_no
+                from mm_fifo f left join mm_stock_move s on s.id = f.move_id left join mm_doc d on d.id = s.doc_id
+                where f.item_id = ? and f.left_ <> 0 order by f.id""", v));
+        out.putAll(Db.rows(c, "select value fifo_value, unit_cost fifo_unit, next_cost fifo_next from mm_fifo_value where item_id = ?", v).get(0));
+        return out;
     }
 
     private Object partners(Connection c, String table, Map<String, String> q) throws SQLException {
@@ -569,6 +591,37 @@ final class Api {
         return m;
     }
 
+    /**
+     * the gross profit of the items in a period: what was sold (the net of the invoices and the receipts,
+     * less the credit notes), what it cost (the moves of the stock of the documents of sale) by FIFO and
+     * by the last cost, COST the one of the method (the first two binds: FIFO or LAST), the quantity out
+     */
+    static final String PROFIT = """
+            select i.id item_id, i.code, i.name, i.unit, nvl(c.qty, 0) qty, nvl(r.revenue, 0) revenue,
+                   round(nvl(c.cost_fifo, 0), 2) cost_fifo, round(nvl(c.cost_last, 0), 2) cost_last,
+                   round(nvl(case ? when 'LAST' then c.cost_last else c.cost_fifo end, 0), 2) cost,
+                   nvl(r.revenue, 0) - round(nvl(case ? when 'LAST' then c.cost_last else c.cost_fifo end, 0), 2) profit
+            from (select l.item_id, sum(t.vat_sign * l.net) revenue
+                  from mm_doc_line l join mm_doc d on d.id = l.doc_id join mm_doc_type t on t.code = d.doc_type
+                  where d.status = 'P' and t.side = 'S' and t.vat_sign <> 0 and d.doc_date between ? and ?
+                  group by l.item_id) r
+            full join (select m.item_id, sum(-m.qty) qty, sum(m.cost) cost_fifo, sum(m.cost_last) cost_last
+                       from mm_move_cost m join mm_doc d on d.id = m.doc_id join mm_doc_type t on t.code = d.doc_type
+                       where t.side = 'S' and d.doc_date between ? and ?
+                       group by m.item_id) c on c.item_id = r.item_id
+            join mm_item i on i.id = nvl(r.item_id, c.item_id)
+            where nvl(r.revenue, 0) <> 0 or nvl(c.cost_fifo, 0) <> 0 or nvl(c.cost_last, 0) <> 0
+            order by profit desc, i.code""";
+
+    /** the way the costs are counted: ?method=FIFO|LAST, else MM_SETTING COST_METHOD, else FIFO */
+    static String costMethod(Connection c, Map<String, String> q) throws SQLException {
+        String m = q == null ? null : q.get("method");
+        if (m == null || m.isBlank()) {
+            m = (String) Db.rows(c, "select max(value) v from mm_setting where name = 'COST_METHOD'").get(0).get("v");
+        }
+        return "LAST".equalsIgnoreCase(m == null ? "" : m.trim()) ? "LAST" : "FIFO";
+    }
+
     private Object report(Connection c, String name, Map<String, String> q) throws SQLException {
         LocalDate f = from(q);
         LocalDate t = to(q);
@@ -610,7 +663,27 @@ final class Api {
                                nvl(sum(close_bal), 0) close_bal
                         from table(mm_ledger.trial_rows(?, ?, ?, 'N'))""", what, f, t).get(0));
             }
-            default -> throw new Http.Fail(404, "not_found", "reports: sales, vat, min-stock, trial-items, trial-customers or trial-suppliers");
+            case "profit" -> {             // the gross profit: the sales less what they cost (FIFO or LAST)
+                String m = costMethod(c, q);
+                out.put("method", m);
+                out.put("default_method", costMethod(c, null));
+                out.put("from", f.toString());
+                out.put("to", t.toString());
+                out.put("rows", Db.rows(c, PROFIT, m, m, f, t, f, t));
+                out.put("stock_diff", Db.rows(c, """
+                        select nvl(sum(case ? when 'LAST' then cost_last else cost end), 0) cost from mm_move_cost
+                        where kind = 'ADJ' and move_at >= ? and move_at < ? + 1""", m, f, t).get(0).get("cost"));
+            }
+            case "stock-value" -> {        // the value of the stock now: FIFO and by the last cost
+                String m = costMethod(c, q);
+                out.put("method", m);
+                out.put("default_method", costMethod(c, null));
+                out.put("rows", Db.rows(c, """
+                        select item_id, code, name, unit, category, stock, value value_fifo, value_last,
+                               case ? when 'LAST' then value_last else value end value, unit_cost, next_cost, last_cost
+                        from mm_fifo_value where stock <> 0 or value <> 0 order by category, code""", m));
+            }
+            default -> throw new Http.Fail(404, "not_found", "reports: sales, vat, min-stock, trial-items, trial-customers, trial-suppliers, profit or stock-value");
         }
         return out;
     }

@@ -118,7 +118,7 @@ commit;
 |---|---|
 | `/api/health` | αν ζει η υπηρεσία και η βάση |
 | `/api/items?q=&limit=&offset=` | είδη: κωδικός, barcode, περιγραφή, κατηγορία, τιμές, απόθεμα, ελάχιστο. Το `q` ψάχνει σε περιγραφή, κωδικό ή barcode. Μία σελίδα, έως 500 γραμμές (προεπιλογή 50), και το `total` όλων |
-| `/api/items/{barcode ή κωδικός}` | ένα είδος, όπως το βρίσκει το ταμείο, με ΦΠΑ, κόστος, δεσμευμένα, διαθέσιμα και διαθέσιμες κάρτες |
+| `/api/items/{barcode ή κωδικός}` | ένα είδος, όπως το βρίσκει το ταμείο, με ΦΠΑ, κόστος, δεσμευμένα, διαθέσιμα και διαθέσιμες κάρτες· `fifo` οι στρώσεις του (FIFO) με ό,τι μένει, `fifo_value`, `fifo_unit`, `fifo_next` |
 | `/api/customers?q=`, `/api/customers/{id}` | πελάτες· ένας με το **υπόλοιπό** του, την κάρτα πόντων (`card`), τους πόντους (`points`) και τις τελευταίες κινήσεις τους (`point_moves`) |
 | `POST /api/customers/{id}/card` | κάρτα πόντων για έναν πελάτη που δεν έχει (MANAGER) |
 | `/api/suppliers?q=`, `/api/suppliers/{id}` | προμηθευτές· ένας με το υπόλοιπό του |
@@ -127,6 +127,9 @@ commit;
 | `/api/reports/vat` | ΦΠΑ ανά μήνα και συντελεστή |
 | `/api/reports/min-stock` | είδη κάτω από το ελάχιστο απόθεμα |
 | `POST /api/docs/from-min-stock` `{"supplier_id"}` | οι παραγγελίες στους προμηθευτές από το ελάχιστο απόθεμα: πρόχειρα δελτία παραλαβής (`mm_core.order_missing`)· `lines` πόσες γραμμές μπήκαν, `drafts` τα πρόχειρα (MANAGER) |
+| `GET /api/reports/profit?from=&to=&method=` | το μικτό κέρδος ανά είδος: `revenue` (καθαρές πωλήσεις), `cost` με τη μέθοδο (`FIFO` ή `LAST`· προεπιλογή η `COST_METHOD`), `cost_fifo`, `cost_last`, `profit`· `stock_diff` οι διαφορές αποθήκης (MANAGER) |
+| `GET /api/reports/stock-value?method=` | η αξία της αποθήκης ανά είδος: `value` με τη μέθοδο, `value_fifo`, `value_last`, `unit_cost`, `next_cost`, `last_cost` |
+| `POST /api/reports/cost-method` `{"method"}` | η μέθοδος κόστους του συστήματος: `FIFO` ή `LAST` (MANAGER) |
 | `GET /api/expiry?days=` | οι λήξεις: όσα έληξαν και όσα λήγουν μέσα σε `days` ημέρες (προεπιλογή `EXPIRY_DAYS`, αλλιώς 7), με όσα μένουν από κάθε παραλαβή (`left_`, FIFO) (MANAGER) |
 | `POST /api/expiry/withdraw` `{"line_id", "qty"}` | απόσυρση από το απόθεμα (`qty`: προεπιλογή όσα μένουν) |
 | `GET /api/chart?days=&to=` | το γράφημα πωλήσεων (7 έως 364 ημέρες, έως μια ημέρα· προεπιλογή 30 έως σήμερα): `days` (ανά ημέρα: `total`, `receipts`, `last_year` την ίδια μέρα της εβδομάδας πέρσι), `hours` (0-23: αποδείξεις λιανικής και ποσό), `sums` (`total`, `last_year`, `receipts`, `avg_receipt`) (MANAGER) |
