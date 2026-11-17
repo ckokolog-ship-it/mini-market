@@ -12,7 +12,7 @@ const RANK = { CASHIER: 1, MANAGER: 2, ADMIN: 3 };
 // the menu: its groups and their pages (by role: CASHIER the till, the store; MANAGER the office too)
 const MENU = [
   ['Πωλήσεις', [['#/pos', 'Ταμείο', 'CASHIER'], ['#/orders', 'Παραγγελίες', 'CASHIER']]],
-  ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER']]],
+  ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER']]],
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
   ['Αναφορές', [['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
@@ -547,6 +547,63 @@ function minTable(rows) {
     num(x.stock, qty), num(x.min_stock, qty), num(x.missing, qty), el('td', { class: 'hide-phone' }, x.supplier || ''))));
 }
 
+// -- the scratch tickets (σκρατς): bought in packs, sold one by one by the barcode of each (its game 4
+// digits, its pack 7, its number 3). A pack loaded by a scan of one of its tickets; the games (έκδοση: the
+// item it is sold as, the tickets of a pack); the packs, sold and left; the prizes paid, by day
+async function scratchPage() {
+  const code = el('input', { name: 'code', inputmode: 'numeric', autocomplete: 'off', placeholder: 'σάρωση ενός δελτίου του πακέτου' });
+  const count = el('input', { name: 'count', type: 'number', min: '1', max: '999', class: 'w6', placeholder: '300' });
+  const game = el('input', { name: 'game', inputmode: 'numeric', maxlength: 4, class: 'w6', placeholder: '1234' });
+  const item = el('input', { name: 'item', autocomplete: 'off', placeholder: 'π.χ. SKR01' });
+  const size = el('input', { name: 'pack_size', type: 'number', min: '1', max: '999', value: '300', class: 'w6' });
+  const out = el('div');
+  const draw = (r) => {
+    out.replaceChildren(
+      el('h2', {}, 'Εκδόσεις'),
+      r.games.length ? table([['Έκδοση'], ['Είδος'], ['Τιμή', 'num'], ['Δελτία / πακέτο', 'num'], ['Διαθέσιμα', 'num']],
+        r.games.map((x) => el('tr', {}, el('td', {}, x.game), el('td', { class: 'wrap' }, `${x.code} ${x.name}`),
+          num(x.price), el('td', { class: 'num' }, x.pack_size), el('td', { class: 'num' }, x.left_))))
+        : el('p', { class: 'muted' }, 'Καμία έκδοση ακόμα: δήλωσε την πρώτη παρακάτω (τα 4 πρώτα ψηφία του barcode).'),
+      el('form', {
+        class: 'panel row',
+        onsubmit: async (ev) => {
+          ev.preventDefault();
+          try { draw(await api('scratch/games', { game: game.value.trim(), code: item.value.trim(), pack_size: Number(size.value || 300) })); toast('Η έκδοση ' + game.value + ' δηλώθηκε'); game.value = ''; } catch (e) { fail(e); }
+        },
+      }, el('label', {}, 'Έκδοση', game), el('label', { class: 'grow' }, 'Είδος (κωδικός ή barcode)', item),
+      el('label', {}, 'Δελτία / πακέτο', size), el('button', { type: 'submit' }, 'Δήλωση έκδοσης')),
+      el('h2', {}, 'Πακέτα'),
+      r.packs.length ? table([['Έκδοση'], ['Πακέτο'], ['Είδος', 'hide-phone'], ['Δελτία', 'num'], ['Πουλήθηκαν', 'num'], ['Μένουν', 'num'], ['Φορτώθηκε', 'hide-phone']],
+        r.packs.map((x) => el('tr', { class: x.left_ === 0 ? 'cancelled' : null }, el('td', {}, x.game), el('td', {}, x.pack),
+          el('td', { class: 'hide-phone wrap' }, x.name), el('td', { class: 'num' }, x.tickets), el('td', { class: 'num' }, x.sold),
+          el('td', { class: 'num' }, x.left_), el('td', { class: 'hide-phone' }, day(x.loaded_at)))))
+        : el('p', { class: 'muted' }, 'Κανένα πακέτο ακόμα.'),
+      el('h2', {}, 'Κέρδη που πληρώθηκαν (31 ημέρες)'),
+      r.prizes.length ? table([['Ημέρα'], ['Κέρδη', 'num'], ['Ποσό', 'num']],
+        r.prizes.map((x) => el('tr', {}, el('td', {}, day(x.day)), el('td', { class: 'num' }, x.prizes), num(x.total))))
+        : el('p', { class: 'muted' }, 'Κανένα κέρδος.'));
+  };
+  const form = el('form', {
+    class: 'panel row',
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      try {
+        const r = await api('scratch/packs', { code: code.value.trim(), count: count.value ? Number(count.value) : null });
+        toast(`Φορτώθηκαν ${r.loaded} δελτία`);
+        code.value = '';
+        count.value = '';
+        draw(r);
+      } catch (e) { fail(e); }
+      code.focus();
+    },
+  }, el('label', { class: 'grow' }, 'Φόρτωση πακέτου', code), el('label', {}, 'Δελτία', count), camera(code), el('button', { class: 'primary', type: 'submit' }, 'Φόρτωση'));
+  show(el('h1', {}, 'Σκρατς'), el('p', { class: 'muted' },
+    'Το barcode ενός δελτίου: έκδοση (4 ψηφία), πακέτο (7), δελτίο (3). Σάρωσε ένα δελτίο του πακέτου για να μπουν όλα στο απόθεμα· στο ταμείο, η σάρωση ενός δελτίου πουλά αυτό το δελτίο.'),
+  form, out);
+  try { draw(await api('scratch')); } catch (e) { fail(e); }
+  code.focus();
+}
+
 // -- the counts of the stock: a phone scans (a scanner types the barcode and Enter) ------------------
 async function countsPage() {
   const name = el('input', { placeholder: 'π.χ. Απογραφή ραφιών Νοεμβρίου' });
@@ -801,9 +858,20 @@ async function posPage(params) {
     if (z) {
       const amount = el('input', { type: 'number', step: '0.01', placeholder: '+ μπαίνουν, − βγαίνουν', class: 'w11' });
       const note = el('input', { placeholder: 'αιτιολογία' });
+      const prize = el('input', { type: 'number', step: '0.01', min: '0', name: 'prize', class: 'w6' });
+      const ticket = el('input', { name: 'ticket', placeholder: 'barcode', autocomplete: 'off', class: 'w11' });
       zBox.replaceChildren(
         el('label', {}, 'Κίνηση συρταριού', amount), el('label', {}, 'Αιτιολογία', note),
         el('button', { type: 'button', onclick: () => run('/cash', { amount: Number(amount.value), note: note.value.trim() }) }, 'Καταχώριση κίνησης'),
+        // a prize of a scratch ticket: out of the drawer (its barcode, if scanned: in the note)
+        el('label', {}, 'Κέρδος σκρατς €', prize), el('label', {}, 'Δελτίο (προαιρετικά)', ticket),
+        el('button', {
+          type: 'button',
+          onclick: async () => {
+            if (!(Number(prize.value) > 0)) { toast('Το κέρδος: ένα ποσό', true); return; }
+            if (await run('/prize', { amount: Number(prize.value), ticket: ticket.value.trim() || null })) toast('Κέρδος σκρατς ' + money(Number(prize.value)) + ' από το συρτάρι');
+          },
+        }, 'Πληρωμή κέρδους'),
         el('button', {
           type: 'button',
           class: 'danger',
@@ -1547,6 +1615,7 @@ function render() {
     case 'ledger': return need('MANAGER', () => ledgerPage(p[1], p[2], params));
     case 'reports': return need('MANAGER', () => reportPage(p[1], params));
     case 'counts': return countsPage();
+    case 'scratch': return need('MANAGER', () => scratchPage());
     case 'count': return countPage(p[1]);
     default: return itemsPage(params);
   }

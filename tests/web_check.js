@@ -141,6 +141,17 @@ async function waitText(page, sel, text) {
   ok(tb.length === 1 && end.replace('Τελικό απόθεμα', '').trim() === tb[0].trim(),
     `the trial balance -> the ledger of the item, the same stock: ${tb[0]} / ${end}`);
 
+  // the scratch tickets: the page; a game with an item without serials: refused, said why
+  await page.goto(BASE + '/web/#/scratch');
+  await waitText(page, 'main', 'Εκδόσεις');
+  ok(await page.isVisible('input[name=code]'), 'the scratch tickets: the page');
+  await page.fill('input[name=game]', '9999');
+  await page.fill('input[name=item]', ITEM);
+  const errs1 = errors.length;
+  await page.click('button:has-text("Δήλωση έκδοσης")');
+  await waitText(page, '#toast', 'serials');
+  if (errors.slice(errs1).every((e) => /status of 400/.test(e))) errors.splice(errs1);   // (that refusal: a 400, meant)
+  ok(true, 'a game of an item without serials: refused, said why');
   // a count: started, two scans, posted
   await page.goto(BASE + '/web/#/counts');
   await page.fill('main form input', 'TST web');
@@ -197,6 +208,13 @@ async function waitText(page, sel, text) {
   await page.click('button[aria-label^="Εκτύπωση ΑΛΠ"]');
   await page.waitForFunction(() => window.__printed === 2);
   ok(true, 'a receipt printed again from the last ones');
+  // a prize of a scratch ticket: out of the drawer
+  const drawer0 = await page.textContent('main');
+  await page.fill('input[name=prize]', '2');
+  await page.fill('input[name=ticket]', '12340000001005');
+  await page.click('button:has-text("Πληρωμή κέρδους")');
+  await waitText(page, '#toast', 'Κέρδος σκρατς 2,00');
+  ok(drawer0 !== await page.textContent('main'), 'the till: a prize of a scratch ticket paid from the drawer');
   // an order: written, an item by scan, the bread by a search, picked, ready; to the till, all of it
   await page.goto(BASE + '/web/#/orders');
   await page.waitForSelector('input[name=name]');
