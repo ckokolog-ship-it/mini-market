@@ -79,7 +79,8 @@ def test_vat_and_doc_types(cur):
     cur.execute('select code, side, stock_sign, partner_sign, vat_sign, ref_type from mm_doc_type order by code')
     assert cur.fetchall() == [
         ('ALP', 'S', -1, 0, 1, None),
-        ('DAP', 'S', -1, 0, 0, None), ('DEA', 'P', -1, 0, 0, None), ('DEP', 'S', 1, 0, 0, None),
+        ('DAP', 'S', -1, 0, 0, None), ('DEA', 'P', -1, 0, 0, None), ('DEN', 'T', -1, 0, 0, None),
+        ('DEP', 'S', 1, 0, 0, None),
         ('DPA', 'P', 1, 0, 0, None),
         ('PAG', 'P', 0, -1, -1, 'DEA'), ('PPY', 'S', 0, -1, -1, 'DEP'),
         ('TAD', 'P', 1, 1, 1, None), ('TAG', 'P', 0, 1, 1, 'DPA'), ('TDA', 'S', -1, 1, 1, None),

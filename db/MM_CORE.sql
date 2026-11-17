@@ -30,8 +30,13 @@ create or replace package mm_core as
   -- the warehouse of a document: the one given, else that of its register, else the main one
   function new_doc(p_doc_type varchar2, p_customer_id number default null, p_supplier_id number default null,
                    p_register_id number default null, p_payment varchar2 default 'CASH',
-                   p_doc_date date default trunc(sysdate), p_warehouse_id number default null) return number;
+                   p_doc_date date default trunc(sysdate), p_warehouse_id number default null,
+                   p_to_warehouse_id number default null) return number;
   function main_warehouse return number;              -- MM_WAREHOUSE MAIN Y
+  -- a transfer (Δελτίο ενδοδιακίνησης, DEN): new_doc('DEN', p_warehouse_id => from, p_to_warehouse_id => to);
+  -- its lines at the cost of each layer of FIFO they take in the warehouse it goes from (a line for each
+  -- cost; no VAT; a price given is not taken); posted: its lines once more by the layers, out of the one,
+  -- into the other with the same layers and costs; cancelled: back in both
   function add_line(p_doc_id number, p_item_id number, p_qty number,
                     p_price number default null, p_discount number default 0) return number;
   procedure update_line(p_line_id number, p_qty number, p_price number, p_discount number default 0);
@@ -186,12 +191,15 @@ end mm_core;
 
 create or replace package body mm_core as
 
+  g_by_cost boolean := false;               -- a line of a transfer at a cost of its own (add_by_cost)
+
   procedure fail(p_no pls_integer, p_text varchar2) is
   begin
     raise_application_error(-20100 - p_no, 'MM-' || to_char(100 + p_no) || ': ' || p_text);
   end;
 
   procedure points_of(p_doc_id number);     -- (below: the points of a receipt posted)
+  function fifo_unit(p_item_id number) return number;   -- (below: the cost of the newest layer)
 
   function tracked(p_item_id number) return boolean is
     v varchar2(1);
@@ -347,11 +355,23 @@ create or replace package body mm_core as
 
   function new_doc(p_doc_type varchar2, p_customer_id number default null, p_supplier_id number default null,
                    p_register_id number default null, p_payment varchar2 default 'CASH',
-                   p_doc_date date default trunc(sysdate), p_warehouse_id number default null) return number is
+                   p_doc_date date default trunc(sysdate), p_warehouse_id number default null,
+                   p_to_warehouse_id number default null) return number is
     t mm_doc_type%rowtype := doc_type_row(p_doc_type);
     v number;
     wh number := p_warehouse_id;
   begin
+    if t.side = 'T' then                  -- a transfer: two warehouses, no partner, no register
+      if p_customer_id is not null or p_supplier_id is not null or p_register_id is not null then
+        fail(94, 'Η ενδοδιακίνηση δεν έχει πελάτη, προμηθευτή ή ταμείο');
+      end if;
+      select count(*) into v from mm_warehouse where id = p_to_warehouse_id and active = 'Y';
+      if v = 0 or p_to_warehouse_id = nvl(wh, main_warehouse) then
+        fail(94, 'Η ενδοδιακίνηση θέλει άλλη ενεργή αποθήκη παραλαβής');
+      end if;
+    elsif p_to_warehouse_id is not null then
+      fail(94, 'Αποθήκη παραλαβής έχει μόνο η ενδοδιακίνηση');
+    end if;
     if wh is null and p_register_id is not null then
       select max(warehouse_id) into wh from mm_register where id = p_register_id;
     end if;
@@ -366,8 +386,9 @@ create or replace package body mm_core as
     if t.side = 'P' and p_register_id is not null then
       fail(5, 'Οι αγορές δεν περνούν από ταμείο');
     end if;
-    insert into mm_doc (doc_type, customer_id, supplier_id, register_id, payment, doc_date, warehouse_id)
-    values (p_doc_type, p_customer_id, p_supplier_id, p_register_id, p_payment, p_doc_date, wh)
+    insert into mm_doc (doc_type, customer_id, supplier_id, register_id, payment, doc_date, warehouse_id, to_warehouse_id)
+    values (p_doc_type, p_customer_id, p_supplier_id, p_register_id,
+            case when t.side = 'T' then 'CREDIT' else p_payment end, p_doc_date, wh, p_to_warehouse_id)
     returning id into v;
     return v;
   end;
@@ -575,6 +596,54 @@ create or replace package body mm_core as
     where d.id = p_doc_id;
   end;
 
+  -- the lines of a transfer (add_line): a line for each cost of the layers it will take in the warehouse
+  -- it goes from (FIFO, after what this document has of it already); beyond them, the cost of the item
+  function add_by_cost(p_doc_id number, p_wh number, p_item_id number, p_qty number) return number is
+    skip number;
+    r number := p_qty;
+    q number;
+    prev number;
+    acc number := 0;
+    id_ number;
+  begin
+    select nvl(sum(qty), 0) into skip from mm_doc_line where doc_id = p_doc_id and item_id = p_item_id;
+    for f in (select left_, unit_cost from mm_fifo where item_id = p_item_id and warehouse_id = p_wh
+              and left_ > 0 order by id) loop
+      exit when r <= 0;
+      if skip >= f.left_ then
+        skip := skip - f.left_;                 -- taken by the lines before
+      else
+        q := least(r, f.left_ - skip);
+        skip := 0;
+        if prev is not null and f.unit_cost <> prev then
+          g_by_cost := true;
+          id_ := add_line(p_doc_id, p_item_id, acc, prev);
+          acc := 0;
+        end if;
+        prev := f.unit_cost;
+        acc := acc + q;
+        r := r - q;
+      end if;
+    end loop;
+    if r > 0 then                               -- beyond the stock there: the cost of its newest layer
+      if prev is not null and fifo_unit(p_item_id) <> prev then
+        g_by_cost := true;
+        id_ := add_line(p_doc_id, p_item_id, acc, prev);
+        acc := 0;
+      end if;
+      prev := fifo_unit(p_item_id);
+      acc := acc + r;
+    end if;
+    g_by_cost := true;
+    id_ := add_line(p_doc_id, p_item_id, acc, prev);
+    g_by_cost := false;
+    return id_;
+  exception
+    when others then
+      g_by_cost := false;
+      raise;
+  end;
+
   function add_line(p_doc_id number, p_item_id number, p_qty number,
                     p_price number default null, p_discount number default 0) return number is
     d mm_doc%rowtype := draft(p_doc_id);
@@ -599,7 +668,19 @@ create or replace package body mm_core as
     end if;
     not_model(p_item_id);
     check_max(p_doc_id, p_item_id, p_qty);
+    if t.side = 'T' then                        -- a transfer: at cost, by the layers; no VAT
+      if i.kit = 'Y' then
+        fail(94, 'Το σετ ' || i.code || ' δεν μεταφέρεται: μεταφέρονται τα είδη του');
+      end if;
+      if not g_by_cost then                   -- (a price given: not taken, the cost)
+        return add_by_cost(p_doc_id, d.warehouse_id, p_item_id, p_qty);
+      end if;
+      g_by_cost := false;
+    end if;
     select rate into r from mm_vat where code = i.vat_code;
+    if t.side = 'T' then
+      r := 0;
+    end if;
     p := nvl(p_price, default_price(d.doc_type, p_item_id));
     amounts(p, p_qty, p_discount, r, t.prices_incl_vat, n, v, tot);
     select nvl(max(line_no), 0) + 1 into ln from mm_doc_line where doc_id = p_doc_id;
@@ -710,7 +791,7 @@ create or replace package body mm_core as
     q number;
     unit number;
     neg number;
-    cancel boolean := m.kind = 'DOC' and m.note = 'Ακύρωση';
+    cancel boolean := m.kind = 'DOC' and nvl(m.note, '-') = 'Ακύρωση';   -- (nvl: a null note, false, not null)
   begin
     -- the cost of the last purchase now (the other way of counting the costs: COST_METHOD LAST)
     unit := fifo_unit(m.item_id);
@@ -720,7 +801,7 @@ create or replace package body mm_core as
         -- a sale cancelled: what its line took, back to its layers (the newest first)
         for o in (select o.fifo_id, sum(o.qty) q, sum(o.cost) c
                   from mm_fifo_out o join mm_stock_move s on s.id = o.move_id
-                  where s.doc_id = m.doc_id and s.item_id = m.item_id
+                  where s.doc_id = m.doc_id and s.item_id = m.item_id and s.warehouse_id = m.warehouse_id
                     and nvl(s.doc_line_id, -1) = nvl(m.doc_line_id, -1)
                   group by o.fifo_id having sum(o.qty) > 0 order by o.fifo_id desc) loop
           exit when r <= 0;
@@ -729,6 +810,31 @@ create or replace package body mm_core as
           insert into mm_fifo_out (fifo_id, move_id, doc_line_id, qty, cost)
           values (o.fifo_id, m.id, m.doc_line_id, -q, -round(o.c * q / o.q, 4));
           r := r - q;
+        end loop;
+      end if;
+      -- a transfer in: the layers of what its line took out of the other warehouse, at their costs (a
+      -- shortage here filled first)
+      if not cancel and m.doc_line_id is not null then
+        for o in (select f.unit_cost, sum(o.qty) q
+                  from mm_fifo_out o join mm_fifo f on f.id = o.fifo_id join mm_stock_move s on s.id = o.move_id
+                  join mm_doc d on d.id = s.doc_id join mm_doc_type t on t.code = d.doc_type
+                  where t.side = 'T' and s.doc_id = m.doc_id and s.doc_line_id = m.doc_line_id
+                    and s.item_id = m.item_id and s.warehouse_id <> m.warehouse_id and s.qty < 0
+                  group by f.unit_cost order by min(o.id)) loop
+          exit when r <= 0;
+          q := least(r, o.q);
+          r := r - q;
+          for f in (select id, left_ from mm_fifo where item_id = m.item_id and warehouse_id = m.warehouse_id
+                    and left_ < 0 order by id) loop
+            exit when q <= 0;
+            unit := least(q, -f.left_);
+            update mm_fifo set left_ = left_ + unit where id = f.id;
+            q := q - unit;
+          end loop;
+          if q > 0 then
+            insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_, warehouse_id)
+            values (m.item_id, m.id, m.doc_line_id, m.move_at, q, o.unit_cost, q, m.warehouse_id);
+          end if;
         end loop;
       end if;
       -- a shortage first (sold before it came)
@@ -754,7 +860,7 @@ create or replace package body mm_core as
       if cancel then
         -- a receipt cancelled: what is left of the layer it brought
         for f in (select f.id, f.left_, f.unit_cost from mm_fifo f join mm_stock_move s on s.id = f.move_id
-                  where s.doc_id = m.doc_id and f.item_id = m.item_id
+                  where s.doc_id = m.doc_id and f.item_id = m.item_id and f.warehouse_id = m.warehouse_id
                     and nvl(f.doc_line_id, -1) = nvl(m.doc_line_id, -1) and f.left_ > 0 order by f.id) loop
           exit when r <= 0;
           q := least(r, f.left_);
@@ -836,6 +942,28 @@ create or replace package body mm_core as
   begin
     -- the number: the row of the kind locked until the commit, so the numbers have no gaps
     select * into t from mm_doc_type where code = d.doc_type for update;
+    if t.side = 'T' then
+      -- a transfer: its lines once more by the layers as they are now (what it takes is what it says)
+      declare
+        type t_q is table of number index by pls_integer;
+        its t_q; qs t_q;
+        k pls_integer := 0;
+        v number;
+      begin
+        for l in (select item_id, sum(qty) q from mm_doc_line where doc_id = p_doc_id
+                  group by item_id order by min(line_no)) loop
+          k := k + 1;
+          its(k) := l.item_id;
+          qs(k) := l.q;
+        end loop;
+        delete from mm_doc_line where doc_id = p_doc_id;
+        for j in 1 .. k loop
+          if qs(j) > 0 then
+            v := add_line(p_doc_id, its(j), qs(j));
+          end if;
+        end loop;
+      end;
+    end if;
     select count(*) into lines from mm_doc_line where doc_id = p_doc_id;
     if lines = 0 then
       fail(9, 'Το παραστατικό δεν έχει γραμμές');
@@ -884,7 +1012,7 @@ create or replace package body mm_core as
     returning total into d.total;
 
     for l in (select l.*, i.kit from mm_doc_line l join mm_item i on i.id = l.item_id
-              where l.doc_id = p_doc_id) loop
+              where l.doc_id = p_doc_id order by l.line_no) loop     -- (in order: FIFO as its lines say)
       if t.stock_sign = 0 then
         null;                                   -- an invoice of notes: the notes moved the stock
       elsif l.kit = 'Y' and t.stock_sign = -1 then
@@ -912,6 +1040,12 @@ create or replace package body mm_core as
         update mm_item set cost = round(l.net / l.qty, 4) where id = l.item_id;   -- the last cost
       end if;
     end loop;
+    -- a transfer: into the warehouse it goes to, with the layers its lines took (fifo_apply)
+    if t.side = 'T' then
+      for l in (select id, item_id, qty from mm_doc_line where doc_id = p_doc_id order by line_no) loop
+        stock_move(l.item_id, 'DOC', l.qty, p_doc_id, l.id, p_warehouse_id => d.to_warehouse_id);
+      end loop;
+    end if;
     update mm_serial set status = 'A' where in_doc_id = p_doc_id and status = 'N';
     update mm_serial set status = 'S', sold_at = sysdate where out_doc_id = p_doc_id and status = 'R';
 
@@ -969,10 +1103,11 @@ create or replace package body mm_core as
       fail(30, 'Από τις κάρτες αυτής της αγοράς έχουν πουληθεί ή δεσμευτεί ' || lines);
     end if;
     -- back exactly what went (a kit: its ready ones and its components)
-    for m in (select item_id, doc_line_id, sum(qty) qty from mm_stock_move
+    for m in (select item_id, doc_line_id, warehouse_id, sum(qty) qty from mm_stock_move
               where doc_id = p_doc_id and kind = 'DOC'
-              group by item_id, doc_line_id) loop
-      stock_move(m.item_id, 'DOC', -m.qty, p_doc_id, m.doc_line_id, 'Ακύρωση');
+              group by item_id, doc_line_id, warehouse_id
+              order by 4 desc) loop                       -- (a transfer: what came in, out first)
+      stock_move(m.item_id, 'DOC', -m.qty, p_doc_id, m.doc_line_id, 'Ακύρωση', p_warehouse_id => m.warehouse_id);
     end loop;
     update mm_serial set status = 'X' where in_doc_id = p_doc_id;
     update mm_serial set status = 'A', sold_at = null, out_line_id = null, out_doc_id = null

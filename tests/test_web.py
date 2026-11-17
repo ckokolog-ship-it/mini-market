@@ -68,11 +68,14 @@ def test_the_pages_in_a_browser(api, env, users):
     draft = db.fn('new_doc', int, 'DPA', p_supplier_id=ids['supplier'], p_payment='CREDIT')
     db.fn('add_line', int, draft, yog, 6)
     db.commit()
+    # a branch: a transfer to it from the page
+    db.cur.execute("insert into mm_warehouse (code, name) values (:c, 'Test υποκατάστημα')", c='TST%s' % ids['tag'][:4])
+    db.commit()
     labels = tempfile.mkdtemp(prefix='mmlabels-')
     e = dict(os.environ, BASE=api, MGR=users['MANAGER'], CASHIER=users['CASHIER'], PW=test_api.PW,
              ITEM='TST%sA' % ids['tag'], ITEM_B=str(ids['b']), XSS=XSS, SHOTS=os.environ.get('MM_WEB_SHOTS', ''),
              LABELS=labels, DOC_SENT=str(sent), SENT_MARK=str(mark),
-             YOGURT='TST%sY' % ids['tag'], DOC_DRAFT=str(draft))
+             YOGURT='TST%sY' % ids['tag'], DOC_DRAFT=str(draft), BRANCH='TST%s' % ids['tag'][:4])
     try:
         r = subprocess.run(['node', os.path.join(HERE, 'web_check.js')], env=e, capture_output=True, text=True, timeout=180)
         print(r.stdout, r.stderr)
