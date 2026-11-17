@@ -93,6 +93,11 @@ end;
 /
 prompt == FIFO again from all the moves of the stock (the layers of each receipt, what each sale took)
 begin
+  -- the statistics of its tables first: old ones (of when they were nearly empty) make a plan that
+  -- reads all of MM_FIFO_OUT for each move (minutes, not seconds)
+  for t in (select table_name from user_tables where table_name in ('MM_STOCK_MOVE', 'MM_FIFO', 'MM_FIFO_OUT')) loop
+    dbms_stats.gather_table_stats(user, t.table_name, cascade => true);
+  end loop;
   mm_core.fifo_rebuild;
   commit;
 end;

@@ -779,7 +779,8 @@ create or replace package body mm_core as
   function fifo_unit(p_item_id number) return number is
     v number;
   begin
-    select max(unit_cost) keep (dense_rank last order by id) into v from mm_fifo where item_id = p_item_id and qty > 0;
+    select /*+ index(mm_fifo mm_fifo_item_ix) */ max(unit_cost) keep (dense_rank last order by id) into v
+    from mm_fifo where item_id = p_item_id and qty > 0;
     if v is null then
       select nvl(cost, 0) into v from mm_item where id = p_item_id;
     end if;
@@ -792,6 +793,7 @@ create or replace package body mm_core as
     unit number;
     neg number;
     cancel boolean := m.kind = 'DOC' and nvl(m.note, '-') = 'Ακύρωση';   -- (nvl: a null note, false, not null)
+    side_ varchar2(1);                        -- of its document: T a transfer
   begin
     -- the cost of the last purchase now (the other way of counting the costs: COST_METHOD LAST)
     unit := fifo_unit(m.item_id);
@@ -799,7 +801,8 @@ create or replace package body mm_core as
     if m.qty > 0 then
       if cancel then
         -- a sale cancelled: what its line took, back to its layers (the newest first)
-        for o in (select o.fifo_id, sum(o.qty) q, sum(o.cost) c
+        for o in (select /*+ leading(s o) use_nl(o) index(s mm_stock_move_doc_ix) index(o mm_fifo_out_move_ix) */
+                         o.fifo_id, sum(o.qty) q, sum(o.cost) c
                   from mm_fifo_out o join mm_stock_move s on s.id = o.move_id
                   where s.doc_id = m.doc_id and s.item_id = m.item_id and s.warehouse_id = m.warehouse_id
                     and nvl(s.doc_line_id, -1) = nvl(m.doc_line_id, -1)
@@ -815,17 +818,20 @@ create or replace package body mm_core as
       -- a transfer in: the layers of what its line took out of the other warehouse, at their costs (a
       -- shortage here filled first)
       if not cancel and m.doc_line_id is not null then
-        for o in (select f.unit_cost, sum(o.qty) q
+        select max(t.side) into side_ from mm_doc d join mm_doc_type t on t.code = d.doc_type where d.id = m.doc_id;
+      end if;
+      if side_ = 'T' then
+        for o in (select /*+ leading(s o f) use_nl(o f) index(s mm_stock_move_doc_ix) index(o mm_fifo_out_move_ix) */
+                         f.unit_cost, sum(o.qty) q
                   from mm_fifo_out o join mm_fifo f on f.id = o.fifo_id join mm_stock_move s on s.id = o.move_id
-                  join mm_doc d on d.id = s.doc_id join mm_doc_type t on t.code = d.doc_type
-                  where t.side = 'T' and s.doc_id = m.doc_id and s.doc_line_id = m.doc_line_id
+                  where s.doc_id = m.doc_id and s.doc_line_id = m.doc_line_id
                     and s.item_id = m.item_id and s.warehouse_id <> m.warehouse_id and s.qty < 0
                   group by f.unit_cost order by min(o.id)) loop
           exit when r <= 0;
           q := least(r, o.q);
           r := r - q;
-          for f in (select id, left_ from mm_fifo where item_id = m.item_id and warehouse_id = m.warehouse_id
-                    and left_ < 0 order by id) loop
+          for f in (select /*+ index(mm_fifo mm_fifo_wh_ix) */ id, left_ from mm_fifo
+                    where item_id = m.item_id and warehouse_id = m.warehouse_id and left_ < 0 order by id) loop
             exit when q <= 0;
             unit := least(q, -f.left_);
             update mm_fifo set left_ = left_ + unit where id = f.id;
@@ -838,8 +844,8 @@ create or replace package body mm_core as
         end loop;
       end if;
       -- a shortage first (sold before it came)
-      for f in (select id, left_ from mm_fifo where item_id = m.item_id and warehouse_id = m.warehouse_id
-                and left_ < 0 order by id) loop
+      for f in (select /*+ index(mm_fifo mm_fifo_wh_ix) */ id, left_ from mm_fifo
+                where item_id = m.item_id and warehouse_id = m.warehouse_id and left_ < 0 order by id) loop
         exit when r <= 0;
         q := least(r, -f.left_);
         update mm_fifo set left_ = left_ + q where id = f.id;
@@ -859,7 +865,8 @@ create or replace package body mm_core as
     else
       if cancel then
         -- a receipt cancelled: what is left of the layer it brought
-        for f in (select f.id, f.left_, f.unit_cost from mm_fifo f join mm_stock_move s on s.id = f.move_id
+        for f in (select /*+ leading(s f) use_nl(f) index(s mm_stock_move_doc_ix) index(f mm_fifo_move_ix) */
+                         f.id, f.left_, f.unit_cost from mm_fifo f join mm_stock_move s on s.id = f.move_id
                   where s.doc_id = m.doc_id and f.item_id = m.item_id and f.warehouse_id = m.warehouse_id
                     and nvl(f.doc_line_id, -1) = nvl(m.doc_line_id, -1) and f.left_ > 0 order by f.id) loop
           exit when r <= 0;
@@ -868,8 +875,8 @@ create or replace package body mm_core as
           r := r - q;
         end loop;
       end if;
-      for f in (select id, left_, unit_cost from mm_fifo where item_id = m.item_id and warehouse_id = m.warehouse_id
-                and left_ > 0 order by id) loop
+      for f in (select /*+ index(mm_fifo mm_fifo_wh_ix) */ id, left_, unit_cost from mm_fifo
+                where item_id = m.item_id and warehouse_id = m.warehouse_id and left_ > 0 order by id) loop
         exit when r <= 0;
         q := least(r, f.left_);
         fifo_take(f.id, f.unit_cost, q, m);
@@ -877,7 +884,8 @@ create or replace package body mm_core as
       end loop;
       if r > 0 then
         -- none left: a shortage, at the cost of the newest layer, until goods come
-        select max(id) into neg from mm_fifo where item_id = m.item_id and warehouse_id = m.warehouse_id and qty = 0;
+        select /*+ index(mm_fifo mm_fifo_wh_ix) */ max(id) into neg from mm_fifo
+        where item_id = m.item_id and warehouse_id = m.warehouse_id and qty = 0;
         if neg is null then
           unit := fifo_unit(m.item_id);
           insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_, warehouse_id)
