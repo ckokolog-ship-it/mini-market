@@ -149,6 +149,13 @@ create or replace package mm_core as
   function load_pack(p_code varchar2, p_count number default null) return number;
   procedure scratch_prize(p_register_id number, p_amount number, p_ticket varchar2 default null);
 
+  -- an order to the suppliers from the minimum stock (MM_MIN_STOCK): for each supplier (the last one
+  -- an item was bought from) a draft delivery note of purchase (DPA: that one, when there is a draft
+  -- already) with what is missing (whole pieces), at the cost of the item; printed as an order, its
+  -- quantities set when the goods come, then posted. Not the items with serials (loaded one by one), nor
+  -- those without a supplier yet. How many lines went in
+  function order_missing(p_supplier_id number default null) return number;
+
   -- the backup of the database (db/backup.ps1) says how it went: p_ok Y (p_text its file) or N (p_text
   -- the error); MM_BACKUP_STATE tells the pages when the last good one is too old
   procedure backup_done(p_ok varchar2, p_text varchar2);
@@ -1847,6 +1854,36 @@ create or replace package body mm_core as
       fail(90, 'Το κέρδος του σκρατς: ένα ποσό πάνω από 0');
     end if;
     cash_in_out(p_register_id, -p_amount, 'Κέρδος σκρατς' || case when p_ticket is not null then ' ' || p_ticket end);
+  end;
+
+  function order_missing(p_supplier_id number default null) return number is
+    d number;
+    had number;
+    n number := 0;
+    v number;
+  begin
+    -- (as MM_MIN_STOCK of MM_REPORT.sql, made after this package: under the minimum, the last supplier)
+    for r in (select * from (
+                select i.id item_id, i.code, i.unit, i.min_stock - (i.stock + 0) missing,
+                       (select max(d.supplier_id) keep (dense_rank last order by d.doc_date, d.id)
+                        from mm_doc d join mm_doc_line l on l.doc_id = d.id
+                        where l.item_id = i.id and d.doc_type in ('DPA', 'TAD') and d.status = 'P') supplier_id
+                from mm_item i
+                where i.active = 'Y' and i.is_model = 'N' and i.kit = 'N' and i.serial_tracked = 'N'
+                  and i.stock + 0 < i.min_stock)
+              where supplier_id is not null and (p_supplier_id is null or supplier_id = p_supplier_id)
+              order by supplier_id, code) loop
+      select max(id) into d from mm_doc where doc_type = 'DPA' and status = 'D' and supplier_id = r.supplier_id;
+      if d is null then
+        d := new_doc('DPA', null, r.supplier_id, null, 'CREDIT');
+      end if;
+      select count(*) into had from mm_doc_line where doc_id = d and item_id = r.item_id;
+      if had = 0 then
+        v := add_line(d, r.item_id, case r.unit when 'PCS' then ceil(r.missing) else r.missing end);
+        n := n + 1;
+      end if;
+    end loop;
+    return n;
   end;
 
   procedure backup_done(p_ok varchar2, p_text varchar2) is

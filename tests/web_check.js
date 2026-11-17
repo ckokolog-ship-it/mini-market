@@ -120,6 +120,18 @@ async function waitText(page, sel, text) {
     ok(!/\bnull\b|undefined/.test(await page.textContent('main')), 'the report ' + path.split('?')[0] + ': no "null" in it');
   }
   if (SHOTS) await page.screenshot({ path: SHOTS + '/vat.png' });
+  // the orders to the suppliers (the item b under its minimum, tests/test_web.py): a draft delivery note of
+  // purchase, printed as an order
+  await page.goto(BASE + '/web/#/reports/min-stock');
+  await page.click('button:has-text("Φτιάξε τις παραγγελίες")');
+  await waitText(page, 'main', 'γραμμές μπήκαν σε πρόχειρα δελτία παραλαβής');
+  await page.click('main li a');
+  await waitText(page, 'h1', 'Δελτίο παραλαβής');
+  await page.evaluate(() => { window.print = () => {}; });
+  await page.click('button:has-text("Εκτύπωση παραγγελίας")');
+  await page.waitForSelector('#docprint', { state: 'attached' });
+  ok((await page.textContent('#docprint')).includes('Παραγγελία προς προμηθευτή'), 'the order to the supplier: a draft, printed as an order');
+  await page.evaluate(() => document.body.classList.remove('printing-doc'));
   // the trial balances: a row each; the customers with their totals; an item opens its ledger for the
   // same period, with the same stock at the end
   await page.goto(BASE + '/web/#/reports/trial-customers?from=2000-01-01');

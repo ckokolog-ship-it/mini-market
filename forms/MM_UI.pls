@@ -761,6 +761,11 @@ PACKAGE BODY ui IS
       open_report('MM_VAT', period_params);
     ELSIF p_item = 'CTL.RPT_MIN' THEN
       open_report('MM_MIN_STOCK', NULL);
+    -- the orders to the suppliers: drafts DPA of what is under the minimum (mm_core.order_missing)
+    ELSIF p_item = 'CTL.ORDERMIN' THEN
+      n := mm_core.order_missing;
+      forms_ddl('COMMIT');
+      message(to_char(n) || ' γραμμές σε πρόχειρα δελτία παραλαβής, ένα για κάθε προμηθευτή: φόρμα «Τιμολόγια»');
     ELSIF p_item IN ('CTL.RPT_TRIAL_I', 'CTL.RPT_TRIAL_C', 'CTL.RPT_TRIAL_S') THEN
       open_report('MM_TRIAL_' || substr(p_item, -1), period_params);
     ELSIF p_item = 'CTL.DELDOC' THEN

@@ -26,6 +26,8 @@ import java.util.Map;
  *   POST /api/docs/{id}/notes {note_id}            one more note into the draft invoice
  *   POST /api/docs/{id}/post | cancel | delete     posted (its number), cancelled, a draft deleted
  *   POST /api/docs/{id}/credit                     goods back: a draft return note of its lines
+ *   POST /api/docs/from-min-stock {supplier_id}    the orders to the suppliers: drafts DPA of what is
+ *                                                  under the minimum stock (mm_core.order_missing)
  *   GET  /api/docs/{id}/mydata                     the XML of myDATA (checked by the XSD of AADE)
  *   POST /api/docs/{id}/mydata  .../mydata/cancel  sent to myDATA now; cancelled there and here (MyData)
  *   GET  /api/payments?kind=R|P&q=&limit=&offset=  receipts (R) and payments (P)
@@ -229,6 +231,28 @@ final class Docs {
             return doc(c, fn(c, "begin ? := mm_core.new_doc(?, ?, ?, null, ?, ?); end;", type,
                     cu == null ? null : idOf(cu, "customer_id"), su == null ? null : idOf(su, "supplier_id"),
                     pay, dateOf(in, "doc_date")));
+        }
+        if (p.length == 2 && "from-min-stock".equals(p[1])) {   // the orders to the suppliers (drafts DPA)
+            Object sup = in.get("supplier_id");
+            int n;
+            try (CallableStatement cs = c.prepareCall("begin ? := mm_core.order_missing(?); end;")) {
+                cs.registerOutParameter(1, Types.NUMERIC);
+                if (sup == null) {
+                    cs.setNull(2, Types.NUMERIC);
+                } else {
+                    cs.setLong(2, Http.id(String.valueOf(sup).replaceAll("\\.0$", "")));
+                }
+                cs.execute();
+                n = cs.getInt(1);
+            }
+            Map<String, Object> out = new java.util.LinkedHashMap<>();
+            out.put("lines", n);
+            out.put("drafts", Db.rows(c, """
+                    select d.id, d.doc_type, s.name supplier, d.total,
+                           (select count(*) from mm_doc_line l where l.doc_id = d.id) lines
+                    from mm_doc d join mm_supplier s on s.id = d.supplier_id
+                    where d.doc_type = 'DPA' and d.status = 'D' order by s.name, d.id"""));
+            return out;
         }
         long id = Http.id(p[1]);
         if (p.length == 3 && "mydata".equals(p[2])) {             // sent to AADE now (myDATA)

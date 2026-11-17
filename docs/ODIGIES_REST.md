@@ -125,6 +125,7 @@ commit;
 | `/api/reports/sales` | πωλήσεις ανά ημέρα |
 | `/api/reports/vat` | ΦΠΑ ανά μήνα και συντελεστή |
 | `/api/reports/min-stock` | είδη κάτω από το ελάχιστο απόθεμα |
+| `POST /api/docs/from-min-stock` `{"supplier_id"}` | οι παραγγελίες στους προμηθευτές από το ελάχιστο απόθεμα: πρόχειρα δελτία παραλαβής (`mm_core.order_missing`)· `lines` πόσες γραμμές μπήκαν, `drafts` τα πρόχειρα (MANAGER) |
 | `GET /api/scratch` | τα σκρατς: οι εκδόσεις (είδος, δελτία ανά πακέτο, διαθέσιμα), τα πακέτα (δελτία, πουλημένα, μένουν), τα κέρδη ανά ημέρα (MANAGER) |
 | `POST /api/scratch/games` `{"game", "code", "pack_size"}` | μια έκδοση (4 ψηφία) και το είδος της (με serials) |
 | `POST /api/scratch/packs` `{"code", "count"}` | φόρτωση πακέτου: το barcode ενός δελτίου (14 ψηφία) ή έκδοση και πακέτο (11)· `loaded`: πόσα δελτία |

@@ -37,7 +37,11 @@ select c.name category, i.code, i.name, i.unit, i.stock + 0 stock, i.min_stock,
        i.min_stock - (i.stock + 0) missing,
        (select max(s.name) keep (dense_rank last order by d.doc_date, d.id)
         from mm_doc d join mm_doc_line l on l.doc_id = d.id join mm_supplier s on s.id = d.supplier_id
-        where l.item_id = i.id and d.doc_type in ('DPA', 'TAD') and d.status = 'P') supplier
+        where l.item_id = i.id and d.doc_type in ('DPA', 'TAD') and d.status = 'P') supplier,
+       i.id item_id, i.serial_tracked,
+       (select max(d.supplier_id) keep (dense_rank last order by d.doc_date, d.id)
+        from mm_doc d join mm_doc_line l on l.doc_id = d.id
+        where l.item_id = i.id and d.doc_type in ('DPA', 'TAD') and d.status = 'P') supplier_id
 from mm_item i
 join mm_category c on c.id = i.category_id
 where i.active = 'Y' and i.is_model = 'N' and i.kit = 'N' and i.stock + 0 < i.min_stock;
