@@ -882,6 +882,8 @@ def test_reports_form(cur):
     assert '«από»' in msg
     run(cur, "ui.press('CTL.GO_MM_LEDGER');")
     assert prop(cur, 'CALL_FORM') == 'MM_LEDGER'
+    run(cur, "ui.press('CTL.ORDERMIN');")                  # the orders to the suppliers: how many lines
+    assert 'πρόχειρα δελτία παραλαβής' in msgs(cur)
     cur.connection.rollback()
 
 

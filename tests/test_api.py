@@ -610,3 +610,33 @@ def test_the_state_of_the_backup(api, env, users):
         for name, value in kept:
             db.cur.execute('insert into mm_setting (name, value) values (:n, :v)', n=name, v=value)
         db.commit()
+
+
+def test_orders_to_the_suppliers_from_the_minimum_stock(api, env, users):
+    """under the minimum: a draft delivery note of purchase for the last supplier of the item, with what
+    is missing (whole pieces) at its cost; again: nothing more (it is in the draft); an item without a
+    supplier: not in it; printed as an order on its page"""
+    db, ids = env
+    sup = ids['supplier']
+    n = db.fn('new_doc', int, 'DPA', p_supplier_id=sup, p_payment='CREDIT')       # bought from the supplier
+    db.fn('add_line', int, n, ids['b'], 1)
+    db.fn('post_doc', int, n)
+    db.commit()                       # (the stock is reservable: its +1 counted once committed)
+    db.cur.execute('update mm_item set min_stock = stock + 4.5 where id = :i', i=ids['b'])
+    db.cur.execute('update mm_item set min_stock = stock + 2 where id = :i', i=ids['a'])  # no supplier yet
+    db.commit()
+    try:
+        r = post(api, '/api/docs/from-min-stock', {'supplier_id': sup})
+        assert r['lines'] == 1
+        d = [x for x in r['drafts'] if x['supplier'] == db.one('select name from mm_supplier where id = :s', s=sup)[0]]
+        assert len(d) == 1 and d[0]['lines'] == 1
+        doc = get(api, '/api/docs/%d' % d[0]['id'])
+        cost = float(db.one('select cost from mm_item where id = :i', i=ids['b'])[0])
+        assert (doc['doc_type'], doc['status']) == ('DPA', 'D')
+        assert [(x['item_id'], x['qty'], x['price']) for x in doc['lines']] == [(ids['b'], 5, cost)]   # 4,5 -> 5
+        assert post(api, '/api/docs/from-min-stock', {'supplier_id': sup})['lines'] == 0              # in it already
+        assert post(api, '/api/docs/from-min-stock', {}, token='CASHIER', status=403)['error'] == 'forbidden'
+        post(api, '/api/docs/%d/delete' % d[0]['id'])
+    finally:
+        db.cur.execute('update mm_item set min_stock = 0 where id in (:a, :b)', a=ids['a'], b=ids['b'])
+        db.commit()

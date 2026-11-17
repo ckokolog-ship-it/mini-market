@@ -452,6 +452,7 @@ async function reportPage(name, params) {
     try {
       const r = await api(`reports/${name}?from=${from.value}&to=${to.value}` + (trial && all.checked ? '&all=1' : ''));
       out.replaceChildren(trial ? trialTable(name, r, from.value, to.value) : name === 'sales' ? salesTable(r.rows) : name === 'vat' ? vatTable(r.rows) : minTable(r.rows));
+      if (name === 'min-stock' && r.rows.length) out.append(orderBox(r.rows));
     } catch (e) { fail(e); }
   };
   const form = name === 'min-stock' ? null
@@ -538,6 +539,23 @@ function trialTable(name, r, f, t) {
   }
   return el('div', {}, el('p', { class: 'muted' }, `${day(r.from)} - ${day(r.to)} · ${r.rows.length} ` + (item ? 'είδη' : name === 'trial-customers' ? 'πελάτες' : 'προμηθευτές')),
     table(head, rows));
+}
+// the orders to the suppliers from the minimum stock: a draft delivery note of purchase each (the last
+// supplier of the items; its draft, if there is one), printed as an order, posted when the goods come
+function orderBox(rows) {
+  const box = el('div', { class: 'panel' });
+  const none = rows.filter((x) => !x.supplier).length;
+  const draw = (r) => box.replaceChildren(el('h2', {}, 'Παραγγελίες σε προμηθευτές'),
+    r ? el('p', {}, `${r.lines} γραμμές μπήκαν σε πρόχειρα δελτία παραλαβής:`) : el('p', { class: 'muted' },
+      'Ένα πρόχειρο δελτίο παραλαβής για κάθε προμηθευτή (τον τελευταίο κάθε είδους), με όσα λείπουν, στο κόστος. Τυπώνεται ως παραγγελία· όταν έρθουν τα είδη, διόρθωσε τις ποσότητες και καταχώρισέ το.'
+      + (none ? ` ${none} είδη δεν έχουν ακόμα προμηθευτή και μένουν έξω.` : '')),
+    r ? el('ul', {}, r.drafts.map((x) => el('li', {}, el('a', { href: '#/doc/' + x.id }, `${x.supplier}: ${x.lines} είδη, ${money(x.total)}`))))
+      : el('button', {
+        type: 'button', class: 'primary',
+        onclick: async () => { try { draw(await api('docs/from-min-stock', {})); } catch (e) { fail(e); } },
+      }, 'Φτιάξε τις παραγγελίες'));
+  draw(null);
+  return box;
 }
 function minTable(rows) {
   if (!rows.length) return el('p', { class: 'muted' }, 'Κανένα είδος κάτω από το ελάχιστο.');
@@ -1083,9 +1101,11 @@ async function printDoc(d) {
     vat[k].vat += x.vat;
   });
   const sent = d.mydata_state === 'S' && d.mydata_mark;
+  const order = d.status === 'D' && d.doc_type === 'DPA';      // a draft delivery note of purchase: an order
   const box = el('div', { class: 'docprint', id: 'docprint' },
     el('div', { class: 'dp-head' }, el('div', { class: 'dp-shop' }, lines(shop.header)),
-      el('div', { class: 'dp-title' }, el('div', { class: 'dp-type' }, d.type_name), el('div', {}, `${d.doc_type} ${d.doc_no || ''}`),
+      el('div', { class: 'dp-title' }, el('div', { class: 'dp-type' }, order ? 'Παραγγελία προς προμηθευτή' : d.type_name),
+        order ? null : el('div', {}, `${d.doc_type} ${d.doc_no || ''}`),
         el('div', {}, day(d.doc_date)), d.status === 'C' ? el('div', { class: 'dp-cancel' }, 'ΑΚΥΡΩΘΗΚΕ') : null)),
     el('div', { class: 'dp-partner' }, el('div', { class: 'dp-label' }, d.side === 'S' ? 'Πελάτης' : 'Προμηθευτής'),
       el('div', { class: 'dp-name' }, d.partner || ''), d.partner_afm ? el('div', {}, 'ΑΦΜ ' + d.partner_afm + (d.partner_doy ? ' · ΔΟΥ ' + d.partner_doy : '')) : null,
@@ -1438,6 +1458,7 @@ async function docPage(id) {
         try { mydataXml.replaceChildren(el('pre', { class: 'xml' }, (await api(`docs/${id}/mydata`)).xml)); } catch (e) { fail(e); }
       }) : null,
       d.status !== 'D' ? btn('Εκτύπωση', () => printDoc(d)) : null,
+      draft && d.doc_type === 'DPA' && d.lines.length ? btn('Εκτύπωση παραγγελίας', () => printDoc(d)) : null,
       d.status === 'P' && d.mydata_state === 'S'
         ? btn('Ακύρωση (και στο myDATA)', ask('Ακύρωση στην ΑΑΔΕ (myDATA) και εδώ;', () => run('mydata/cancel', {})), 'danger')
         : d.status === 'P' ? btn('Ακύρωση', ask('Ακύρωση του παραστατικού;', () => run('cancel', {})), 'danger') : null,

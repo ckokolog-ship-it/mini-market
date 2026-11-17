@@ -48,6 +48,13 @@ def test_the_pages_in_a_browser(api, env, users):
     db.fn('post_doc', int, sent)
     db.commit()
     mark = test_api.post(api, '/api/docs/%d/mydata' % sent)['mydata_mark']
+    # the item b under its minimum, bought from the supplier: an order to it from the page
+    bought = db.fn('new_doc', int, 'DPA', p_supplier_id=ids['supplier'], p_payment='CREDIT')
+    db.fn('add_line', int, bought, ids['b'], 1)
+    db.fn('post_doc', int, bought)
+    db.commit()
+    db.cur.execute('update mm_item set min_stock = stock + 3 where id = :i', i=ids['b'])
+    db.commit()
     labels = tempfile.mkdtemp(prefix='mmlabels-')
     e = dict(os.environ, BASE=api, MGR=users['MANAGER'], CASHIER=users['CASHIER'], PW=test_api.PW,
              ITEM='TST%sA' % ids['tag'], ITEM_B=str(ids['b']), XSS=XSS, SHOTS=os.environ.get('MM_WEB_SHOTS', ''),
@@ -62,6 +69,10 @@ def test_the_pages_in_a_browser(api, env, users):
         shutil.rmtree(labels, ignore_errors=True)
         db.cur.execute("delete from mm_setting where name like 'MYDATA%'")
         db.cur.execute('update mm_customer set afm = null where id = :c', c=ids['customer'])
+        db.cur.execute('update mm_item set min_stock = 0 where id = :i', i=ids['b'])
+        for (d,) in db.cur.execute("select id from mm_doc where doc_type = 'DPA' and status = 'D' and supplier_id = :s",
+                                   s=ids['supplier']).fetchall():
+            db.proc('delete_doc', d)
         db.cur.execute("delete from mm_setting where name like 'BACKUP\\_%' escape '\\'")
         db.commit()
 

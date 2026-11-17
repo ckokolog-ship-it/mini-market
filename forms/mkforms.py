@@ -584,7 +584,8 @@ FORMS['MM_REPORTS'] = dict(
          ('RPT_TRIAL_I', 'button', 20, 192, 300, 'Ισοζύγιο ειδών', {}),
          ('RPT_TRIAL_C', 'button', 20, 226, 300, 'Ισοζύγιο πελατών', {}),
          ('RPT_TRIAL_S', 'button', 20, 260, 300, 'Ισοζύγιο προμηθευτών', {}),
-         ('GO_MM_LEDGER', 'button', 20, 308, 300, 'Καρτέλες (είδους, πελάτη, προμηθευτή)', {})])
+         ('GO_MM_LEDGER', 'button', 20, 308, 300, 'Καρτέλες (είδους, πελάτη, προμηθευτή)', {}),
+         ('ORDERMIN', 'button', 20, 356, 300, 'Παραγγελίες από το ελάχιστο απόθεμα', {})])
 
 # the login (step 7a): name and password (MM_AUTH, as the REST service); the token to GLOBAL.MM_TOKEN,
 # then the first menu. Every other form checks it when it opens (ui.session_ok, FORM_ROLES).
