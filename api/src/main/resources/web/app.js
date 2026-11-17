@@ -15,7 +15,7 @@ const MENU = [
   ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER']]],
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
-  ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
+  ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/chart', 'Γράφημα πωλήσεων', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
     ['#/reports/min-stock', 'Ελάχιστο απόθεμα', 'MANAGER'], ['#/reports/trial-items', 'Ισοζύγιο ειδών', 'MANAGER'],
     ['#/reports/trial-customers', 'Ισοζύγιο πελατών', 'MANAGER'], ['#/reports/trial-suppliers', 'Ισοζύγιο προμηθευτών', 'MANAGER']]],
 ];
@@ -680,6 +680,144 @@ async function dayPage(params) {
         pair('Backup', (BACKUP_STATE[b.state] || b.state) + (b.ok_at ? ' · ' + day(b.ok_at) : ''), b.state !== 'OK'))),
       r.min_stock > 0 ? el('p', { class: 'no-print' }, el('a', { href: '#/reports/min-stock' }, 'Τα είδη κάτω από το ελάχιστο ›')) : null)),
     box('Τα 10 είδη με τις περισσότερες πωλήσεις', top));
+}
+
+// -- the charts of the sales: by day (bars) with the same day a year before (a line), by hour (bars); the
+// totals of the period as figures, against a year before. SVG drawn here, a tooltip on each day or hour,
+// the numbers as a table too. One axis each; the colors by role (app.css: --series-1 this year, --series-2
+// the year before)
+const SVGNS = 'http://www.w3.org/2000/svg';
+function sv(tag, attrs, ...kids) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) if (v !== null && v !== undefined) e.setAttribute(k, v);
+  for (const k of kids.flat()) if (k !== null && k !== undefined) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return e;
+}
+function niceStep(v) {                 // a step of the axis: 1, 2, 2.5 or 5 x 10^n, just above v
+  if (!(v > 0)) return 1;
+  const p = 10 ** Math.floor(Math.log10(v));
+  return [1, 2, 2.5, 5, 10].map((m) => m * p).find((m) => m >= v);
+}
+const nf0 = new Intl.NumberFormat('el-GR', { maximumFractionDigits: 0 });
+function barPath(x, w, y, y0, r) {     // a bar from the baseline y0 to y: its data end rounded, square at y0
+  const h = Math.abs(y0 - y);
+  const rr = Math.min(r, w / 2, h);
+  if (h < 0.5) return '';
+  if (y <= y0) return `M${x},${y0}V${y + rr}Q${x},${y} ${x + rr},${y}H${x + w - rr}Q${x + w},${y} ${x + w},${y + rr}V${y0}Z`;
+  return `M${x},${y0}V${y - rr}Q${x},${y} ${x + rr},${y}H${x + w - rr}Q${x + w},${y} ${x + w},${y - rr}V${y0}Z`;
+}
+// a chart of bars (and a line) over bands: rows, bar(r) the bar, line(r) the line or null, label(r, i,
+// band) the text under a band (or ''; band its width in px), tip(r) the lines of its tooltip
+function barChart(wrap, { rows, bar, line, label, tip, aria }) {
+  const W = Math.max(320, wrap.clientWidth || 720);
+  const H = 240;
+  const m = { l: 56, r: 12, t: 12, b: 28 };
+  const vals = rows.flatMap((r) => [bar(r), line ? line(r) : 0]);
+  const step = niceStep((Math.max(...vals, 0) - Math.min(...vals, 0)) / 4);
+  const top = Math.max(step, Math.ceil(Math.max(...vals, 0) / step) * step);
+  const bottom = Math.floor(Math.min(...vals, 0) / step) * step;
+  const y = (v) => m.t + (H - m.t - m.b) * (top - v) / (top - bottom);
+  const band = (W - m.l - m.r) / rows.length;
+  const bw = Math.max(2, Math.min(24, band * 0.7));
+  const x = (i) => m.l + band * i + band / 2;
+  const svg = sv('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': aria, class: 'chart' });
+  for (let v = bottom; v <= top + step / 2; v += step) {   // the grid at round steps, recessive; euros
+    svg.append(sv('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: Math.abs(v) < step / 2 ? 'ch-base' : 'ch-grid' }),
+      sv('text', { x: m.l - 6, y: y(v) + 4, 'text-anchor': 'end', class: 'ch-axis' }, nf0.format(v) + ' €'));
+  }
+  rows.forEach((r, i) => {
+    const t = label(r, i, band);
+    if (t) svg.append(sv('text', { x: x(i), y: H - 8, 'text-anchor': 'middle', class: 'ch-axis' }, t));
+    const d = barPath(x(i) - bw / 2, bw, y(bar(r)), y(0), 4);
+    if (d) svg.append(sv('path', { d, class: 'ch-bar' }));
+  });
+  if (line) {
+    svg.append(sv('polyline', { points: rows.map((r, i) => `${x(i)},${y(line(r))}`).join(' '), class: 'ch-line' }));
+  }
+  // the hover: the whole band is the target; a tooltip with its numbers, a marker on the line
+  const tipBox = el('div', { class: 'ch-tip', hidden: true });
+  const mark = line ? sv('circle', { r: 4, class: 'ch-dot', visibility: 'hidden' }) : null;
+  const hl = sv('rect', { y: m.t, height: H - m.t - m.b, width: band, class: 'ch-hl', visibility: 'hidden' });
+  svg.insertBefore(hl, svg.firstChild);
+  if (mark) svg.append(mark);
+  rows.forEach((r, i) => {
+    const hit = sv('rect', { x: m.l + band * i, y: m.t, width: band, height: H - m.t - m.b, class: 'ch-hit' });
+    const on = () => {
+      hl.setAttribute('x', m.l + band * i);
+      hl.setAttribute('visibility', 'visible');
+      if (mark) { mark.setAttribute('cx', x(i)); mark.setAttribute('cy', y(line(r))); mark.setAttribute('visibility', 'visible'); }
+      tipBox.replaceChildren(...tip(r).map((t, k) => el('div', { class: k ? null : 'ch-tip-head' }, t)));
+      tipBox.hidden = false;
+      const left = Math.min(Math.max(x(i) + 12, 0), W - tipBox.offsetWidth - 4);
+      tipBox.style.left = (x(i) + 12 + tipBox.offsetWidth > W ? x(i) - 12 - tipBox.offsetWidth : left) + 'px';
+      tipBox.style.top = m.t + 'px';
+    };
+    const off = () => { tipBox.hidden = true; hl.setAttribute('visibility', 'hidden'); if (mark) mark.setAttribute('visibility', 'hidden'); };
+    hit.addEventListener('mouseenter', on);
+    hit.addEventListener('mouseleave', off);
+    hit.addEventListener('click', on);                   // a phone: a tap
+    svg.append(hit);
+  });
+  wrap.replaceChildren(svg, tipBox);
+}
+async function chartPage(params) {
+  const to = el('input', { type: 'date', name: 'to', value: params.get('to') || isoDay(new Date()) });
+  const days = el('select', { name: 'days' }, [[7, '7 ημέρες'], [30, '30 ημέρες'], [91, '3 μήνες'], [364, 'Ένας χρόνος']]
+    .map(([v, t]) => el('option', { value: v, selected: String(v) === (params.get('days') || '30') }, t)));
+  const go = () => { location.hash = `#/chart?days=${days.value}&to=${to.value}`; };
+  const figs = el('div', { class: 'figs' });
+  const byDay = el('div', { class: 'ch-wrap' });
+  const byHour = el('div', { class: 'ch-wrap' });
+  const tableBox = el('details', { class: 'no-print' }, el('summary', {}, 'Τα νούμερα σε πίνακα'));
+  show(el('h1', {}, 'Γράφημα πωλήσεων'),
+    el('form', { class: 'panel row no-print', onsubmit: (ev) => { ev.preventDefault(); go(); } },
+      el('label', {}, 'Διάστημα', days), el('label', {}, 'Έως', to), el('button', { class: 'primary', type: 'submit' }, 'Εμφάνιση')),
+    figs,
+    el('section', { class: 'panel' }, el('h2', {}, 'Πωλήσεις ανά ημέρα'),
+      el('div', { class: 'legend' }, el('span', { class: 'sw sw-1' }), 'Φέτος', el('span', { class: 'sw sw-2' }), 'Πέρσι, την ίδια μέρα της εβδομάδας'),
+      byDay),
+    el('section', { class: 'panel' }, el('h2', {}, 'Αποδείξεις λιανικής ανά ώρα'), byHour),
+    tableBox);
+  let r;
+  try { r = await api(`chart?days=${days.value}&to=${to.value}`); } catch (e) { fail(e); return; }
+  const s = r.sums;
+  const pct = s.last_year > 0 ? (s.total - s.last_year) / s.last_year * 100 : null;
+  const fig = (label, value, note, cls) => el('div', { class: 'fig' }, el('div', { class: 'fig-label' }, label),
+    el('div', { class: 'fig-value' }, value), note ? el('div', { class: 'fig-note ' + (cls || '') }, note) : null);
+  figs.replaceChildren(
+    fig(`Πωλήσεις ${day(r.from)} – ${day(r.to)}`, money(s.total) + ' €',
+      pct === null ? 'πέρσι: καμία πώληση' : `${pct >= 0 ? '▲ +' : '▼ '}${nf2.format(pct)}% από πέρσι (${money(s.last_year)} €)`, pct === null ? '' : pct >= 0 ? 'up' : 'down'),
+    fig('Αποδείξεις λιανικής', String(s.receipts), money(s.receipts_total) + ' €'),
+    fig('Μέσο ποσό απόδειξης', s.avg_receipt === null ? '–' : money(s.avg_receipt) + ' €'));
+  const many = r.days.length;
+  const every = many <= 10 ? 1 : many <= 31 ? 3 : many <= 92 ? 7 : 30;
+  const dm = (iso) => day(iso).slice(0, 5);
+  const lastYear = (iso) => dayShift(iso, -364);
+  const draw = () => {
+    if (!document.body.contains(byDay)) { window.removeEventListener('resize', draw); return; }
+    barChart(byDay, {
+      rows: r.days,
+      bar: (x) => x.total,
+      line: (x) => x.last_year,
+      label: (x, i, band) => ((many - 1 - i) % Math.max(every, Math.ceil(44 / band)) === 0 ? dm(x.day) : ''),   // (44px a date)
+      tip: (x) => [day(x.day), `Φέτος: ${money(x.total)} €`, `Πέρσι (${day(lastYear(x.day))}): ${money(x.last_year)} €`, `Αποδείξεις: ${x.receipts}`],
+      aria: 'Πωλήσεις ανά ημέρα, φέτος και πέρσι',
+    });
+    const used = r.hours.filter((h) => h.receipts > 0).map((h) => h.hour);
+    const hours = used.length ? r.hours.filter((h) => h.hour >= Math.min(...used) && h.hour <= Math.max(...used)) : r.hours.slice(8, 22);
+    barChart(byHour, {
+      rows: hours,
+      bar: (h) => h.total,
+      line: null,
+      label: (h, i, band) => (i % Math.ceil(22 / band) === 0 ? String(h.hour).padStart(2, '0') : ''),
+      tip: (h) => [`${String(h.hour).padStart(2, '0')}:00 – ${String(h.hour).padStart(2, '0')}:59`, `Ποσό: ${money(h.total)} €`, `Αποδείξεις: ${h.receipts}`],
+      aria: 'Αποδείξεις λιανικής ανά ώρα',
+    });
+  };
+  draw();
+  window.addEventListener('resize', draw);
+  tableBox.append(table([['Ημέρα'], ['Φέτος', 'num'], ['Πέρσι', 'num'], ['Αποδείξεις', 'num']],
+    r.days.slice().reverse().map((x) => el('tr', {}, el('td', {}, day(x.day)), num(x.total), num(x.last_year), el('td', { class: 'num' }, x.receipts)))));
 }
 
 // -- the scratch tickets (σκρατς): bought in packs, sold one by one by the barcode of each (its game 4
@@ -1817,6 +1955,7 @@ function render() {
     case 'counts': return countsPage();
     case 'scratch': return need('MANAGER', () => scratchPage());
     case 'day': return need('MANAGER', () => dayPage(params));
+    case 'chart': return need('MANAGER', () => chartPage(params));
     case 'count': return countPage(p[1]);
     default: return itemsPage(params);
   }

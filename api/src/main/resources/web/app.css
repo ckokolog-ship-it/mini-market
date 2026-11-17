@@ -266,3 +266,33 @@ table.pairs tr.neg td, table.pairs tr.neg th { color: var(--bad, #b00020); font-
   body.printing-card { background: #fff; }
   body.printing-card #cardprint { position: static; padding: 10mm; }
 }
+
+/* the charts of the sales: the colors by role (a validated pair, light and dark), thin marks, a recessive
+   grid; the figures of the period */
+:root { --series-1: #2a78d6; --series-2: #eb6834; }
+@media (prefers-color-scheme: dark) { :root { --series-1: #3987e5; --series-2: #d95926; } }
+.ch-wrap { position: relative; overflow: hidden; }
+svg.chart { display: block; max-width: 100%; }
+.ch-grid { stroke: var(--line); stroke-width: 1; }
+.ch-base { stroke: var(--muted); stroke-width: 1; }
+.ch-axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ch-bar { fill: var(--series-1); }
+.ch-line { fill: none; stroke: var(--series-2); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.ch-dot { fill: var(--series-2); stroke: var(--panel); stroke-width: 2; }
+.ch-hl { fill: var(--row); }
+.ch-hit { fill: transparent; cursor: pointer; }
+.ch-tip { position: absolute; pointer-events: none; background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+          border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); white-space: nowrap; }
+.ch-tip-head { font-weight: 600; }
+.legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+.legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-left: 8px; }
+.legend .sw:first-child { margin-left: 0; }
+.legend .sw-1 { background: var(--series-1); }
+.legend .sw-2 { background: var(--series-2); height: 3px; border-radius: 2px; }
+.figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.fig { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.fig-label { color: var(--muted); font-size: 13px; }
+.fig-value { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fig-note { color: var(--muted); font-size: 13px; }
+.fig-note.up { color: var(--good); }
+.fig-note.down { color: var(--bad); }

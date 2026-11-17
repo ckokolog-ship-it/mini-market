@@ -303,6 +303,28 @@ async function waitText(page, sel, text) {
   const prev = new URL(page.url().replace('#/', '')).searchParams.get('date');
   await waitText(page, 'main h1', prev.split('-').reverse().join('/'));
   ok(true, 'the summary: the day before, ' + prev);
+  // the charts of the sales: 30 days with a year before, the hours; a day's tooltip; the numbers as a table
+  await page.goto(BASE + '/web/#/chart?days=30');
+  await page.waitForSelector('svg.chart path.ch-bar');
+  const charts = await page.$$eval('svg.chart', (ss) => ss.map((x) => x.querySelectorAll('path.ch-bar').length));
+  ok(charts.length === 2 && charts[0] >= 1 && (await page.$$('svg.chart polyline.ch-line')).length === 1,
+    `the charts: by day with a year before, by hour (${charts})`);
+  const hits = await (await page.$$('svg.chart'))[0].$$('rect.ch-hit');          // (the chart by day)
+  await hits[hits.length - 1].hover();
+  await page.waitForSelector('.ch-tip:not([hidden])');
+  ok(/Φέτος: .*Πέρσι/s.test(await page.textContent('.ch-tip')), 'the chart: a day, its tooltip (this year, a year before)');
+  ok((await page.$$('details tbody tr')).length === 30, 'the chart: its numbers as a table');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/chart.png', fullPage: true });
+  // dark, and a phone: redrawn to its width, no page wider than the screen
+  await page.emulateMedia({ colorScheme: 'dark' });
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/chart_dark.png', fullPage: true });
+  await page.emulateMedia({ colorScheme: 'light' });
+  const size = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(300);
+  ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'the chart on a phone: no page wider than it');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/chart_phone.png', fullPage: true });
+  await page.setViewportSize(size);
 
   // the labels (a sharp screen: each label a picture, read back by tests/test_web.py): the item of
   // the tests by a scan (no barcode: its code in Code 128; its name with HTML: as text), the bread by a

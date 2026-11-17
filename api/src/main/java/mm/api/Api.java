@@ -32,6 +32,8 @@ import java.util.Optional;
  *                                              with ?limit=&offset= a page of its moves, its carry_in, carry_out
  *   /api/reports/sales   /api/reports/vat   /api/reports/min-stock
  *   /api/scratch/...                           the scratch tickets in packs: see Scratch (MANAGER)
+ *   /api/chart?to=&days=                       the charts of the sales: by day (and a year before), by hour
+ *                                              (MANAGER, Chart.java)
  *   /api/day?date=                             the summary of a day: its Z, sales, VAT, items, scratch, orders,
  *                                              myDATA, minimum stock, backup (MANAGER, Day.java)
  *   /api/backup                              the last backup (db/backup.ps1): state OK, OLD, FAILED, NEVER (MANAGER)
@@ -367,6 +369,12 @@ final class Api {
                 need(u, "MANAGER");
                 if (n == 1) {
                     return Scratch.get(c);
+                }
+            }
+            case "chart" -> {
+                need(u, "MANAGER");
+                if (n == 1) {
+                    return Chart.get(c, q);
                 }
             }
             case "day" -> {
