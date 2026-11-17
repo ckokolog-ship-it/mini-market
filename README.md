@@ -42,6 +42,7 @@ Oracle Forms ──────────────────────�
 
 ## Φάκελοι
 
+- **Ενημέρωση μετά από merge** (backup, βάση, mm-api, φόρμες, reports): όλες οι εντολές μαζί στο [docs/ODIGIES_ENIMEROSI.md](docs/ODIGIES_ENIMEROSI.md).
 - `db/`: η βάση (`CREATE_USER.sql`, `INSTALL.sql`, `UNINSTALL.sql`) και το `MM_CORE.sql`. Ένας χρόνος δεδομένων για τα reports: `MM_DEMO_BIG.sql`· ο έλεγχος ότι όλα συμφωνούν: `MM_CHECK.sql`. Το backup κάθε βράδυ και η επαναφορά: `backup.ps1` (§14). Οδηγίες στο [docs/ODIGIES_VASI.md](docs/ODIGIES_VASI.md).
 - `forms/`: οι φόρμες (`mkforms.py` → `MM_*.xml`, `build_forms.ps1`). Οδηγίες στο [docs/ODIGIES_FORMS.md](docs/ODIGIES_FORMS.md).
 - `reports/`: τα reports (`mkreports.py` → `MM_LEDGER_*.xml`, `build_reports.ps1` → `.rdf`). Οδηγίες στο [docs/ODIGIES_REPORTS.md](docs/ODIGIES_REPORTS.md).
