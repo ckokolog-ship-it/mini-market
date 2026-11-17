@@ -43,11 +43,11 @@ reports_server.cmd -Alias MM_DB -Key mm -EnvId lottoEnv
 
 Μετά, από τον φάκελο `db` του mini market:
 ```bat
-sqlplus mm/<κωδικός>@localhost:1522/FREEPDB1 @SET_REPORTS_URL.sql http://192.168.178.165:9012 HTML
+sqlplus mm/<κωδικός>@localhost:1522/FREEPDB1 @SET_REPORTS_URL.sql http://192.168.178.165:9012 PDF
 ```
 
 - **Τι γράφει:** στο `MM_SETTING` πού είναι ο Reports Server και σε ποια μορφή ανοίγουν τα reports.
-- **Γιατί HTML:** στα Windows τα ελληνικά του PDF είναι ακόμα ανοιχτό θέμα (§10.2 του οδηγού του PROPO). Στο HTML βγαίνουν σωστά.
+- **PDF ή HTML:** και τα δύο βγάζουν σωστά ελληνικά. Για το PDF στα Windows, ο engine του Reports Server διαβάζει το `uifont.ali` από το **`Oracle_Home`** (`guicommon\tk\admin`, `tools\common`), όχι από τον φάκελο του domain: το γράφει εκεί το `reports_server.cmd` του PROPO (§10.2 του οδηγού του PROPO). Μετά από αυτό: `SET_REPORTS_URL.sql … PDF`.
 
 ## Κάθε φορά που αλλάζουν
 
