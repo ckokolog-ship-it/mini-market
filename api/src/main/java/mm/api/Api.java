@@ -32,7 +32,9 @@ import java.util.Optional;
  *                                              with ?limit=&offset= a page of its moves, its carry_in, carry_out
  *   /api/reports/sales   /api/reports/vat   /api/reports/min-stock
  *   /api/scratch/...                           the scratch tickets in packs: see Scratch (MANAGER)
- *   /api/backup                                the last backup (db/backup.ps1): state OK, OLD, FAILED, NEVER (MANAGER)
+ *   /api/day?date=                             the summary of a day: its Z, sales, VAT, items, scratch, orders,
+ *                                              myDATA, minimum stock, backup (MANAGER, Day.java)
+ *   /api/backup                              the last backup (db/backup.ps1): state OK, OLD, FAILED, NEVER (MANAGER)
  *   /api/reports/trial-items|trial-customers|trial-suppliers?from=&to=&all=1   the trial balances
  *                                              (ισοζύγια): a row each with the totals of its ledger, no moves
  *   GET /api/counts   GET /api/counts/{id}      the counts of the stock; one with its lines
@@ -359,6 +361,12 @@ final class Api {
                 need(u, "MANAGER");
                 if (n == 1) {
                     return Scratch.get(c);
+                }
+            }
+            case "day" -> {
+                need(u, "MANAGER");
+                if (n == 1) {
+                    return Day.get(c, q);
                 }
             }
             case "backup" -> {

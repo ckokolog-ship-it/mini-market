@@ -237,3 +237,17 @@ pre.xml { max-height: 420px; overflow: auto; background: var(--panel); border: 1
   body.printing-doc { background: #fff; }
   body.printing-doc #docprint { position: static; width: auto; }
 }
+
+/* the summary of a day: its boxes side by side; printed on A4 with margins of its own (@page has none) */
+.day-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0 16px; }
+.day-box h2 { margin: 14px 0 6px; font-size: 1.05rem; }
+table.pairs { width: 100%; border-collapse: collapse; }
+table.pairs th { text-align: left; font-weight: 400; color: var(--muted); padding: 3px 8px 3px 0; }
+table.pairs td { padding: 3px 0; white-space: nowrap; }
+table.pairs tr.neg td, table.pairs tr.neg th { color: var(--bad, #b00020); font-weight: 600; }
+@media print {
+  .day-sheet { padding: 0 12mm; }
+  main > h1 { padding: 10mm 12mm 0; }
+  .day-grid { grid-template-columns: 1fr 1fr 1fr; }
+  .day-box { break-inside: avoid; }
+}
