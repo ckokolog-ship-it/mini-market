@@ -320,6 +320,24 @@ async function waitText(page, sel, text) {
   await page.click(yrow + ' button:has-text("Απόσυρση")');                        // (the prompt: its 3)
   await waitText(page, '#toast', 'Αποσύρθηκαν 3');
   ok((await page.$$(yrow)).length === 0, 'the expired one taken out of the stock');
+  // the costs: the gross profit by FIFO (the method of the shop), then by the last purchase, the other
+  // beside it; the value of the stock; the layers of an item (FIFO) in its page
+  await page.goto(BASE + '/web/#/reports/profit?from=2000-01-01');
+  await waitText(page, '.figs', 'Κόστος (FIFO)');
+  ok((await page.inputValue('select[name=method]')) === 'FIFO' && (await page.textContent('thead')).includes('Κόστος τελευταίας αγοράς'),
+    'the gross profit: by FIFO, the last cost beside it');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/profit.png', fullPage: true });
+  await page.selectOption('select[name=method]', 'LAST');
+  await page.click('main form button[type=submit]');
+  await waitText(page, '.figs', 'Κόστος (τελευταίας αγοράς)');
+  ok(await page.isVisible('button:has-text("Να είναι η μέθοδος του συστήματος")'), 'the gross profit by the last cost; it can be made the method of the shop');
+  await page.goto(BASE + '/web/#/reports/stock-value');
+  await waitText(page, '.figs', 'Αξία αποθήκης (FIFO)');
+  ok((await page.$$('main tbody tr.click')).length > 0, 'the value of the stock, each item');
+  await page.goto(BASE + '/web/#/item/' + encodeURIComponent(CODE_B));
+  await waitText(page, 'main', 'Το απόθεμα ανά παραλαβή (FIFO)');
+  ok((await page.textContent('main')).includes('Κόστος FIFO (επόμενο)'), 'an item: its layers (FIFO), the cost of the next piece out');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/item_fifo.png', fullPage: true });
   // the charts of the sales: 30 days with a year before, the hours; a day's tooltip; the numbers as a table
   await page.goto(BASE + '/web/#/chart?days=30');
   await page.waitForSelector('svg.chart path.ch-bar');

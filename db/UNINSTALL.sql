@@ -44,6 +44,8 @@ drop table if exists mm_pin_user cascade constraints purge;
 drop table if exists mm_secret cascade constraints purge;
 drop table if exists mm_scratch_game cascade constraints purge;
 drop table if exists mm_points cascade constraints purge;
+drop table if exists mm_fifo_out cascade constraints purge;
+drop table if exists mm_fifo cascade constraints purge;
 drop table if exists mm_serial cascade constraints purge;
 drop table if exists mm_count_line cascade constraints purge;
 drop table if exists mm_count cascade constraints purge;

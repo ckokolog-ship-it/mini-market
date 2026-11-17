@@ -119,8 +119,12 @@ def cleanup(c):
     # stock back as its moves are taken away (row by row: reservable)
     c.execute(f'select item_id, sum(qty) from mm_stock_move where doc_id in ({TEST_DOCS}) '
               f'and item_id not in ({TEST_ITEMS}) group by item_id')
-    for item, qty in c.fetchall():
+    shop = c.fetchall()
+    for item, qty in shop:
         c.execute('update mm_item set stock = stock - :q where id = :i', q=qty, i=item)
+    # FIFO: the layers of the test items out; of an item of the shop, built again below from its moves
+    c.execute(f'delete from mm_fifo_out where fifo_id in (select id from mm_fifo where item_id in ({TEST_ITEMS}))')
+    c.execute(f'delete from mm_fifo where item_id in ({TEST_ITEMS})')
     c.execute(f'delete from mm_stock_move where item_id in ({TEST_ITEMS}) or doc_id in ({TEST_DOCS})')
     c.execute(f'delete from mm_count_line where item_id in ({TEST_ITEMS})')
     c.execute("delete from mm_count where name like 'TST %'")
@@ -134,6 +138,8 @@ def cleanup(c):
     # the totals of the months of the test items (row by row: MM_MONTHS.REBUILD), of its partners. A
     # row of MM_ITEM_MONTH changed by the trigger of the moves above (reservable) is deleted only after
     # that is committed (else ORA-55754)
+    for item, _ in shop:
+        c.callproc('mm_core.fifo_rebuild', [item])
     c.connection.commit()
     c.execute(f'begin for r in (select item_id, month from mm_item_month where item_id in ({TEST_ITEMS})) loop '
               'delete from mm_item_month where item_id = r.item_id and month = r.month; end loop; end;')

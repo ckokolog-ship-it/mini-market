@@ -52,6 +52,32 @@ from (select l.item_id, i.code, i.name, i.unit, c.name category, l.id line_id, l
       where d.status = 'P' and t.side = 'P' and t.stock_sign = 1 and l.qty > 0) x
 where x.expires is not null and x.left_ > 0;
 
+-- FIFO: the value of the stock of each item (its layers left, each at its cost; a shortage below 0, at
+-- the cost it was taken), the cost by piece of what is left, and the cost of the next piece out; and
+-- the value by the last cost (VALUE_LAST: the stock at the cost of the last purchase)
+create or replace view mm_fifo_value as
+select i.id item_id, i.code, i.name, i.unit, c.name category, i.stock + 0 stock, i.cost last_cost,
+       nvl(sum(f.left_ * f.unit_cost), 0) value,
+       round(sum(case when f.left_ > 0 then f.left_ * f.unit_cost end)
+             / nullif(sum(case when f.left_ > 0 then f.left_ end), 0), 4) unit_cost,
+       min(case when f.left_ > 0 then f.unit_cost end) keep (dense_rank first order by case when f.left_ > 0 then f.id end) next_cost,
+       round((i.stock + 0) * nvl(i.cost, 0), 2) value_last
+from mm_item i
+join mm_category c on c.id = i.category_id
+left join mm_fifo f on f.item_id = i.id
+group by i.id, i.code, i.name, i.unit, c.name, i.stock + 0, i.cost;
+
+-- the cost of each move of the stock by FIFO (COST): what it took out (its layers, at their costs; given
+-- back by a cancellation: below 0) less what it brought in (a return of a customer: a layer); and by the
+-- last cost (COST_LAST: its quantity at the cost of the last purchase then). The cost of the sales of a
+-- period: the moves of its documents of sale
+create or replace view mm_move_cost as
+select s.id move_id, s.item_id, s.kind, s.doc_id, s.doc_line_id, s.move_at, s.qty, s.note,
+       nvl((select sum(o.cost) from mm_fifo_out o where o.move_id = s.id), 0)
+       - nvl((select sum(f.qty * f.unit_cost) from mm_fifo f where f.move_id = s.id), 0) cost,
+       round(-s.qty * nvl(s.unit_last, 0), 4) cost_last
+from mm_stock_move s;
+
 create or replace view mm_min_stock as
 select c.name category, i.code, i.name, i.unit, i.stock + 0 stock, i.min_stock,
        i.min_stock - (i.stock + 0) missing,

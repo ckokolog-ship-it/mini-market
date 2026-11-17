@@ -299,3 +299,5 @@ svg.chart { display: block; max-width: 100%; }
 
 /* the expiry of the goods: an expired receipt */
 tr.expired td { background: color-mix(in srgb, var(--bad) 8%, transparent); }
+/* a column beside, for comparing (the cost by the other method) */
+td.muted-col, th.muted-col { color: var(--muted); }

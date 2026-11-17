@@ -91,6 +91,12 @@ begin
   commit;
 end;
 /
+prompt == FIFO again from all the moves of the stock (the layers of each receipt, what each sale took)
+begin
+  mm_core.fifo_rebuild;
+  commit;
+end;
+/
 prompt == what is in the database
 set feedback on
 select 'items' what, count(*) n from mm_item
