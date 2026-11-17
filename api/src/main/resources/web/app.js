@@ -356,6 +356,10 @@ async function itemPage(code) {
     if (can('MANAGER')) rows.splice(6, 0, ['Κόστος (τελευταία αγορά)', money(x.cost)], ['Κόστος FIFO (επόμενο)', x.fifo_next === null ? '' : money4(x.fifo_next)]);
     show(el('h1', {}, x.name),
       el('div', { class: 'panel' }, el('dl', { class: 'kv' }, rows.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v ?? '')]))),
+      // more than one warehouse (the central store, the branches): its stock in each
+      x.warehouses && x.warehouses.length > 1 ? el('div', { class: 'panel' }, el('h2', {}, 'Απόθεμα ανά αποθήκη'),
+        table([['Αποθήκη'], ['Απόθεμα', 'num']], x.warehouses.map((w) => el('tr', {},
+          el('td', {}, `${w.code} ${w.name}` + (w.main === 'Y' ? ' (κεντρική)' : '')), num(w.stock, qty))))) : null,
       can('MANAGER') && x.fifo.length ? el('div', { class: 'panel' }, el('h2', {}, `Το απόθεμα ανά παραλαβή (FIFO): ${money(x.fifo_value)} €`),
         el('p', { class: 'muted' }, 'Πρώτα φεύγουν τα παλιότερα, με το κόστος τους.'),
         table([['Παραλαβή'], ['Από'], ['Ποσότητα', 'num'], ['Μένουν', 'num'], ['Κόστος', 'num'], ['Αξία', 'num']],

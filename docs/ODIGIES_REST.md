@@ -130,6 +130,7 @@ commit;
 | `GET /api/reports/profit?from=&to=&method=` | το μικτό κέρδος ανά είδος: `revenue` (καθαρές πωλήσεις), `cost` με τη μέθοδο (`FIFO` ή `LAST`· προεπιλογή η `COST_METHOD`), `cost_fifo`, `cost_last`, `profit`· `stock_diff` οι διαφορές αποθήκης (MANAGER) |
 | `GET /api/reports/stock-value?method=` | η αξία της αποθήκης ανά είδος: `value` με τη μέθοδο, `value_fifo`, `value_last`, `unit_cost`, `next_cost`, `last_cost` |
 | `POST /api/reports/cost-method` `{"method"}` | η μέθοδος κόστους του συστήματος: `FIFO` ή `LAST` (MANAGER) |
+| `GET /api/warehouses` | οι αποθήκες (κεντρική πρώτη): `code`, `name`, `main`, `active`· ένα είδος (`/api/items/{…}`) έχει και `warehouses`, το απόθεμά του σε καθεμιά |
 | `GET /api/expiry?days=` | οι λήξεις: όσα έληξαν και όσα λήγουν μέσα σε `days` ημέρες (προεπιλογή `EXPIRY_DAYS`, αλλιώς 7), με όσα μένουν από κάθε παραλαβή (`left_`, FIFO) (MANAGER) |
 | `POST /api/expiry/withdraw` `{"line_id", "qty"}` | απόσυρση από το απόθεμα (`qty`: προεπιλογή όσα μένουν) |
 | `GET /api/chart?days=&to=` | το γράφημα πωλήσεων (7 έως 364 ημέρες, έως μια ημέρα· προεπιλογή 30 έως σήμερα): `days` (ανά ημέρα: `total`, `receipts`, `last_year` την ίδια μέρα της εβδομάδας πέρσι), `hours` (0-23: αποδείξεις λιανικής και ποσό), `sums` (`total`, `last_year`, `receipts`, `avg_receipt`) (MANAGER) |

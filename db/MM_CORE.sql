@@ -27,9 +27,11 @@ create or replace package mm_core as
   function default_price(p_doc_type varchar2, p_item_id number) return number;
 
   -- the documents: a draft, its lines, then post (number, stock, cash) or cancel
+  -- the warehouse of a document: the one given, else that of its register, else the main one
   function new_doc(p_doc_type varchar2, p_customer_id number default null, p_supplier_id number default null,
                    p_register_id number default null, p_payment varchar2 default 'CASH',
-                   p_doc_date date default trunc(sysdate)) return number;
+                   p_doc_date date default trunc(sysdate), p_warehouse_id number default null) return number;
+  function main_warehouse return number;              -- MM_WAREHOUSE MAIN Y
   function add_line(p_doc_id number, p_item_id number, p_qty number,
                     p_price number default null, p_discount number default 0) return number;
   procedure update_line(p_line_id number, p_qty number, p_price number, p_discount number default 0);
@@ -336,20 +338,36 @@ create or replace package body mm_core as
   end;
 
   -- ---------------------------------------------------------------------------------------------
-  function new_doc(p_doc_type varchar2, p_customer_id number default null, p_supplier_id number default null,
-                   p_register_id number default null, p_payment varchar2 default 'CASH',
-                   p_doc_date date default trunc(sysdate)) return number is
-    t mm_doc_type%rowtype := doc_type_row(p_doc_type);
+  function main_warehouse return number is
     v number;
   begin
+    select min(id) into v from mm_warehouse where main = 'Y';
+    return v;
+  end;
+
+  function new_doc(p_doc_type varchar2, p_customer_id number default null, p_supplier_id number default null,
+                   p_register_id number default null, p_payment varchar2 default 'CASH',
+                   p_doc_date date default trunc(sysdate), p_warehouse_id number default null) return number is
+    t mm_doc_type%rowtype := doc_type_row(p_doc_type);
+    v number;
+    wh number := p_warehouse_id;
+  begin
+    if wh is null and p_register_id is not null then
+      select max(warehouse_id) into wh from mm_register where id = p_register_id;
+    end if;
+    wh := nvl(wh, main_warehouse);
+    select count(*) into v from mm_warehouse where id = wh and active = 'Y';
+    if v = 0 then
+      fail(93, 'Δεν υπάρχει ενεργή αποθήκη ' || wh);
+    end if;
     if t.side = 'S' and p_supplier_id is not null or t.side = 'P' and p_customer_id is not null then
       fail(4, 'Το ' || t.name || ' θέλει ' || case t.side when 'S' then 'πελάτη' else 'προμηθευτή' end);
     end if;
     if t.side = 'P' and p_register_id is not null then
       fail(5, 'Οι αγορές δεν περνούν από ταμείο');
     end if;
-    insert into mm_doc (doc_type, customer_id, supplier_id, register_id, payment, doc_date)
-    values (p_doc_type, p_customer_id, p_supplier_id, p_register_id, p_payment, p_doc_date)
+    insert into mm_doc (doc_type, customer_id, supplier_id, register_id, payment, doc_date, warehouse_id)
+    values (p_doc_type, p_customer_id, p_supplier_id, p_register_id, p_payment, p_doc_date, wh)
     returning id into v;
     return v;
   end;
@@ -714,7 +732,8 @@ create or replace package body mm_core as
         end loop;
       end if;
       -- a shortage first (sold before it came)
-      for f in (select id, left_ from mm_fifo where item_id = m.item_id and left_ < 0 order by id) loop
+      for f in (select id, left_ from mm_fifo where item_id = m.item_id and warehouse_id = m.warehouse_id
+                and left_ < 0 order by id) loop
         exit when r <= 0;
         q := least(r, -f.left_);
         update mm_fifo set left_ = left_ + q where id = f.id;
@@ -728,8 +747,8 @@ create or replace package body mm_core as
         if unit is null then
           unit := fifo_unit(m.item_id);
         end if;
-        insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_)
-        values (m.item_id, m.id, m.doc_line_id, m.move_at, r, unit, r);
+        insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_, warehouse_id)
+        values (m.item_id, m.id, m.doc_line_id, m.move_at, r, unit, r, m.warehouse_id);
       end if;
     else
       if cancel then
@@ -743,7 +762,8 @@ create or replace package body mm_core as
           r := r - q;
         end loop;
       end if;
-      for f in (select id, left_, unit_cost from mm_fifo where item_id = m.item_id and left_ > 0 order by id) loop
+      for f in (select id, left_, unit_cost from mm_fifo where item_id = m.item_id and warehouse_id = m.warehouse_id
+                and left_ > 0 order by id) loop
         exit when r <= 0;
         q := least(r, f.left_);
         fifo_take(f.id, f.unit_cost, q, m);
@@ -751,11 +771,11 @@ create or replace package body mm_core as
       end loop;
       if r > 0 then
         -- none left: a shortage, at the cost of the newest layer, until goods come
-        select max(id) into neg from mm_fifo where item_id = m.item_id and qty = 0;
+        select max(id) into neg from mm_fifo where item_id = m.item_id and warehouse_id = m.warehouse_id and qty = 0;
         if neg is null then
           unit := fifo_unit(m.item_id);
-          insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_)
-          values (m.item_id, m.id, m.doc_line_id, m.move_at, 0, unit, 0)
+          insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_, warehouse_id)
+          values (m.item_id, m.id, m.doc_line_id, m.move_at, 0, unit, 0, m.warehouse_id)
           returning id into neg;
         end if;
         select unit_cost into unit from mm_fifo where id = neg;
@@ -766,6 +786,9 @@ create or replace package body mm_core as
 
   procedure fifo_rebuild(p_item_id number default null) is
   begin
+    -- a move written without a warehouse (MM_DEMO.sql: the first count): of the main one
+    update mm_stock_move set warehouse_id = main_warehouse
+    where warehouse_id is null and (p_item_id is null or item_id = p_item_id);
     delete from mm_fifo_out where fifo_id in (select id from mm_fifo where p_item_id is null or item_id = p_item_id);
     delete from mm_fifo where p_item_id is null or item_id = p_item_id;
     for m in (select * from mm_stock_move where p_item_id is null or item_id = p_item_id order by id) loop
@@ -775,14 +798,20 @@ create or replace package body mm_core as
 
   procedure stock_move(p_item_id number, p_kind varchar2, p_qty number, p_doc_id number default null,
                        p_line_id number default null, p_note varchar2 default null,
-                       p_count_id number default null) is
+                       p_count_id number default null, p_warehouse_id number default null) is
     m mm_stock_move%rowtype;
   begin
     if p_qty = 0 then
       return;
     end if;
-    insert into mm_stock_move (item_id, kind, qty, doc_id, doc_line_id, note, count_id)
-    values (p_item_id, p_kind, p_qty, p_doc_id, p_line_id, p_note, p_count_id)
+    -- its warehouse: the one given, else that of its document, else the main one
+    m.warehouse_id := p_warehouse_id;
+    if m.warehouse_id is null and p_doc_id is not null then
+      select warehouse_id into m.warehouse_id from mm_doc where id = p_doc_id;
+    end if;
+    m.warehouse_id := nvl(m.warehouse_id, main_warehouse);
+    insert into mm_stock_move (item_id, kind, qty, doc_id, doc_line_id, note, count_id, warehouse_id)
+    values (p_item_id, p_kind, p_qty, p_doc_id, p_line_id, p_note, p_count_id, m.warehouse_id)
     returning id, move_at into m.id, m.move_at;
     update mm_item set stock = stock + p_qty where id = p_item_id;   -- reservable: no row lock
     m.item_id := p_item_id; m.kind := p_kind; m.qty := p_qty; m.doc_id := p_doc_id;
