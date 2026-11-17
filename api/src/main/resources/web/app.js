@@ -591,10 +591,10 @@ async function scratchPage() {
       }, el('label', {}, 'Έκδοση', game), el('label', { class: 'grow' }, 'Είδος (κωδικός ή barcode)', item),
       el('label', {}, 'Δελτία / πακέτο', size), el('button', { type: 'submit' }, 'Δήλωση έκδοσης')),
       el('h2', {}, 'Πακέτα'),
-      r.packs.length ? table([['Έκδοση'], ['Πακέτο'], ['Είδος', 'hide-phone'], ['Δελτία', 'num'], ['Πουλήθηκαν', 'num'], ['Μένουν', 'num'], ['Φορτώθηκε', 'hide-phone']],
+      r.packs.length ? table([['Έκδοση'], ['Πακέτο'], ['Είδος', 'hide-phone'], ['Δελτία', 'num'], ['Πουλήθηκαν', 'num'], ['Μένουν', 'num'], ['Επιστράφηκαν', 'num'], ['Φορτώθηκε', 'hide-phone']],
         r.packs.map((x) => el('tr', { class: x.left_ === 0 ? 'cancelled' : null }, el('td', {}, x.game), el('td', {}, x.pack),
           el('td', { class: 'hide-phone wrap' }, x.name), el('td', { class: 'num' }, x.tickets), el('td', { class: 'num' }, x.sold),
-          el('td', { class: 'num' }, x.left_), el('td', { class: 'hide-phone' }, day(x.loaded_at)))))
+          el('td', { class: 'num' }, x.left_), el('td', { class: 'num' }, x.returned || ''), el('td', { class: 'hide-phone' }, day(x.loaded_at)))))
         : el('p', { class: 'muted' }, 'Κανένα πακέτο ακόμα.'),
       el('h2', {}, 'Κέρδη που πληρώθηκαν (31 ημέρες)'),
       r.prizes.length ? table([['Ημέρα'], ['Κέρδη', 'num'], ['Ποσό', 'num']],
@@ -615,9 +615,24 @@ async function scratchPage() {
       code.focus();
     },
   }, el('label', { class: 'grow' }, 'Φόρτωση πακέτου', code), el('label', {}, 'Δελτία', count), camera(code), el('button', { class: 'primary', type: 'submit' }, 'Φόρτωση'));
+  // the tickets of a pack not sold, back to the supplier
+  const back = el('input', { name: 'return_code', inputmode: 'numeric', autocomplete: 'off', placeholder: 'σάρωση ενός δελτίου του πακέτου' });
+  const returns = el('form', {
+    class: 'panel row',
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      if (!back.value.trim() || !confirm('Επιστροφή στον προμηθευτή όσων δελτίων του πακέτου δεν πουλήθηκαν;')) return;
+      try {
+        const r = await api('scratch/returns', { code: back.value.trim() });
+        toast(`Επιστράφηκαν ${r.returned} δελτία: βγήκαν από το απόθεμα`);
+        back.value = '';
+        draw(r);
+      } catch (e) { fail(e); }
+    },
+  }, el('label', { class: 'grow' }, 'Επιστροφή απούλητων', back), el('button', { type: 'submit', class: 'danger' }, 'Επιστροφή'));
   show(el('h1', {}, 'Σκρατς'), el('p', { class: 'muted' },
     'Το barcode ενός δελτίου: έκδοση (4 ψηφία), πακέτο (7), δελτίο (3). Σάρωσε ένα δελτίο του πακέτου για να μπουν όλα στο απόθεμα· στο ταμείο, η σάρωση ενός δελτίου πουλά αυτό το δελτίο.'),
-  form, out);
+  form, out, returns);
   try { draw(await api('scratch')); } catch (e) { fail(e); }
   code.focus();
 }

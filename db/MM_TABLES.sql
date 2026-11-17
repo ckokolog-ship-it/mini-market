@@ -774,6 +774,7 @@ create or replace view mm_scratch_pack as
 select g.game, substr(s.serial, 5, 7) pack, g.item_id, i.code, i.name, i.price, count(*) tickets,
        sum(case when s.status = 'S' then 1 else 0 end) sold,
        sum(case when s.status = 'A' then 1 else 0 end) left_,
+       sum(case when s.status = 'X' then 1 else 0 end) returned,
        min(s.created_at) loaded_at, max(s.sold_at) last_sold
 from mm_serial s
 join mm_scratch_game g on g.item_id = s.item_id and g.game = substr(s.serial, 1, 4)

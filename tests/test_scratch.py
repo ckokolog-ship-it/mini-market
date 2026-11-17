@@ -77,4 +77,21 @@ def test_a_pack_loaded_and_sold_ticket_by_ticket(api, scratch, users):
     assert db.one("select note from mm_cash_move where kind = 'OUT' order by id desc fetch first 1 rows only")[0] == (
         'Κέρδος σκρατς ' + game + pack + '123')
     assert get(api, '/api/scratch', 403, token='CASHIER')['error'] == 'forbidden'
+    # the tickets not sold, back to the supplier: void, out of the stock; the sold one stays; once
+    stock = float(db.one('select stock from mm_item where id = :i', i=item)[0])
+    r = post(api, '/api/scratch/returns', {'code': game + pack + '250'})
+    assert r['returned'] == 299
+    p = [x for x in r['packs'] if (x['game'], x['pack']) == (game, pack)][0]
+    assert (p['sold'], p['left_'], p['returned']) == (1, 0, 299)
+    assert float(db.one('select stock from mm_item where id = :i', i=item)[0]) == stock - 299
+    assert db.one('select status from mm_serial where serial = :s', s=t)[0] == 'S'
+    assert db.one('select count(*) from mm_check')[0] == 0
+    assert 'απούλητα' in post(api, '/api/scratch/returns', {'code': game + pack}, status=400)['message']
+    e = post(api, pos + '/scan', {'code': game + pack + '008'}, status=404, token='CASHIER')   # returned: not sold
+    assert e['error'] == 'not_found'
+    # one of a pack in a receipt being written: not back yet
+    post(api, pos + '/scan', {'code': game + '0004212' + '001'}, token='CASHIER')
+    assert 'απόδειξη' in post(api, '/api/scratch/returns', {'code': game + '0004212'}, status=400)['message']
+    post(api, pos + '/pay', {'payment': 'CASH', 'given': 1}, token='CASHIER')
+    assert post(api, '/api/scratch/returns', {'code': game + '0004212'})['returned'] == 4
     post(api, pos + '/close', token='CASHIER')
