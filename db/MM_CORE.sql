@@ -33,6 +33,9 @@ create or replace package mm_core as
   function add_line(p_doc_id number, p_item_id number, p_qty number,
                     p_price number default null, p_discount number default 0) return number;
   procedure update_line(p_line_id number, p_qty number, p_price number, p_discount number default 0);
+  -- the date a line of goods received expires (a draft that brings stock from a supplier: DPA, TAD);
+  -- null: none. What is left of them: MM_EXPIRY
+  procedure set_expiry(p_line_id number, p_expires date);
   procedure delete_line(p_line_id number);
   procedure recalc(p_doc_id number);                     -- a draft sale: reprice first
   procedure reprice(p_doc_id number);                    -- the promotions and the discount of the document
@@ -583,6 +586,24 @@ create or replace package body mm_core as
     returning id into id_;
     recalc(p_doc_id);
     return id_;
+  end;
+
+  procedure set_expiry(p_line_id number, p_expires date) is
+    l mm_doc_line%rowtype;
+    d mm_doc%rowtype;
+    t mm_doc_type%rowtype;
+  begin
+    begin
+      select * into l from mm_doc_line where id = p_line_id;
+    exception
+      when no_data_found then fail(92, 'Δεν υπάρχει γραμμή ' || p_line_id);
+    end;
+    d := draft(l.doc_id);
+    t := doc_type_row(d.doc_type);
+    if not (t.side = 'P' and t.stock_sign = 1) then
+      fail(92, 'Ημερομηνία λήξης μπαίνει στην παραλαβή από προμηθευτή (δελτίο παραλαβής, τιμολόγιο - δελτίο παραλαβής)');
+    end if;
+    update mm_doc_line set expires = trunc(p_expires) where id = p_line_id;
   end;
 
   procedure update_line(p_line_id number, p_qty number, p_price number, p_discount number default 0) is

@@ -296,3 +296,6 @@ svg.chart { display: block; max-width: 100%; }
 .fig-note { color: var(--muted); font-size: 13px; }
 .fig-note.up { color: var(--good); }
 .fig-note.down { color: var(--bad); }
+
+/* the expiry of the goods: an expired receipt */
+tr.expired td { background: color-mix(in srgb, var(--bad) 8%, transparent); }

@@ -20,6 +20,7 @@ import java.util.Map;
  *     orders    the orders written that day (online of them), the open ones now (online not confirmed)
  *     mydata    the invoices of the day to myDATA by state; waiting or failed now (any day)
  *     min_stock how many items are under their minimum now
+ *     expiry    the receipts of goods expired (something left of them) and expiring in EXPIRY_DAYS, now
  *     backup    the state of the backup (MM_BACKUP_STATE)
  * </pre>
  */
@@ -85,6 +86,12 @@ final class Day {
                 from mm_doc""").get(0));
         out.put("mydata", my);
         out.put("min_stock", Db.rows(c, "select count(*) n from mm_min_stock").get(0).get("n"));
+        Map<String, Object> exp = new LinkedHashMap<>(Db.rows(c, """
+                select count(case when days_left < 0 then 1 end) expired,
+                       count(case when days_left between 0 and ? then 1 end) soon
+                from mm_expiry""", Expiry.days(c)).get(0));
+        exp.put("days", Expiry.days(c));
+        out.put("expiry", exp);
         out.put("backup", Db.rows(c, "select state, days, ok_at, failed_at, error from mm_backup_state").get(0));
         return out;
     }

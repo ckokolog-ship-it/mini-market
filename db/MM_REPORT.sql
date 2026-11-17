@@ -32,6 +32,26 @@ join mm_doc_line l on l.doc_id = d.id
 where d.status = 'P' and t.vat_sign <> 0      -- the notes: no VAT (their invoice has it)
 group by d.doc_date, l.vat_code, l.vat_rate;
 
+-- the goods with a date of expiry (MM_DOC_LINE.EXPIRES of the goods received): what is left of each
+-- receipt, by FIFO: the stock of an item is of its newest receipts first (the oldest went first), so a
+-- receipt has what the stock has after the receipts newer than it, up to its own quantity. Only the
+-- lines with something left; DAYS_LEFT: negative, expired
+create or replace view mm_expiry as
+select x.item_id, x.code, x.name, x.unit, x.category, x.line_id, x.expires, x.expires - trunc(sysdate) days_left,
+       x.qty, x.left_, x.doc_id, x.doc_type, x.doc_no, x.doc_date, x.supplier
+from (select l.item_id, i.code, i.name, i.unit, c.name category, l.id line_id, l.expires, l.qty,
+             least(l.qty, greatest(0, (i.stock + 0) - nvl(sum(l.qty) over (partition by l.item_id
+                   order by d.doc_date desc, l.id desc rows between unbounded preceding and 1 preceding), 0))) left_,
+             d.id doc_id, d.doc_type, d.doc_no, d.doc_date, s.name supplier
+      from mm_doc_line l
+      join mm_doc d on d.id = l.doc_id
+      join mm_doc_type t on t.code = d.doc_type
+      join mm_item i on i.id = l.item_id
+      join mm_category c on c.id = i.category_id
+      left join mm_supplier s on s.id = d.supplier_id
+      where d.status = 'P' and t.side = 'P' and t.stock_sign = 1 and l.qty > 0) x
+where x.expires is not null and x.left_ > 0;
+
 create or replace view mm_min_stock as
 select c.name category, i.code, i.name, i.unit, i.stock + 0 stock, i.min_stock,
        i.min_stock - (i.stock + 0) missing,
