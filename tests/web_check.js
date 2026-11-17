@@ -227,6 +227,33 @@ async function waitText(page, sel, text) {
   await page.click('button:has-text("Πληρωμή κέρδους")');
   await waitText(page, '#toast', 'Κέρδος σκρατς 2,00');
   ok(drawer0 !== await page.textContent('main'), 'the till: a prize of a scratch ticket paid from the drawer');
+  // the points: a new customer with a card into the receipt (its card printed, the size of a bank card),
+  // an item, paid: its points on the receipt; then its page: the card, the points, their move
+  await page.evaluate(() => { window.print = () => { window.__cards = (window.__cards || 0) + 1; }; });
+  const who = 'Test web card ' + Date.now() % 100000;
+  await page.click('summary:has-text("Νέος πελάτης με κάρτα")');
+  await page.fill('input[name=new_name]', who);
+  await page.fill('input[name=new_phone]', '69' + String(Date.now()).slice(-8));
+  await page.click('button:has-text("Νέα κάρτα")');
+  await waitText(page, '.cust', 'κάρτα 2990');
+  ok((await page.textContent('#cardprint')).includes(who) && await page.evaluate(() => window.__cards === 1),
+    'a new customer with a card: in the receipt, its card printed');
+  await page.fill('input[name=code]', ITEM);
+  await page.press('input[name=code]', 'Enter');
+  await waitText(page, '.cust', '+12 πόντοι');
+  ok(!(await page.textContent('.cust')).includes('null'), 'the customer of the receipt: its points, nothing empty as text');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/pos_points.png', fullPage: true });
+  await page.click('button:has-text("Μετρητά (F9)")');
+  await waitText(page, '#toast', 'καταχωρήθηκε');
+  ok(!(await page.textContent('.cust')).includes(who), 'paid: the next receipt without a customer');
+  await page.goto(BASE + '/web/#/partners/customers?q=' + encodeURIComponent(who));
+  await page.click(`main tbody tr.click:has-text("${who}")`);
+  await waitText(page, 'main', 'Κάρτα πόντων');
+  await waitText(page, 'main', '12 πόντοι');
+  ok((await page.textContent('main tbody')).includes('Αγορά'), 'the customer: its card, its points, their move');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/customer_points.png', fullPage: true });
+  await page.goto(BASE + '/web/#/pos');
+  await waitText(page, 'main', 'Τελευταίες αποδείξεις');
   // an order: written, an item by scan, the bread by a search, picked, ready; to the till, all of it
   await page.goto(BASE + '/web/#/orders');
   await page.waitForSelector('input[name=name]');

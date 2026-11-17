@@ -85,6 +85,16 @@ final class Db implements AutoCloseable {
         }
     }
 
+    /** a block of PL/SQL with its binds (in only) */
+    static void exec(Connection c, String plsql, Object... binds) throws SQLException {
+        try (java.sql.CallableStatement st = c.prepareCall(plsql)) {
+            for (int i = 0; i < binds.length; i++) {
+                st.setObject(i + 1, binds[i]);
+            }
+            st.execute();
+        }
+    }
+
     private static Object value(ResultSet rs, int k, int type) throws SQLException {
         switch (type) {
             case java.sql.Types.NUMERIC, java.sql.Types.DECIMAL, java.sql.Types.INTEGER, java.sql.Types.BIGINT -> {

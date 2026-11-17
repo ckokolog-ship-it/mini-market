@@ -23,6 +23,10 @@ import java.util.Map;
  *   POST /api/pos/{register}/scan {code, qty}  an item by barcode or code (a card of mobile: one, the
  *                                              oldest), or a card by its serial (a scratch ticket: its barcode)
  *   POST /api/pos/{register}/prize {amount, ticket}   a prize of a scratch ticket, paid from the drawer
+ *   POST /api/pos/{register}/customer {code}   the customer of the receipt (points): its card (a scan of it
+ *                                              at /scan works as well) or its phone; none: out of the receipt
+ *   POST /api/pos/{register}/customer/new {name, phone}   a new customer with a card, into the receipt
+ *   POST /api/pos/{register}/points {points}   points of its customer used on the receipt (0: none)
  *   POST /api/pos/{register}/lines/{id} {qty}  the quantity of a line (0: the line out)
  *   POST /api/pos/{register}/void              the draft out (an order in it: open again)
  *   POST /api/pos/{register}/order {id}        an order (Orders), all of its lines, into the receipt
@@ -145,6 +149,69 @@ final class Pos {
                     break;
                 }
                 scan(c, reg, Http.text(in, "code", true), Http.decimal(in, "qty", BigDecimal.ONE));
+                return state(c, reg);
+            }
+            case "customer" -> {
+                if (p.length == 4 && "new".equals(p[3])) {
+                    String name = Http.text(in, "name", true).trim();
+                    String phone = Http.text(in, "phone", false);
+                    if (name.isEmpty() || name.length() > 100 || (phone != null && phone.length() > 20)) {
+                        throw new Http.Fail(400, "bad_customer", "name: 1 to 100 characters, phone up to 20");
+                    }
+                    if (openZ(c, reg) == null) {
+                        throw new Http.Fail(409, "z_closed", "Το ταμείο δεν έχει ανοιχτό Ζ: «Άνοιγμα Ζ»");
+                    }
+                    long id;
+                    try (CallableStatement cs = c.prepareCall(
+                            "begin insert into mm_customer (name, phone) values (?, ?) returning id into ?; end;")) {
+                        cs.setString(1, name);
+                        cs.setString(2, phone == null || phone.isBlank() ? null : phone.trim());
+                        cs.registerOutParameter(3, Types.NUMERIC);
+                        cs.execute();
+                        id = cs.getLong(3);
+                    }
+                    Db.exec(c, "declare v varchar2(20); begin v := mm_core.new_card(?); end;", id);
+                    customer(c, reg, id);
+                    return state(c, reg);
+                }
+                if (p.length != 3) {
+                    break;
+                }
+                String code = Http.text(in, "code", false);
+                if (code == null || code.isBlank()) {
+                    if (draft(c, reg) != null) {
+                        customer(c, reg, null);
+                    }
+                    return state(c, reg);
+                }
+                Object id = Db.rows(c, "select mm_core.card_customer(?) id from dual", code).get(0).get("id");
+                if (id == null) {
+                    String phone = code.replaceAll("[^0-9+]", "");
+                    List<Map<String, Object>> r = phone.isEmpty() ? List.of() : Db.rows(c, """
+                            select id from mm_customer where active = 'Y' and card is not null
+                            and regexp_replace(phone, '[^0-9+]', '') = ? fetch first 2 rows only""", phone);
+                    if (r.size() != 1) {
+                        throw new Http.Fail(404, "not_found", r.isEmpty() ? "Δεν βρέθηκε πελάτης με κάρτα: " + code
+                                : "Πολλοί πελάτες με το τηλέφωνο " + code + ": σάρωσε την κάρτα");
+                    }
+                    id = r.get(0).get("id");
+                }
+                customer(c, reg, ((BigDecimal) id).longValue());
+                return state(c, reg);
+            }
+            case "points" -> {
+                if (p.length != 3) {
+                    break;
+                }
+                Long d = draft(c, reg);
+                if (d == null) {
+                    throw new Http.Fail(409, "no_receipt", "Δεν υπάρχει απόδειξη: σάρωσε πρώτα τα είδη");
+                }
+                try (CallableStatement cs = c.prepareCall("begin mm_core.use_points(?, ?); end;")) {
+                    cs.setLong(1, d);
+                    cs.setBigDecimal(2, Http.decimal(in, "points", BigDecimal.ZERO));
+                    cs.execute();
+                }
                 return state(c, reg);
             }
             case "lines" -> {
@@ -270,6 +337,19 @@ final class Pos {
         }
     }
 
+    /** the customer of the receipt (a new receipt if none yet); null: none */
+    private static void customer(Connection c, long reg, Long id) throws SQLException {
+        if (openZ(c, reg) == null) {
+            throw new Http.Fail(409, "z_closed", "Το ταμείο δεν έχει ανοιχτό Ζ: «Άνοιγμα Ζ»");
+        }
+        long d = draftOrNew(c, reg);
+        try (CallableStatement cs = c.prepareCall("begin mm_core.set_doc_customer(?, ?); end;")) {
+            cs.setLong(1, d);
+            cs.setObject(2, id);
+            cs.execute();
+        }
+    }
+
     private static Long openZ(Connection c, long reg) throws SQLException {
         Object z = Db.rows(c, "select mm_core.open_z_of(?) z from dual", reg).get(0).get("z");
         return z == null ? null : ((BigDecimal) z).longValue();
@@ -282,6 +362,11 @@ final class Pos {
         }
         Object v = Db.rows(c, "select mm_core.find_item(?) id from dual", code).get(0).get("id");
         if (v == null) {
+            Object who = Db.rows(c, "select mm_core.card_customer(?) id from dual", code).get(0).get("id");
+            if (who != null) {                      // the card of a customer: the customer of the receipt
+                customer(c, reg, ((BigDecimal) who).longValue());
+                return;
+            }
             Object n = Db.rows(c, "select count(*) n from mm_serial where serial = ? and status = 'A'", code).get(0).get("n");
             if (((BigDecimal) n).signum() == 0) {
                 // sold already (a scratch ticket scanned twice): say so, and where
@@ -396,8 +481,13 @@ final class Pos {
         } else {
             Map<String, Object> r = Db.rows(c, """
                     select d.id, d.net, d.vat, d.total, d.deposit, d.total - d.deposit due,
-                           (select max(x.id) from mm_reservation x where x.doc_id = d.id) order_id
+                           (select max(x.id) from mm_reservation x where x.doc_id = d.id) order_id,
+                           d.disc_amount, d.disc_reason, d.points_used, d.customer_id
                     from mm_doc d where d.id = ?""", d).get(0);
+            Object cust = r.remove("customer_id");
+            r.put("customer", cust == null ? null : Db.rows(c, """
+                    select id, name, phone, card, points, trunc(? * ?) earn
+                    from mm_customer where id = ?""", r.get("total"), points(c).get("per_euro"), cust).get(0));
             r.put("lines", Db.rows(c, """
                     select l.id, l.line_no, i.code, i.name, i.unit, i.serial_tracked, l.qty, l.price, l.discount,
                            l.total,
@@ -407,11 +497,23 @@ final class Pos {
                     where l.doc_id = ? order by l.line_no""", d));
             out.put("receipt", r);
         }
+        out.put("points", points(c));
         out.put("last", z == null ? List.of() : Db.rows(c, """
                 select id, doc_no, created_at, payment, total, status from mm_doc
                 where z_id = ? and doc_type = 'ALP' and status in ('P', 'C')
                 order by id desc fetch first 5 rows only""", z));
         return out;
+    }
+
+    /** the points: for each euro, the value of one, at least this many used (MM_SETTING, as mm_core) */
+    static Map<String, Object> points(Connection c) throws SQLException {
+        return Db.rows(c, """
+                select nvl(max(case name when 'POINTS_PER_EURO' then v end), 1) per_euro,
+                       nvl(max(case name when 'POINT_VALUE' then v end), 0.01) value,
+                       nvl(max(case name when 'POINTS_MIN' then v end), 100) min
+                from (select name, to_number(value default null on conversion error, '9999999990D9999',
+                             'NLS_NUMERIC_CHARACTERS=''.,''') v
+                      from mm_setting where name in ('POINTS_PER_EURO', 'POINT_VALUE', 'POINTS_MIN'))""").get(0);
     }
 
     private static Map<String, Object> settings(Connection c) throws SQLException {
@@ -428,8 +530,12 @@ final class Pos {
     private static Object receipt(Connection c, Api.User u, long reg, long id) throws SQLException {
         List<Map<String, Object>> h = Db.rows(c, """
                 select d.id, d.doc_no, d.created_at, d.status, d.payment, d.net, d.vat, d.total, d.deposit,
-                       d.total - d.deposit due, r.code register, r.name register_name, z.z_no
+                       d.total - d.deposit due, r.code register, r.name register_name, z.z_no,
+                       d.disc_amount, d.disc_reason, d.points_used, cu.name customer, cu.card, cu.points,
+                       (select nvl(sum(m.points), 0) from mm_points m where m.doc_id = d.id
+                          and m.note = 'Αγορά') points_earned
                 from mm_doc d join mm_register r on r.id = d.register_id left join mm_z z on z.id = d.z_id
+                left join mm_customer cu on cu.id = d.customer_id
                 where d.id = ? and d.register_id = ? and d.doc_type = 'ALP' and d.status in ('P', 'C')""", id, reg);
         if (h.isEmpty()) {
             throw new Http.Fail(404, "not_found", "no such receipt of this register: " + id);

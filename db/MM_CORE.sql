@@ -159,6 +159,15 @@ create or replace package mm_core as
   -- those without a supplier yet. How many lines went in
   function order_missing(p_supplier_id number default null) return number;
 
+  -- the points of the retail customers (MM_POINTS): a card for a customer (EAN-13 2990 + its id), the
+  -- customer of a card; the customer of a draft receipt (null: none, its points not used); points used
+  -- on it (0: none): at least POINTS_MIN, not more than it has, as the discount of the receipt
+  -- (POINT_VALUE euros each). Posted: its points used taken, POINTS_PER_EURO for each euro given
+  function new_card(p_customer_id number) return varchar2;
+  function card_customer(p_card varchar2) return number;
+  procedure set_doc_customer(p_doc_id number, p_customer_id number);
+  procedure use_points(p_doc_id number, p_points number);
+
   -- the backup of the database (db/backup.ps1) says how it went: p_ok Y (p_text its file) or N (p_text
   -- the error); MM_BACKUP_STATE tells the pages when the last good one is too old
   procedure backup_done(p_ok varchar2, p_text varchar2);
@@ -172,6 +181,8 @@ create or replace package body mm_core as
   begin
     raise_application_error(-20100 - p_no, 'MM-' || to_char(100 + p_no) || ': ' || p_text);
   end;
+
+  procedure points_of(p_doc_id number);     -- (below: the points of a receipt posted)
 
   function tracked(p_item_id number) return boolean is
     v varchar2(1);
@@ -745,6 +756,7 @@ create or replace package body mm_core as
               case when t.stock_sign > 0 then -(d.total - d.deposit) else d.total - d.deposit end, p_doc_id);
     end if;
     update mm_reservation set status = 'D' where doc_id = p_doc_id;
+    points_of(p_doc_id);                  -- a receipt of a customer with a card: its points
     -- myDATA: an invoice of a sale to be sent at once, when the shop wants it so (MM_SETTING MYDATA_AUTO Y)
     if t.mydata_type is not null then
       select max(value) into auto_ from mm_setting where name = 'MYDATA_AUTO';
@@ -803,6 +815,11 @@ create or replace package body mm_core as
     select register_id, z_id, case kind when 'SALE' then 'REFUND' else 'SALE' end, payment, -amount, doc_id, 'Ακύρωση'
     from mm_cash_move where doc_id = p_doc_id and kind in ('SALE', 'REFUND');
     update mm_reservation set status = 'O', doc_id = null where doc_id = p_doc_id;
+    -- its points back (what it took, what it gave)
+    for m in (select customer_id, sum(points) points from mm_points where doc_id = p_doc_id group by customer_id) loop
+      insert into mm_points (customer_id, doc_id, points, note) values (m.customer_id, p_doc_id, -m.points, 'Ακύρωση');
+      update mm_customer set points = points - m.points where id = m.customer_id;
+    end loop;
     update mm_doc set status = 'C' where id = p_doc_id;
   end;
 
@@ -1260,7 +1277,8 @@ create or replace package body mm_core as
     if (nvl(p_pct, 0) > 0 or nvl(p_amount, 0) > 0) and trim(p_reason) is null then
       fail(59, 'Η έκπτωση στο σύνολο θέλει αιτιολογία');
     end if;
-    update mm_doc set disc_pct = nvl(p_pct, 0), disc_amount = nvl(p_amount, 0), disc_reason = trim(p_reason)
+    update mm_doc set disc_pct = nvl(p_pct, 0), disc_amount = nvl(p_amount, 0), disc_reason = trim(p_reason),
+                      points_used = 0      -- (use_points sets its own after)
     where id = p_doc_id;
     recalc(p_doc_id);
   end;
@@ -1916,6 +1934,122 @@ create or replace package body mm_core as
       end if;
     end loop;
     return n;
+  end;
+
+  -- ---------------------------------------------------------------------------------------------
+  -- the points of the retail customers
+  function setting_num(p_name varchar2, p_default number) return number is
+    v varchar2(400);
+  begin
+    select max(value) into v from mm_setting where name = p_name;
+    return nvl(to_number(v default null on conversion error, '9999999990D9999', 'NLS_NUMERIC_CHARACTERS=''.,'''), p_default);
+  end;
+
+  function new_card(p_customer_id number) return varchar2 is
+    c mm_customer%rowtype;
+    v varchar2(13);
+    s number := 0;
+  begin
+    begin
+      select * into c from mm_customer where id = p_customer_id for update;
+    exception
+      when no_data_found then fail(91, 'Δεν υπάρχει πελάτης ' || p_customer_id);
+    end;
+    if c.card is not null then
+      return c.card;
+    end if;
+    v := '2990' || lpad(p_customer_id, 8, '0');
+    for i in 1 .. 12 loop
+      s := s + to_number(substr(v, i, 1)) * case mod(i, 2) when 1 then 1 else 3 end;
+    end loop;
+    v := v || mod(10 - mod(s, 10), 10);
+    update mm_customer set card = v where id = p_customer_id;
+    return v;
+  end;
+
+  function card_customer(p_card varchar2) return number is
+    v number;
+  begin
+    select min(id) into v from mm_customer where card = trim(p_card) and active = 'Y';
+    return v;
+  end;
+
+  procedure set_doc_customer(p_doc_id number, p_customer_id number) is
+    d mm_doc%rowtype := draft(p_doc_id);
+  begin
+    if d.doc_type <> 'ALP' then
+      fail(91, 'Πελάτης με κάρτα μπαίνει μόνο σε απόδειξη λιανικής');
+    end if;
+    if d.points_used > 0 then
+      set_doc_discount(p_doc_id);           -- its points: not used any more
+    end if;
+    update mm_doc set customer_id = p_customer_id, points_used = 0 where id = p_doc_id;
+  end;
+
+  procedure use_points(p_doc_id number, p_points number) is
+    d mm_doc%rowtype := draft(p_doc_id);
+    has number;
+    gross number;
+    n number := nvl(p_points, 0);
+  begin
+    if d.customer_id is null then
+      fail(91, 'Η απόδειξη δεν έχει πελάτη: σάρωσε την κάρτα του');
+    end if;
+    if n <> trunc(n) or n < 0 then
+      fail(91, 'Πόντοι: ακέραιος, 0 ή περισσότεροι');
+    end if;
+    if n = 0 then
+      if d.points_used > 0 then
+        set_doc_discount(p_doc_id);
+      end if;
+      return;
+    end if;
+    select points into has from mm_customer where id = d.customer_id;
+    if n < setting_num('POINTS_MIN', 100) then
+      fail(91, 'Εξαργύρωση από ' || setting_num('POINTS_MIN', 100) || ' πόντους και πάνω');
+    end if;
+    if n > has then
+      fail(91, 'Ο πελάτης έχει ' || has || ' πόντους');
+    end if;
+    -- not more than the receipt (its lines with their promotions, before any discount of its own)
+    update mm_doc set disc_pct = 0, disc_amount = 0, disc_reason = null where id = p_doc_id;
+    recalc(p_doc_id);
+    select total into gross from mm_doc where id = p_doc_id;
+    if round(n * setting_num('POINT_VALUE', 0.01), 2) > gross then
+      fail(91, 'Οι πόντοι (' || to_char(round(n * setting_num('POINT_VALUE', 0.01), 2), 'FM9999990D00') ||
+               ' €) είναι πάνω από το ποσό της απόδειξης');
+    end if;
+    set_doc_discount(p_doc_id, 0, round(n * setting_num('POINT_VALUE', 0.01), 2), 'Πόντοι ' || n);
+    update mm_doc set points_used = n where id = p_doc_id;
+  end;
+
+  -- a receipt posted: its points used out of the customer, its points in
+  procedure points_of(p_doc_id number) is
+    d mm_doc%rowtype;
+    has number;
+    gave number;
+    earned number;
+  begin
+    select * into d from mm_doc where id = p_doc_id;
+    if d.doc_type <> 'ALP' or d.customer_id is null then
+      return;
+    end if;
+    select points into has from mm_customer where id = d.customer_id for update;
+    if d.points_used > 0 then
+      select nvl(sum(doc_disc), 0) into gave from mm_doc_line where doc_id = p_doc_id;
+      if d.points_used > has then
+        fail(91, 'Ο πελάτης έχει ' || has || ' πόντους, όχι ' || d.points_used);
+      end if;
+      if gave <> round(d.points_used * setting_num('POINT_VALUE', 0.01), 2) then
+        fail(91, 'Οι πόντοι είναι πάνω από το ποσό της απόδειξης: λιγότεροι πόντοι');
+      end if;
+      insert into mm_points (customer_id, doc_id, points, note) values (d.customer_id, p_doc_id, -d.points_used, 'Εξαργύρωση');
+    end if;
+    earned := trunc(d.total * setting_num('POINTS_PER_EURO', 1));
+    if earned <> 0 then
+      insert into mm_points (customer_id, doc_id, points, note) values (d.customer_id, p_doc_id, earned, 'Αγορά');
+    end if;
+    update mm_customer set points = points - d.points_used + earned where id = d.customer_id;
   end;
 
   procedure backup_done(p_ok varchar2, p_text varchar2) is

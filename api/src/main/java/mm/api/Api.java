@@ -226,6 +226,12 @@ final class Api {
             need(u, "MANAGER");
             return Scratch.post(c, p, in);
         }
+        if ("customers".equals(p[0]) && n == 3 && "card".equals(p[2])) {   // a card for the points
+            need(u, "MANAGER");
+            long id = Http.id(p[1]);
+            Db.exec(c, "declare v varchar2(20); begin v := mm_core.new_card(?); end;", id);
+            return partner(c, "mm_customer", "C", id);
+        }
         if ("counts".equals(p[0])) {
             if (n == 1) {
                 need(u, "MANAGER");
@@ -460,6 +466,13 @@ final class Api {
                 select balance from table(mm_ledger.partner_rows(?, ?, date '1900-01-01', trunc(sysdate)))
                 order by seq desc fetch first 1 rows only""", kind, id);
         r.put("balance", b.isEmpty() ? null : b.get(0).get("balance"));
+        if ("C".equals(kind)) {                // its card and its points, the last moves of them
+            r.putAll(Db.rows(c, "select card, points from mm_customer where id = ?", id).get(0));
+            r.put("point_moves", Db.rows(c, """
+                    select m.move_at, m.points, m.note, d.doc_no, d.id doc_id
+                    from mm_points m left join mm_doc d on d.id = m.doc_id
+                    where m.customer_id = ? order by m.id desc fetch first 30 rows only""", id));
+        }
         return r;
     }
 

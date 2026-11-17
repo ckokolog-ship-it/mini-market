@@ -251,3 +251,18 @@ table.pairs tr.neg td, table.pairs tr.neg th { color: var(--bad, #b00020); font-
   .day-grid { grid-template-columns: 1fr 1fr 1fr; }
   .day-box { break-inside: avoid; }
 }
+
+/* the card of the points of a customer: the size of a bank card (85,6 x 54 mm); printed alone on its page */
+.loyalty-card { width: 85.6mm; height: 54mm; box-sizing: border-box; padding: 4mm 5mm; border: 1px solid var(--line);
+                border-radius: 3mm; background: #fff; color: #000; display: flex; flex-direction: column; }
+.loyalty-card .lc-title { font-weight: 700; font-size: 11pt; }
+.loyalty-card .lc-name { font-size: 10pt; margin: 1mm 0 auto; }
+.loyalty-card .bc svg { width: 100%; height: 16mm; display: block; }
+.loyalty-card .digits { text-align: center; font: 9pt/1.2 "Courier New", monospace; letter-spacing: 1px; }
+#cardprint { position: absolute; left: -10000px; top: 0; }
+.cust { align-items: center; }
+@media print {
+  body.printing-card > *:not(#cardprint) { display: none !important; }
+  body.printing-card { background: #fff; }
+  body.printing-card #cardprint { position: static; padding: 10mm; }
+}

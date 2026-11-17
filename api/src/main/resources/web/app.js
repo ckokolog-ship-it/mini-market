@@ -393,9 +393,49 @@ async function partnerPage(kind, id) {
           .flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v || '')]),
         el('dt', {}, kind === 'customers' ? 'Υπόλοιπο (χρωστάει)' : 'Υπόλοιπο (του χρωστάμε)'),
         el('dd', { class: 'big' + (x.balance < 0 ? ' neg' : '') }, money(x.balance)))),
+      kind === 'customers' ? pointsBox(x) : null,
       el('div', { class: 'row' }, el('button', { onclick: () => history.back() }, 'Πίσω'),
         el('button', { class: 'primary', onclick: () => { location.hash = `#/ledger/${who}/${x.id}`; } }, 'Καρτέλα')));
   } catch (e) { fail(e); }
+}
+
+// -- the points of a customer: its card (a barcode, printed the size of a bank card), its points, their
+// moves; a card for one without
+function pointsBox(x) {
+  const box = el('div', { class: 'panel' }, el('h2', {}, 'Κάρτα πόντων'));
+  if (!x.card) {
+    box.append(el('p', { class: 'muted' }, 'Ο πελάτης δεν έχει κάρτα πόντων.'),
+      el('button', {
+        type: 'button',
+        onclick: async () => {
+          try { await api(`customers/${x.id}/card`, {}); toast('Νέα κάρτα'); render(); } catch (e) { fail(e); }
+        },
+      }, 'Νέα κάρτα'));
+    return box;
+  }
+  box.append(el('div', { class: 'row' }, loyaltyCard(x.name, x.card),
+    el('div', {}, el('p', { class: 'big' }, `${x.points} πόντοι`),
+      el('button', { type: 'button', onclick: () => printCard(x.name, x.card) }, 'Εκτύπωση κάρτας'))),
+  x.point_moves.length ? table([['Ημέρα'], ['Απόδειξη'], ['Κίνηση'], ['Πόντοι', 'num']],
+    x.point_moves.map((m) => el('tr', {}, el('td', {}, day(m.move_at)), el('td', {}, m.doc_no ? 'ΑΛΠ ' + m.doc_no : ''),
+      el('td', {}, m.note || ''), num(m.points, (v) => (v > 0 ? '+' : '') + v))))
+    : el('p', { class: 'muted' }, 'Καμία κίνηση πόντων ακόμα.'));
+  return box;
+}
+function loyaltyCard(name, card) {
+  const b = itemBars({ barcode: card, code: card });
+  return el('div', { class: 'loyalty-card' }, el('div', { class: 'lc-title' }, 'Κάρτα πόντων'),
+    el('div', { class: 'lc-name' }, name), el('div', { class: 'bc' }, barsSvg(b.bars), el('div', { class: 'digits' }, b.text)));
+}
+function printCard(name, card) {
+  const old = document.getElementById('cardprint');
+  if (old) old.remove();
+  document.body.classList.remove('printing-doc', 'printing-receipt');
+  document.body.append(el('div', { id: 'cardprint' }, loyaltyCard(name, card)));
+  document.body.classList.add('printing-card');
+  const done = () => { document.body.classList.remove('printing-card'); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
 }
 
 // -- a ledger: the carry-over, the moves with the running balance, the totals ----------------------
@@ -949,6 +989,7 @@ async function posPage(params) {
   const given = el('input', { name: 'given', type: 'number', step: '0.01', min: '0', class: 'w8' });
   const change = el('p', { class: 'big' });
   const last = el('div');
+  const cust = el('div', { class: 'panel row cust' });
   let st = null;
   const run = async (path, body) => {
     try {
@@ -1000,6 +1041,7 @@ async function posPage(params) {
     scan.hidden = !z;
     pay.hidden = !st.receipt;
     const r = st.receipt;
+    drawCustomer(r);
     total.textContent = 'Σύνολο: ' + money(r ? r.total : 0)
       + (r && r.deposit > 0 ? ` · προκαταβολή ${money(r.deposit)} · πληρωτέο ${money(r.due)}` : '');
     orderText.textContent = r && r.order_id ? `Παραγγελία ${r.order_id}` : '';
@@ -1036,6 +1078,46 @@ async function posPage(params) {
     },
   }, el('label', {}, 'Σάρωση (Enter)', code), camera(code), el('label', {}, 'Ποσότητα', n), el('button', { class: 'primary', type: 'submit' }, 'Βάλε'),
   el('button', { type: 'button', onclick: () => pickOrder() }, 'Παραγγελία'), orderText, total);
+  // the customer of the receipt (its points): a scan of its card (here or in the scan above) or its phone;
+  // a new one with a card; its points used as the discount of the receipt
+  const drawCustomer = (r) => {
+    cust.hidden = !st.z;
+    const c = r && r.customer;
+    const pts = st.points;
+    if (!c) {
+      const who = el('input', { name: 'customer', autocomplete: 'off', placeholder: 'κάρτα ή τηλέφωνο', class: 'w11' });
+      const nm = el('input', { name: 'new_name', placeholder: 'ονοματεπώνυμο' });
+      const ph = el('input', { name: 'new_phone', type: 'tel', placeholder: 'τηλέφωνο', class: 'w11' });
+      cust.replaceChildren(
+        el('form', { class: 'row', onsubmit: (ev) => { ev.preventDefault(); if (who.value.trim()) run('/customer', { code: who.value.trim() }); } },
+          el('label', {}, 'Πελάτης με κάρτα', who), el('button', { type: 'submit' }, 'Πελάτης')),
+        el('details', {}, el('summary', {}, 'Νέος πελάτης με κάρτα'),
+          el('form', {
+            class: 'row',
+            onsubmit: async (ev) => {
+              ev.preventDefault();
+              const s2 = await run('/customer/new', { name: nm.value.trim(), phone: ph.value.trim() || null });
+              if (s2 && s2.receipt && s2.receipt.customer) {
+                const k = s2.receipt.customer;
+                toast(`Νέα κάρτα ${k.card} για ${k.name}`);
+                if (confirm('Εκτύπωση της κάρτας;')) printCard(k.name, k.card);
+              }
+            },
+          }, el('label', { class: 'grow' }, 'Όνομα', nm), el('label', {}, 'Τηλέφωνο', ph), el('button', { type: 'submit' }, 'Νέα κάρτα'))));
+      return;
+    }
+    const most = Math.min(c.points, Math.floor((r.total + (r.points_used > 0 ? r.disc_amount : 0)) / pts.value + 1e-9));
+    const use = el('input', { name: 'points', type: 'number', min: '0', step: '1', class: 'w6', value: r.points_used || (most >= pts.min ? most : '') });
+    cust.replaceChildren(...[                 // (replaceChildren writes a null as text: out first)
+      el('div', { class: 'grow' }, el('strong', {}, c.name), ` · κάρτα ${c.card} · ${c.points} πόντοι`,
+        el('div', { class: 'muted' }, `Με αυτή την απόδειξη: +${c.earn} πόντοι`
+          + (r.points_used > 0 ? ` · εξαργύρωση ${r.points_used} πόντων = ${money(r.disc_amount)} €` : ''))),
+      c.points >= pts.min ? el('label', {}, `Πόντοι (από ${pts.min})`, use) : null,
+      c.points >= pts.min ? el('button', { type: 'button', onclick: () => run('/points', { points: Number(use.value || 0) }) }, 'Εξαργύρωση') : null,
+      r.points_used > 0 ? el('button', { type: 'button', onclick: () => run('/points', { points: 0 }) }, 'Χωρίς πόντους') : null,
+      el('button', { type: 'button', class: 'danger', 'aria-label': 'Χωρίς πελάτη', onclick: () => run('/customer', { code: '' }) }, '×'),
+    ].filter(Boolean));
+  };
   // an order into the receipt, all of it: the open ones of today and before, the ready ones first
   const loadOrder = async (id) => {
     const r = await run('/order', { id });
@@ -1108,7 +1190,7 @@ async function posPage(params) {
       }, 'Αποθήκευση')));
   }
   show(el('h1', {}, 'Ταμείο'), el('div', { class: 'panel' }, el('div', { class: 'row' }, el('label', {}, 'Ταμείο', pick), zText), zBox),
-    scan, orders, lines, pay, change, el('label', { class: 'check' }, autoPrint, 'Εκτύπωση απόδειξης αυτόματα'), last, setup);
+    scan, cust, orders, lines, pay, change, el('label', { class: 'check' }, autoPrint, 'Εκτύπωση απόδειξης αυτόματα'), last, setup);
   await load();
   if (params && params.get('order') && st && st.z) loadOrder(Number(params.get('order')));
 }
@@ -1151,6 +1233,7 @@ async function printReceipt(reg, id, extra = {}) {
     r.lines.map((x) => el('div', { class: 'rc-line' }, el('div', {}, x.name),
       pair(`${nfQty.format(x.qty)} x ${money(x.price)}` + (x.discount > 0 ? ` -${nfQty.format(x.discount)}%` : ''), money(x.total) + ' ' + x.vat_code))),
     el('hr'),
+    r.disc_amount > 0 ? pair('Έκπτωση' + (r.disc_reason ? ' (' + r.disc_reason + ')' : ''), '-' + money(r.disc_amount)) : null,
     pair('ΣΥΝΟΛΟ', money(r.total) + ' €', 'rc-total'),
     r.deposit > 0 ? [pair('Προκαταβολή', money(r.deposit)), pair('Πληρωτέο', money(r.due))] : null,
     pair(r.payment === 'CARD' ? 'Κάρτα' : 'Μετρητά', money(r.due)),
@@ -1159,6 +1242,9 @@ async function printReceipt(reg, id, extra = {}) {
     r.vat_rows.map((v) => pair(`ΦΠΑ ${v.vat_code} ${nfQty.format(v.vat_rate)}%`, `${money(v.net)} + ${money(v.vat)}`)),
     r.cards.length ? [el('hr'), r.cards.map((c) => el('div', { class: 'rc-card' }, el('div', {}, c.name), pair('Serial', c.serial),
       c.pin ? pair('PIN', c.pin, 'rc-pin') : null))] : null,
+    r.card ? [el('hr'), el('div', {}, r.customer), pair('Κάρτα', r.card),
+      r.points_used > 0 ? pair('Πόντοι που εξαργυρώθηκαν', '-' + r.points_used) : null,
+      pair('Πόντοι από αυτή την αγορά', '+' + r.points_earned), pair('Πόντοι τώρα', String(r.points))] : null,
     el('div', { class: 'rc-foot' }, lines(r.footer)));
   const old = $('#receipt');
   if (old) old.remove();
@@ -1172,7 +1258,7 @@ async function printReceipt(reg, id, extra = {}) {
     }
     sheet.insertRule(`@page receipt { size: 80mm ${mm}mm; margin: 0; }`, sheet.cssRules.length);
   }
-  document.body.classList.remove('printing-doc');         // (a document before it, with no afterprint)
+  document.body.classList.remove('printing-doc', 'printing-card');   // (one before it, with no afterprint)
   document.body.classList.add('printing-receipt');
   const done = () => { document.body.classList.remove('printing-receipt'); window.removeEventListener('afterprint', done); };
   window.addEventListener('afterprint', done);
@@ -1226,7 +1312,7 @@ async function printDoc(d) {
   const old = $('#docprint');
   if (old) old.remove();
   document.body.append(box);
-  document.body.classList.remove('printing-receipt');     // (a receipt before it, with no afterprint)
+  document.body.classList.remove('printing-receipt', 'printing-card');   // (one before it, with no afterprint)
   document.body.classList.add('printing-doc');
   const done = () => { document.body.classList.remove('printing-doc'); window.removeEventListener('afterprint', done); };
   window.addEventListener('afterprint', done);

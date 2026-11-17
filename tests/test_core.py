@@ -126,6 +126,8 @@ def cleanup(c):
     c.execute("delete from mm_count where name like 'TST %'")
     c.execute(f"delete from mm_cash_move where doc_id in ({TEST_DOCS}) "
               "or register_id in (select id from mm_register where code = 'TST')")
+    c.execute(f"delete from mm_points where doc_id in ({TEST_DOCS}) "
+              "or customer_id in (select id from mm_customer where name like 'Test %')")
     c.execute(f'delete from mm_doc where id in ({TEST_DOCS})')
     c.execute("delete from mm_z where register_id in (select id from mm_register where code = 'TST')")
     c.execute("delete from mm_register where code = 'TST'")
