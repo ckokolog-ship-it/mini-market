@@ -32,6 +32,7 @@ import java.util.Optional;
  *                                              with ?limit=&offset= a page of its moves, its carry_in, carry_out
  *   /api/reports/sales   /api/reports/vat   /api/reports/min-stock
  *   /api/scratch/...                           the scratch tickets in packs: see Scratch (MANAGER)
+ *   /api/warehouses                            the warehouses (the main one first); an item: its stock in each
  *   /api/expiry?days=   POST /api/expiry/withdraw   the goods expiring, expired; one taken out (Expiry.java)
  *   /api/chart?to=&days=                       the charts of the sales: by day (and a year before), by hour
  *                                              (MANAGER, Chart.java)
@@ -391,6 +392,13 @@ final class Api {
                     return Scratch.get(c);
                 }
             }
+            case "warehouses" -> {          // the warehouses: the main one first
+                if (n == 1) {
+                    return Map.of("rows", Db.rows(c, """
+                            select id, code, name, main, active from mm_warehouse
+                            order by case main when 'Y' then 0 else 1 end, code"""));
+                }
+            }
             case "expiry" -> {
                 need(u, "MANAGER");
                 if (n == 1) {
@@ -476,6 +484,12 @@ final class Api {
                 join mm_item_avail a on a.item_id = i.id
                 where i.id = ?""", v);
         Map<String, Object> out = rows.get(0);
+        // its stock in each warehouse (the main one first)
+        out.put("warehouses", Db.rows(c, """
+                select w.id, w.code, w.name, w.main, nvl(s.stock, 0) stock
+                from mm_warehouse w left join mm_warehouse_stock s on s.warehouse_id = w.id and s.item_id = ?
+                where w.active = 'Y' or nvl(s.stock, 0) <> 0
+                order by case w.main when 'Y' then 0 else 1 end, w.code""", v));
         // FIFO: its layers with something left (each receipt at its cost), the value of its stock
         out.put("fifo", Db.rows(c, """
                 select f.in_at, f.qty, f.unit_cost, f.left_, d.id doc_id, d.doc_type, d.doc_no

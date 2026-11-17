@@ -135,6 +135,7 @@ def cleanup(c):
     c.execute(f'delete from mm_doc where id in ({TEST_DOCS})')
     c.execute("delete from mm_z where register_id in (select id from mm_register where code = 'TST')")
     c.execute("delete from mm_register where code = 'TST'")
+    c.execute("delete from mm_warehouse where code like 'TST%'")
     # the totals of the months of the test items (row by row: MM_MONTHS.REBUILD), of its partners. A
     # row of MM_ITEM_MONTH changed by the trigger of the moves above (reservable) is deleted only after
     # that is committed (else ORA-55754)
