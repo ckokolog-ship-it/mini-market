@@ -176,7 +176,8 @@ def test_plsql_of_the_forms(name):
 
 
 def test_items_form_stock_is_not_a_column():
-    items = {i.get('Name'): i for i in xml_of('MM_ITEMS').iter('{%s}Item' % NS['f'])}
+    item_block = [b for b in xml_of('MM_ITEMS').iter('{%s}Block' % NS['f']) if b.get('Name') == 'ITEM'][0]
+    items = {i.get('Name'): i for i in item_block.iter('{%s}Item' % NS['f'])}
     assert items['STOCK'].get('DatabaseItem') == 'false'           # reservable: never written
     assert items['CAT_NAME'].get('LovName') == 'LOV_CAT' and items['CAT_NAME'].get('ValidateFromList') == 'true'
     assert items['ACTIVE'].get('ItemType') == 'Check Box' and items['ACTIVE'].get('InitializeValue') == 'Y'
