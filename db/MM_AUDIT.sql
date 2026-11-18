@@ -16,6 +16,8 @@
 create or replace package mm_audit as
   procedure log(p_action varchar2, p_ref_type varchar2 default null, p_ref_id number default null,
                 p_ref_text varchar2 default null, p_detail varchar2 default null);
+  -- who is doing it: the user of the pages or the forms (CLIENT_IDENTIFIER), else of the database
+  function who return varchar2;
   -- a change of a value for the detail: 'name: old → new' (nothing when the same)
   function diff(p_name varchar2, p_old varchar2, p_new varchar2) return varchar2;
   procedure purge(p_days number);
@@ -23,11 +25,16 @@ end mm_audit;
 /
 
 create or replace package body mm_audit as
+  function who return varchar2 is
+  begin
+    return substr(nvl(sys_context('USERENV', 'CLIENT_IDENTIFIER'), sys_context('USERENV', 'SESSION_USER')), 1, 64);
+  end;
+
   procedure log(p_action varchar2, p_ref_type varchar2 default null, p_ref_id number default null,
                 p_ref_text varchar2 default null, p_detail varchar2 default null) is
   begin
     insert into mm_audit_log (username, source, action, ref_type, ref_id, ref_text, detail)
-    values (substr(nvl(sys_context('USERENV', 'CLIENT_IDENTIFIER'), sys_context('USERENV', 'SESSION_USER')), 1, 64),
+    values (who,
             substr(sys_context('USERENV', 'MODULE'), 1, 64), p_action, p_ref_type, p_ref_id,
             substr(p_ref_text, 1, 100), substr(p_detail, 1, 1000));
   end;
@@ -56,6 +63,27 @@ select id, at, username, source, action, ref_type, ref_id, ref_text, detail from
 union all
 select -l.id, cast(l.at as timestamp), l.username, l.client, 'AUTH_' || l.event, 'USER', null, l.username, null
 from mm_auth_log l;
+
+-- who made a document, who posted it (the cashier of a receipt)
+create or replace trigger mm_doc_who
+before insert or update of status on mm_doc
+for each row
+begin
+  if inserting then
+    :new.created_by := nvl(:new.created_by, mm_audit.who);
+  elsif :old.status = 'D' and :new.status = 'P' then
+    :new.posted_by := mm_audit.who;
+  end if;
+end;
+/
+
+-- (the documents posted before: who, from the history, where it has it)
+merge into mm_doc d
+using (select ref_id, max(username) keep (dense_rank last order by id) username from mm_audit_log
+       where action = 'DOC_POST' group by ref_id) a
+on (d.id = a.ref_id)
+when matched then update set d.posted_by = a.username where d.posted_by is null;
+commit;
 
 create or replace trigger mm_doc_audit
 after update of status or delete on mm_doc

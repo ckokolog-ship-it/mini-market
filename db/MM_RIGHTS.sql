@@ -406,6 +406,7 @@ begin
   scr('CHART', 'REPORTS', 'Γράφημα πωλήσεων', '#/chart', null, 20);
   scr('REP_SALES', 'REPORTS', 'Πωλήσεις', '#/reports/sales', null, 30);
   scr('REP_VAT', 'REPORTS', 'ΦΠΑ', '#/reports/vat', null, 40);
+  scr('REP_SALES_BY', 'REPORTS', 'Πωλήσεις ανά κατάστημα και ταμία', '#/reports/sales-by', null, 35);
   scr('REP_MIN_STOCK', 'REPORTS', 'Ελάχιστο απόθεμα', '#/reports/min-stock', null, 50, 'A:ORDER:Παραγγελίες σε προμηθευτές');
   scr('TRIAL_ITEMS', 'REPORTS', 'Ισοζύγιο ειδών', '#/reports/trial-items', null, 60);
   scr('TRIAL_CUSTOMERS', 'REPORTS', 'Ισοζύγιο πελατών', '#/reports/trial-customers', null, 70);
@@ -420,7 +421,7 @@ begin
 
   grants('CASHIER', 'POS:W;POS.WAREHOUSE:N;POS.SETTINGS:N;ORDERS:W;ORDERS.NOTE:N;RESERVATIONS:W;ITEMS:R;ITEMS.COST:N;ITEMS.FIFO:N;'
                     || 'LABELS:W;COUNTS:W;COUNTS.CREATE:N;COUNTS.POST:N;COUNTS.CANCEL:N');
-  grants('MANAGER', 'POS:W;ORDERS:W;RESERVATIONS:W;PROMOS:W;ITEMS:W;VARIANTS:W;KITS:W;CARDS:W;LABELS:W;COUNTS:W;'
+  grants('MANAGER', 'REP_SALES_BY:R;POS:W;ORDERS:W;RESERVATIONS:W;PROMOS:W;ITEMS:W;VARIANTS:W;KITS:W;CARDS:W;LABELS:W;COUNTS:W;'
                     || 'SCRATCH:W;EXPIRY:W;WAREHOUSES:W;DOCS:W;PAYMENTS:W;CUSTOMERS:W;SUPPLIERS:W;LEDGERS:W;'
                     || 'DAY:R;CHART:R;REP_SALES:R;REP_VAT:R;REP_MIN_STOCK:W;TRIAL_ITEMS:R;TRIAL_CUSTOMERS:R;'
                     || 'TRIAL_SUPPLIERS:R;PROFIT:R;STOCK_VALUE:W;REPORTS_PDF:R');

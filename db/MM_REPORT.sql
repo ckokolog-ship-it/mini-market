@@ -92,6 +92,18 @@ from mm_item i
 join mm_category c on c.id = i.category_id
 where i.active = 'Y' and i.is_model = 'N' and i.kit = 'N' and i.stock + 0 < i.min_stock;
 
+-- the sales by document (receipts, invoices, less credit notes): its day, its warehouse, its register, who posted
+-- it, its value, what it cost (FIFO, the last cost); the reports by store, by register, by cashier
+create or replace view mm_sales_doc as
+select d.id doc_id, d.doc_date day, d.doc_type,
+       nvl(d.warehouse_id, (select min(id) from mm_warehouse where main = 'Y')) warehouse_id, d.register_id,
+       nvl(d.posted_by, '-') posted_by, t.vat_sign docs, t.vat_sign * d.net net, t.vat_sign * d.total total,
+       nvl((select sum(m.cost) from mm_move_cost m where m.doc_id = d.id), 0) cost_fifo,
+       nvl((select sum(m.cost_last) from mm_move_cost m where m.doc_id = d.id), 0) cost_last
+from mm_doc d
+join mm_doc_type t on t.code = d.doc_type
+where d.status = 'P' and t.side = 'S' and t.vat_sign <> 0;
+
 create or replace package mm_report as
   -- the title of a report: SALES, VAT, MIN_STOCK
   function title(p_report varchar2) return varchar2;

@@ -192,6 +192,7 @@ final class Rights {
     static String report(String name) {
         return switch (name) {
             case "sales" -> "REP_SALES";
+            case "sales-by" -> "REP_SALES_BY";
             case "vat" -> "REP_VAT";
             case "min-stock" -> "REP_MIN_STOCK";
             case "trial-items" -> "TRIAL_ITEMS";
@@ -220,6 +221,12 @@ final class Rights {
     /** what a GET returns, without the fields the user may not read (null) */
     @SuppressWarnings("unchecked")
     static Object mask(Api.User u, String[] p, Object body) {
+        if ("reports".equals(p[0]) && p.length == 2 && "sales-by".equals(p[1])) {
+            if (!may(u, "PROFIT", null, "R")) {
+                hideIn(body, java.util.Set.of("cost", "profit"));      // (the costs: with the gross profit)
+            }
+            return body;
+        }
         String screen;
         Map<String, String[]> keys;
         switch (p[0]) {

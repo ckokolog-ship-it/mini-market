@@ -52,6 +52,15 @@ final class Day {
                 select alp_docs, alp_total, tpy_total, ppy_total, total from mm_sales_day where day = ?""", d);
         out.put("sales", s.isEmpty() ? Map.of("alp_docs", 0, "alp_total", 0, "tpy_total", 0, "ppy_total", 0, "total", 0)
                 : s.get(0));
+        // the sales of the day by store and by cashier (MM_SALES_DOC)
+        out.put("by_warehouse", Db.rows(c, """
+                select w.code, w.name, sum(s.docs) docs, sum(s.total) total
+                from mm_sales_doc s join mm_warehouse w on w.id = s.warehouse_id
+                where s.day = ? group by w.code, w.name order by sum(s.total) desc""", d));
+        out.put("by_user", Db.rows(c, """
+                select s.posted_by username, nvl(max(u.full_name), s.posted_by) name, sum(s.docs) docs, sum(s.total) total
+                from mm_sales_doc s left join mm_user u on u.username = s.posted_by
+                where s.day = ? group by s.posted_by order by sum(s.total) desc""", d));
         // the gross profit of the day (the sales less what they cost, as the shop counts its costs)
         String method = Api.costMethod(c, null);
         Map<String, Object> profit = new LinkedHashMap<>(Db.rows(c, """
