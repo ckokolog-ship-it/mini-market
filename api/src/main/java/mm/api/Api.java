@@ -44,6 +44,8 @@ import java.util.Optional;
  *   POST /api/users/{id} {full_name, role, active, password, unlock, warehouse_id, register_id}
  *                                              the users and where each works: its store, its register
  *                                              (mm_auth.set_place; the till: mm_auth.may_use) (ADMIN)
+ *   /api/audit?from=&to=&user=&action=&q=&limit=&offset=   the history of what was done and the logins
+ *                                              (MM_AUDIT_ALL), the newest first (AUDIT)
  *   /api/expiry?days=   POST /api/expiry/withdraw   the goods expiring, expired; one taken out (Expiry.java)
  *   /api/chart?to=&days=                       the charts of the sales: by day (and a year before), by hour
  *                                              (MANAGER, Chart.java)
@@ -141,12 +143,21 @@ final class Api {
                     } else {
                         User u = user(c, ex);
                         Rights.check(u, method, p);                  // the screen, the action of the call
+                        // who and from where, for the history of what is done (MM_AUDIT: its triggers)
+                        Db.exec(c, "begin dbms_session.set_identifier(?); dbms_application_info.set_module('mm-api', null); end;",
+                                u.username());
                         body = "POST".equals(method) ? post(c, u, p, in) : Rights.mask(u, p, route(c, u, p, q));
                     }
                     c.commit();            // what a POST wrote (a GET: only the last_seen of its session)
                 } catch (SQLException | RuntimeException e) {
                     c.rollback();
                     throw e;
+                } finally {
+                    try {                  // (the connection back to the pool: no one's)
+                        Db.exec(c, "begin dbms_session.clear_identifier; dbms_application_info.set_module(null, null); end;");
+                    } catch (SQLException e) {
+                        System.err.println("== mm-api: " + e);
+                    }
                 }
             }
             Http.send(ex, 200, body);
@@ -429,6 +440,38 @@ final class Api {
         throw new Http.Fail(404, "not_found", "no such endpoint");
     }
 
+    /** the history of what was done and the logins (MM_AUDIT_ALL), the newest first: from, to (days), user,
+     *  action (its start, e.g. DOC_ or AUTH_), q (in what it was of, its detail); a page of it */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> audit(Connection c, Map<String, String> q) throws SQLException {
+        int limit = Http.number(q, "limit", 50, 1, MAX_LIMIT);
+        int offset = Http.number(q, "offset", 0, 0, Integer.MAX_VALUE);
+        LocalDate to = Http.date(q, "to", LocalDate.now());
+        LocalDate fr = Http.date(q, "from", to.minusDays(30));
+        String user = Optional.ofNullable(q.get("user")).map(String::trim).filter(x -> !x.isEmpty()).orElse(null);
+        String action = Optional.ofNullable(q.get("action")).map(x -> x.trim().toUpperCase(java.util.Locale.ROOT))
+                .filter(x -> !x.isEmpty()).orElse(null);
+        String text = Optional.ofNullable(q.get("q")).map(String::trim).filter(x -> !x.isEmpty()).orElse(null);
+        String where = """
+                 from mm_audit_all
+                where at >= ? and at < ? + 1
+                  and (? is null or lower(username) = lower(?))
+                  and (? is null or action like ? || '%')
+                  and (? is null or upper(ref_text || ' ' || detail) like '%' || upper(?) || '%')""";
+        Object[] b = {fr, to, user, user, action, action, text, text};
+        Object[] pg = java.util.Arrays.copyOf(b, b.length + 2);
+        pg[b.length] = offset;
+        pg[b.length + 1] = limit;
+        Map<String, Object> out = new LinkedHashMap<>((Map<String, Object>) page(Db.rows(c,
+                "select id, at, username, source, action, ref_type, ref_id, ref_text, detail" + where
+                + " order by at desc, id desc offset ? rows fetch next ? rows only", pg), limit, offset,
+                Db.rows(c, "select count(*) n" + where, b).get(0).get("n")));
+        out.put("from", fr.toString());
+        out.put("to", to.toString());
+        out.put("users", Db.rows(c, "select distinct username from mm_audit_all where username is not null order by 1"));
+        return out;
+    }
+
     /** where a user works: its store (warehouse) and its register; null: everywhere */
     static Map<String, Object> place(Connection c, String username) throws SQLException {
         List<Map<String, Object>> r = Db.rows(c, """
@@ -614,6 +657,11 @@ final class Api {
             case "expiry" -> {
                 if (n == 1) {
                     return Expiry.get(c, q);
+                }
+            }
+            case "audit" -> {               // the history of what was done (MM_AUDIT_ALL)
+                if (n == 1) {
+                    return audit(c, q);
                 }
             }
             case "roles", "menu" -> {       // the roles, their rights, the menu (Roles)
