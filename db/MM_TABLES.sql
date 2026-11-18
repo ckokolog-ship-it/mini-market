@@ -915,6 +915,28 @@ select m.item_id, m.warehouse_id, w.code warehouse, w.name warehouse_name, sum(m
 from mm_stock_move m join mm_warehouse w on w.id = m.warehouse_id
 group by m.item_id, m.warehouse_id, w.code, w.name;
 
+-- the minimum stock of an item in a branch (the main one: MM_ITEM.MIN_STOCK); below it, goods sent from
+-- the central store (mm_core.transfer_missing: a draft DEN)
+create table if not exists mm_warehouse_min (
+  warehouse_id number      not null constraint mm_wh_min_wh_fk references mm_warehouse on delete cascade,
+  item_id     number       not null constraint mm_wh_min_item_fk references mm_item on delete cascade,
+  min_stock   number(12,3) not null constraint mm_wh_min_ck check (min_stock > 0),
+  constraint mm_warehouse_min_pk primary key (warehouse_id, item_id)
+);
+create index if not exists mm_wh_min_item_ix on mm_warehouse_min (item_id);
+
+-- the items under their minimum in each branch: what it has, what is missing, what the central store has
+create or replace view mm_warehouse_min_stock as
+select m.warehouse_id, w.code warehouse, w.name warehouse_name, i.id item_id, i.code, i.name, i.unit,
+       nvl(s.stock, 0) stock, m.min_stock, m.min_stock - nvl(s.stock, 0) missing,
+       nvl((select sum(k.qty) from mm_stock_move k join mm_warehouse c on c.id = k.warehouse_id and c.main = 'Y'
+            where k.item_id = i.id), 0) central
+from mm_warehouse_min m
+join mm_warehouse w on w.id = m.warehouse_id and w.main = 'N' and w.active = 'Y'
+join mm_item i on i.id = m.item_id and i.active = 'Y'
+left join mm_warehouse_stock s on s.item_id = m.item_id and s.warehouse_id = m.warehouse_id
+where nvl(s.stock, 0) < m.min_stock;
+
 -- the check of the whole database (MM_CHECK.sql, and the tests): a row here is something that does
 -- not add up. Empty: the stock is the sum of its moves, every document the sum of its lines, every
 -- closed Z the sum of its documents and of its money, every receipt paid once in the register,

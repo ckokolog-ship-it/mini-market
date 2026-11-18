@@ -35,6 +35,10 @@ import java.util.Optional;
  *   /api/warehouses                            the warehouses (the main one first), what each has; an item: its
  *                                              stock in each. POST /api/warehouses {code, name}, /api/warehouses/{id}
  *                                              {name, active} (MANAGER)
+ *   /api/warehouses/{id}                       a branch and its minimum stock: the items, what is missing,
+ *                                              what the central store has; its drafts DEN. POST .../min
+ *                                              {code, min} (0: none), POST .../transfer: what is missing,
+ *                                              a draft DEN from the central store (MANAGER)
  *   /api/expiry?days=   POST /api/expiry/withdraw   the goods expiring, expired; one taken out (Expiry.java)
  *   /api/chart?to=&days=                       the charts of the sales: by day (and a year before), by hour
  *                                              (MANAGER, Chart.java)
@@ -249,6 +253,30 @@ final class Api {
                 Db.exec(c, "begin insert into mm_warehouse (code, name) values (?, ?); end;", code, name);
                 return warehouses(c);
             }
+            if (n == 3 && "min".equals(p[2])) {      // the minimum of an item there (0: none)
+                long id = Http.id(p[1]);
+                String code = String.valueOf(Http.text(in, "code", true)).trim();
+                Object item = Db.rows(c, "select mm_core.find_item(?, 'N') id from dual", code).get(0).get("id");
+                if (item == null) {
+                    throw new Http.Fail(404, "not_found", "no item " + code);
+                }
+                Db.exec(c, "begin mm_core.set_min(?, ?, ?); end;", id, item,
+                        Http.decimal(in, "min", java.math.BigDecimal.ZERO));
+                return warehouseMin(c, id);
+            }
+            if (n == 3 && "transfer".equals(p[2])) { // what is missing, from the central store: a draft DEN
+                long id = Http.id(p[1]);
+                int lines;
+                try (CallableStatement cs = c.prepareCall("begin ? := mm_core.transfer_missing(?); end;")) {
+                    cs.registerOutParameter(1, Types.NUMERIC);
+                    cs.setLong(2, id);
+                    cs.execute();
+                    lines = cs.getInt(1);
+                }
+                Map<String, Object> out = new java.util.LinkedHashMap<>(warehouseMin(c, id));
+                out.put("lines", lines);
+                return out;
+            }
             if (n == 2) {
                 long id = Http.id(p[1]);
                 List<Map<String, Object>> w = Db.rows(c, "select main from mm_warehouse where id = ?", id);
@@ -351,9 +379,43 @@ final class Api {
                        (select count(*) from mm_warehouse_stock s where s.warehouse_id = w.id and s.stock <> 0) items,
                        (select nvl(sum(f.left_ * f.unit_cost), 0) from mm_fifo f where f.warehouse_id = w.id) value,
                        (select count(*) from mm_register r where nvl(r.warehouse_id, mm_core.main_warehouse) = w.id
-                          and r.active = 'Y') registers
+                          and r.active = 'Y') registers,
+                       case w.main when 'Y' then (select count(*) from mm_item i where i.active = 'Y' and i.is_model = 'N'
+                                                    and i.kit = 'N' and i.stock + 0 < i.min_stock)   -- (as MM_MIN_STOCK)
+                            else (select count(*) from mm_warehouse_min m
+                                  left join mm_warehouse_stock s on s.item_id = m.item_id and s.warehouse_id = m.warehouse_id
+                                  join mm_item i on i.id = m.item_id and i.active = 'Y'
+                                  where m.warehouse_id = w.id and nvl(s.stock, 0) < m.min_stock) end under_min
                 from mm_warehouse w
                 order by case w.main when 'Y' then 0 else 1 end, w.code"""));
+    }
+
+    /** a branch and its minimum stock: the items with a minimum there (what it has, what is missing, what
+     *  the central store has), the drafts DEN to it from the central store */
+    static Map<String, Object> warehouseMin(Connection c, long id) throws SQLException {
+        List<Map<String, Object>> w = Db.rows(c, "select id, code, name, main, active from mm_warehouse where id = ?", id);
+        if (w.isEmpty()) {
+            throw new Http.Fail(404, "not_found", "no such warehouse: " + id);
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("warehouse", w.get(0));
+        out.put("rows", Db.rows(c, """
+                select i.id item_id, i.code, i.name, i.unit, nvl(s.stock, 0) stock, m.min_stock,
+                       greatest(m.min_stock - nvl(s.stock, 0), 0) missing,
+                       nvl((select sum(k.qty) from mm_stock_move k where k.item_id = i.id
+                              and k.warehouse_id = mm_core.main_warehouse), 0) central
+                from mm_warehouse_min m
+                join mm_item i on i.id = m.item_id
+                left join mm_warehouse_stock s on s.item_id = m.item_id and s.warehouse_id = m.warehouse_id
+                where m.warehouse_id = ?
+                order by case when nvl(s.stock, 0) < m.min_stock then 0 else 1 end, i.code""", id));
+        out.put("drafts", Db.rows(c, """
+                select d.id, d.doc_date, d.total, (select count(*) from mm_doc_line l where l.doc_id = d.id) lines
+                from mm_doc d
+                where d.doc_type = 'DEN' and d.status = 'D' and d.to_warehouse_id = ?
+                  and d.warehouse_id = mm_core.main_warehouse
+                order by d.id""", id));
+        return out;
     }
 
     private Object count(Connection c, long id) throws SQLException {
@@ -451,6 +513,10 @@ final class Api {
                 if (n == 1) {
                     return warehouses(c);
                 }
+                if (n == 2) {               // a branch and its minimum stock
+                    need(u, "MANAGER");
+                    return warehouseMin(c, Http.id(p[1]));
+                }
             }
             case "expiry" -> {
                 need(u, "MANAGER");
@@ -539,8 +605,12 @@ final class Api {
         Map<String, Object> out = rows.get(0);
         // its stock in each warehouse (the main one first)
         out.put("warehouses", Db.rows(c, """
-                select w.id, w.code, w.name, w.main, nvl(s.stock, 0) stock
-                from mm_warehouse w left join mm_warehouse_stock s on s.warehouse_id = w.id and s.item_id = ?
+                select w.id, w.code, w.name, w.main, nvl(s.stock, 0) stock,
+                       case w.main when 'Y' then (select min_stock from mm_item where id = s0.item_id)
+                            else nvl((select m.min_stock from mm_warehouse_min m
+                                      where m.warehouse_id = w.id and m.item_id = s0.item_id), 0) end min_stock
+                from mm_warehouse w cross join (select ? item_id from dual) s0
+                left join mm_warehouse_stock s on s.warehouse_id = w.id and s.item_id = s0.item_id
                 where w.active = 'Y' or nvl(s.stock, 0) <> 0
                 order by case w.main when 'Y' then 0 else 1 end, w.code""", v));
         // FIFO: its layers with something left (each receipt at its cost), the value of its stock

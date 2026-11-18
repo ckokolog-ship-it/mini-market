@@ -331,6 +331,18 @@ async function waitText(page, sel, text) {
   const bcells = await page.$$eval(`main tbody tr:has-text("${process.env.BRANCH}") td`, (tds) => tds.map((td) => td.textContent.trim()));
   ok(bcells[2] === '1', `the warehouses: the branch, one item there (the transfer): ${bcells[2]}`);
   if (SHOTS) await page.screenshot({ path: SHOTS + '/warehouses.png', fullPage: true });
+  // the minimum of the branch: its page; an item's minimum there, under it (what is missing)
+  await page.click(`a[aria-label="Ελάχιστο ${process.env.BRANCH}"]`);
+  await waitText(page, 'main h1', 'Ελάχιστο απόθεμα');
+  await page.fill('input[name=min_code]', CODE_B);
+  await page.fill('input[name=min_qty]', '1000');
+  await page.click('main form button[type=submit]');
+  await page.waitForSelector(`input[aria-label="Ελάχιστο ${CODE_B}"]`);
+  ok(await page.isEnabled('button:has-text("Φτιάξε το δελτίο ενδοδιακίνησης")'), 'the minimum of a branch: an item under it, a transfer to make');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/warehouse-min.png', fullPage: true });
+  await page.fill(`input[aria-label="Ελάχιστο ${CODE_B}"]`, '0');
+  await page.dispatchEvent(`input[aria-label="Ελάχιστο ${CODE_B}"]`, 'change');
+  await waitText(page, 'main', 'Κανένα είδος με ελάχιστο εδώ');
   await page.goto(BASE + '/web/#/pos');
   await page.waitForSelector('select[name=register_warehouse]');
   ok((await page.$eval('select[name=register_warehouse]', (s) => s.selectedOptions[0].text)).startsWith('K '),
