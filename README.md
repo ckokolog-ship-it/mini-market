@@ -1,51 +1,135 @@
-# Mini market
+<div align="center">
 
-Εφαρμογή για ένα μικρό σούπερ μάρκετ: είδη, πελάτες, προμηθευτές, αγορές, πωλήσεις, απόθεμα, ΦΠΑ, ταμείο και Ζ.
+# 🛒 Mini market
 
-- **Γραφείο:** Oracle Forms 14 και PL/SQL, με βάση Oracle 23ai/26ai.
-- **Ταμείο:** εφαρμογή web, πάνω στην ίδια βάση.
+**Εφαρμογή για μικρά σούπερ μάρκετ και καταστήματα λιανικής, πάνω σε Oracle**
 
-Όλοι οι κανόνες είναι σε ένα πακέτο PL/SQL, το `MM_CORE`. Οι φόρμες, οι σελίδες web και τα κινητά καλούν τις ίδιες διαδικασίες, άρα συμπεριφέρονται ίδια:
+Ταμείο · Γραφείο · Αποθήκες · Τιμολόγηση · myDATA · Αναφορές · Android
+
+![Oracle](https://img.shields.io/badge/Oracle-23ai%20%7C%2026ai-F80000?logo=oracle&logoColor=white)
+![PL/SQL](https://img.shields.io/badge/PL%2FSQL-MM__CORE-F80000)
+![Java](https://img.shields.io/badge/Java-17-007396?logo=openjdk&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-vanilla-F7DF1E?logo=javascript&logoColor=black)
+![Oracle Forms](https://img.shields.io/badge/Oracle%20Forms-14-8B0000)
+![Android](https://img.shields.io/badge/Android-Capacitor-3DDC84?logo=android&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-pytest%20%2B%20Playwright-0A9EDC?logo=pytest&logoColor=white)
+
+</div>
+
+---
+
+Είδη, πελάτες, προμηθευτές, αγορές και πωλήσεις, απόθεμα σε πολλές αποθήκες με κόστος FIFO, ΦΠΑ, ταμείο με Ζ, τιμολόγια με αποστολή στο myDATA, καρτέλες και αναφορές. Όλα τρέχουν πάνω σε **μία** βάση Oracle, με **έναν** πυρήνα κανόνων σε PL/SQL.
+
+> **Η βασική ιδέα:** κάθε κανόνας ζει μία φορά, στη βάση. Οι σελίδες web, οι φόρμες, τα reports και το κινητό καλούν τις ίδιες διαδικασίες. Έτσι δίνουν τα ίδια νούμερα και κάνουν τους ίδιους ελέγχους, όπως κι αν μπει κανείς.
+
+## ✨ Τι κάνει
+
+| | |
+|---|---|
+| 🧾 **Ταμείο** | Απόδειξη με σάρωση barcode και QR, μετρητά και κάρτα, άνοιγμα και κλείσιμο Ζ. Προσφορές αυτόματα (έκπτωση %, N+M δώρο, πακέτο σε τιμή), πόντοι πελατών, κάρτες κινητής με κρυπτογραφημένο PIN, ο ταμίας στην απόδειξη. |
+| 📦 **Απόθεμα** | Κεντρική αποθήκη και υποκαταστήματα, κάθε ταμείο με τη δική του. Κόστος FIFO ανά στρώση, ενδοδιακίνηση στο κόστος, αναλώσεις (χρήση, φθορά, δείγμα, λήξη), ημερομηνίες λήξης ανά παρτίδα, ελάχιστο απόθεμα, απογραφή από το κινητό. |
+| 🏷️ **Είδη** | Παραλλαγές (χρώμα × μέγεθος), καλάθια και σετ με συναρμολόγηση, serial numbers, κρατήσεις με προκαταβολή (π.χ. βασιλόπιτες), ετικέτες με barcode και QR. |
+| 💼 **Γραφείο** | Τιμολόγια και πιστωτικά πώλησης και αγοράς, δελτία αποστολής, εισπράξεις και πληρωμές, παραγγελίες πελατών (και από σελίδα για τους ίδιους τους πελάτες). |
+| 🏛️ **myDATA** | Αποστολή των παραστατικών στην ΑΑΔΕ, με ουρά: όσα περιμένουν φεύγουν αυτόματα κάθε λεπτό. |
+| 📊 **Αναφορές** | Καρτέλες είδους, πελάτη και προμηθευτή, ισοζύγια, πωλήσεις ανά αποθήκη, ταμείο και ταμία, ΦΠΑ, αναλώσεις, σύνοψη ημέρας, γραφήματα. Στην οθόνη και σε PDF (Oracle Reports). |
+| 🔐 **Ασφάλεια** | Χρήστες με PBKDF2, κλείδωμα μετά από 5 λάθη, ρόλοι με δικαιώματα ανά οθόνη, πεδίο και ενέργεια, μενού από τη βάση, έλεγχος σε κάθε κλήση στον server, ιστορικό κάθε αλλαγής (ποιος, πότε, τι). |
+| ✅ **Έλεγχος** | Η όψη `MM_CHECK` είναι άδεια όταν όλα συμφωνούν: απόθεμα, σύνολα, Ζ, μετρητά, FIFO, πόντοι, αρίθμηση. |
+
+## 🏗️ Αρχιτεκτονική
+
+```mermaid
+flowchart LR
+  W["🖥️ Σελίδες web<br/>ταμείο · γραφείο"] --> API
+  A["📱 Android<br/>απογραφή · σάρωση"] --> API
+  S["🛍️ Παραγγελίες<br/>πελατών"] --> API
+  API["☕ mm-api<br/>REST · Java 17"] --> CORE
+  API -. myDATA .-> AADE["🏛️ ΑΑΔΕ"]
+  F["📋 Oracle Forms<br/>γραφείο"] --> CORE
+  R["📄 Oracle Reports<br/>PDF"] --> V
+  subgraph DB ["🗄️ Oracle 23ai / 26ai"]
+    CORE["MM_CORE<br/>όλοι οι κανόνες"] --> T[("πίνακες MM_*")]
+    AUTH["MM_AUTH · MM_RIGHTS<br/>MM_AUDIT"] --> T
+    V["MM_LEDGER · MM_REPORT<br/>όψεις"] --> T
+  end
+  API --> AUTH
+  F --> AUTH
+  API --> V
+```
+
+Η πλήρης περιγραφή είναι στο **[docs/ARXITEKTONIKI.md](docs/ARXITEKTONIKI.md)**: οι αρχές της βάσης, τα δικαιώματα, το mm-api, οι σελίδες, οι φόρμες, τα reports, τα tests.
+
+## 🚀 Γρήγορη εκκίνηση
+
+**1. Η βάση** (Oracle 23ai Free ή νεότερη):
+
+```bash
+cd db
+sqlplus system@FREEPDB1 @CREATE_USER.sql        # ο χρήστης MM
+export NLS_LANG=GREEK_GREECE.AL32UTF8            # Windows: set NLS_LANG=...
+sqlplus mm@FREEPDB1 @INSTALL.sql demo            # πίνακες, πακέτα και δεδομένα επίδειξης
+```
+
+**2. Η υπηρεσία και οι σελίδες web** (Java 17):
+
+```bash
+cd api
+./mvnw -q package -DskipTests                    # → target/mm-api.jar
+java -jar target/mm-api.jar                      # http://localhost:8090
+```
+
+Η σύνδεση με τη βάση γίνεται με wallet, χωρίς κωδικό σε αρχείο. Στα Windows η υπηρεσία μπαίνει με το `install_service.ps1`, και υπάρχει και `Dockerfile`. Λεπτομέρειες στο [ODIGIES_REST.md](docs/ODIGIES_REST.md).
+
+**3. Φόρμες και reports** (Oracle Forms & Reports 14): `forms/build_forms.ps1` και `reports/build_reports.ps1`.
+
+**4. Android:** `mobile/build_apk.ps1` → APK.
+
+**Μετά από κάθε ενημέρωση**, όλες οι εντολές μαζί (backup, βάση, mm-api, φόρμες, reports) είναι στο [ODIGIES_ENIMEROSI.md](docs/ODIGIES_ENIMEROSI.md).
+
+## 📚 Τεκμηρίωση
+
+| Έγγραφο | Τι έχει |
+|---|---|
+| [ARXITEKTONIKI.md](docs/ARXITEKTONIKI.md) | Πώς είναι φτιαγμένη η εφαρμογή και γιατί. |
+| [ANAFORA_VASIS.md](docs/ANAFORA_VASIS.md) | **Η βάση:** κάθε πίνακας (στήλες, κλειδιά, έλεγχοι), οι όψεις, τα πακέτα, τα triggers, τα είδη παραστατικών, όλα τα λάθη `MM-1xx`. Φτιάχνεται από τη βάση. |
+| [ANAFORA_EFARMOGIS.md](docs/ANAFORA_EFARMOGIS.md) | **Η εφαρμογή:** κάθε οθόνη (σελίδα και φόρμα, πεδία, ενέργειες, δικαιώματα), κάθε κλήση REST, οι φόρμες, τα reports, τα tests. Φτιάχνεται από τον κώδικα. |
+| [ODIGIES_VASI.md](docs/ODIGIES_VASI.md) | Εγκατάσταση, backup, δεδομένα επίδειξης, και πώς δουλεύει κάθε λειτουργία της βάσης. |
+| [ODIGIES_REST.md](docs/ODIGIES_REST.md) | Η υπηρεσία mm-api: εγκατάσταση, wallet, ρυθμίσεις, myDATA. |
+| [ODIGIES_WEB.md](docs/ODIGIES_WEB.md) | Οι σελίδες web, μία προς μία. |
+| [ODIGIES_FORMS.md](docs/ODIGIES_FORMS.md) | Οι φόρμες: πώς φτιάχνονται και πώς τρέχουν. |
+| [ODIGIES_REPORTS.md](docs/ODIGIES_REPORTS.md) | Τα reports και ο Reports Server. |
+| [ODIGIES_ANDROID.md](docs/ODIGIES_ANDROID.md) | Η εφαρμογή Android. |
+| [ODIGIES_ENIMEROSI.md](docs/ODIGIES_ENIMEROSI.md) | Οι εντολές μετά από κάθε merge. |
+
+Οι δύο αναφορές ξαναφτιάχνονται με `MM_DSN=mm/<κωδικός>@host:1521/FREEPDB1 python tools/mkdocs.py`.
+
+## 🗂️ Δομή
 
 ```
-Oracle Forms (γραφείο) ─┐
-Σελίδες web (ταμείο)  ──┼── REST ──┐
-Κινητό (απογραφή)     ──┘          ├── MM_CORE ── πίνακες
-Oracle Forms ──────────────────────┘
+mini-market/
+├── db/          η βάση: πίνακες, MM_CORE και τα άλλα πακέτα, INSTALL, demo, backup
+├── api/         mm-api (Java 17): REST, myDATA, και οι σελίδες web (src/main/resources/web)
+├── forms/       Oracle Forms: mkforms.py → MM_*.xml, το κοινό πακέτο MM_UI.pls
+├── reports/     Oracle Reports: mkreports.py → XML → .rdf
+├── mobile/      Android (Capacitor) με σάρωση barcode και QR
+├── tests/       pytest και Playwright, πάνω σε ζωντανή βάση
+├── tools/       mkdocs.py: η γεννήτρια των αναφορών
+└── docs/        η τεκμηρίωση
 ```
 
-Η δουλειά προχωρά σε βήματα, ένα pull request το καθένα:
+## 🧪 Tests
 
-| # | Βήμα | |
-|---|------|---|
-| 1 | Βάση: πίνακες, constraints, δεδομένα επίδειξης | ✔ |
-| 2 | Πακέτο `MM_CORE`: παραστατικά, απόθεμα, ΦΠΑ, αρίθμηση, ακυρώσεις, πιστωτικά, Ζ, απογραφή | ✔ |
-| 3 | Φόρμες: είδη, πελάτες, προμηθευτές, με LOV | ✔ |
-| 3α | Κάρτες κινητής: serial numbers, PIN κρυπτογραφημένο, φόρτωση και πώληση (βάση, `MM_CORE`) | ✔ |
-| 3β | Κρατήσεις (π.χ. βασιλόπιτες): δέσμευση αποθέματος, προκαταβολή, παράδοση (βάση, `MM_CORE`) | ✔ |
-| 3γ | Καλάθια και σετ: σύνθεση, συναρμολόγηση, πώληση (βάση, `MM_CORE`) | ✔ |
-| 3δ | Προσφορές: έκπτωση %, N+M δώρο, πακέτο σε τιμή, έκπτωση στο σύνολο, αυτόματα στο ταμείο | ✔ |
-| 3ε | Παραλλαγές: χρώμα και μέγεθος (ρούχα, παπούτσια) | ✔ |
-| 3ζ | Φόρμες: κάρτες και κρατήσεις (master-detail) | ✔ |
-| 3η | Φόρμες: καλάθια, προσφορές, ρούχα και παπούτσια (χρώμα × μέγεθος) | ✔ |
-| 3θ | Φόρμες: το μενού (`MM_MAIN`) | ✔ |
-| 3ι | Φόρμες: μπάρα με pull-down μενού σε όλες (`MM_MENU`) | ✔ |
-| 3κ | Φόρμες: δική μας εργαλειοθήκη σε όλες | ✔ |
-| 4 | Τιμολόγηση χονδρικής: τιμή χονδρικής στο είδος, φόρμα τιμολογίων πώλησης/αγοράς και πιστωτικών (master-detail) | ✔ |
-| 4α | Εισπράξεις και πληρωμές (βάση, `MM_CORE`, φόρμα) | ✔ |
-| 5 | Καρτέλες είδους, πελάτη, προμηθευτή (από μεταφορά, προοδευτικό, σύνολα), στην οθόνη και σε Oracle Reports· πωλήσεις, ΦΠΑ, ελάχιστο απόθεμα | ✔ καρτέλες στην οθόνη (`MM_LEDGER`) και σε report· πωλήσεις, ΦΠΑ, ελάχιστο απόθεμα (`MM_REPORTS`) |
-| 6 | Ταμείο λιανικής: απόδειξη, σάρωση, μετρητά/κάρτα, άνοιγμα και κλείσιμο Ζ | ✔ η φόρμα `MM_POS` |
-| 7 | REST: το `MM_CORE` για web και κινητό | ✔ η υπηρεσία `api/` (Java, [ODIGIES_REST.md](docs/ODIGIES_REST.md)), με login και ρόλους |
-| 7α | Login και ρόλοι, όπως στο PROPOApplication (π.χ. ποιος βλέπει τα PIN) | ✔ χρήστες και ρόλοι στη βάση (`MM_AUTH`), login στο REST και στις φόρμες (`MM_LOGIN`, `MM_USERS`)· ρόλοι του μαγαζιού και δικαιώματα ανά οθόνη, πεδίο και ενέργεια, μενού από τη βάση (`MM_RIGHTS`, ODIGIES_VASI §16)· ιστορικό ενεργειών (`MM_AUDIT`) |
-| 8 | Σελίδες web: ό,τι κάνουν οι φόρμες, και το ταμείο | ✔ οι σελίδες μέσα στο `mm-api.jar` ([ODIGIES_WEB.md](docs/ODIGIES_WEB.md)): ταμείο, παραγγελίες, ετικέτες με barcode και QR, τιμολόγια και δελτία, εισπράξεις και πληρωμές, είδη, πελάτες, καρτέλες, reports, απογραφή |
-| 9 | Κινητό Android: σάρωση από τα ράφια για απογραφή | ✔ η εφαρμογή `mobile/` (APK, [ODIGIES_ANDROID.md](docs/ODIGIES_ANDROID.md)): οι σελίδες web με σάρωση από την κάμερα (barcode και QR) |
+Τα tests τρέχουν πάνω σε πραγματική βάση, χωρίς mocks: τα πακέτα, το REST (με ψεύτικο server της ΑΑΔΕ), τις σελίδες σε Chromium, και τη λογική των φορμών, μεταγλωττισμένη μέσα στη βάση.
 
-## Φάκελοι
+```bash
+pip install pytest oracledb
+(cd api && ./mvnw -q package -DskipTests)
+MM_DSN=mm/<κωδικός>@localhost:1521/FREEPDB1 python -m pytest -q tests
+```
 
-- **Ενημέρωση μετά από merge** (backup, βάση, mm-api, φόρμες, reports): όλες οι εντολές μαζί στο [docs/ODIGIES_ENIMEROSI.md](docs/ODIGIES_ENIMEROSI.md).
-- `db/`: η βάση (`CREATE_USER.sql`, `INSTALL.sql`, `UNINSTALL.sql`) και το `MM_CORE.sql`. Ένας χρόνος δεδομένων για τα reports: `MM_DEMO_BIG.sql`· αγορές σε πολλές τιμές για το FIFO: `MM_DEMO_FIFO.sql`· υποκαταστήματα με ταμεία, μεταφορές, πωλήσεις και ελάχιστο απόθεμα: `MM_DEMO_WAREHOUSES.sql`· χρήστες σε καταστήματα και ταμεία: `MM_DEMO_USERS.sql`· ο έλεγχος ότι όλα συμφωνούν: `MM_CHECK.sql`. Το backup κάθε βράδυ και η επαναφορά: `backup.ps1` (§14). Οδηγίες στο [docs/ODIGIES_VASI.md](docs/ODIGIES_VASI.md).
-- `forms/`: οι φόρμες (`mkforms.py` → `MM_*.xml`, `build_forms.ps1`). Οδηγίες στο [docs/ODIGIES_FORMS.md](docs/ODIGIES_FORMS.md).
-- `reports/`: τα reports (`mkreports.py` → `MM_LEDGER_*.xml`, `build_reports.ps1` → `.rdf`). Οδηγίες στο [docs/ODIGIES_REPORTS.md](docs/ODIGIES_REPORTS.md).
-- `api/`: η υπηρεσία REST (`mm-api.jar`, `run_api.ps1`) και οι σελίδες web. Οδηγίες στο [docs/ODIGIES_REST.md](docs/ODIGIES_REST.md) και στο [docs/ODIGIES_WEB.md](docs/ODIGIES_WEB.md).
-- `mobile/`: η εφαρμογή Android (`build_apk.ps1` → APK). Οδηγίες στο [docs/ODIGIES_ANDROID.md](docs/ODIGIES_ANDROID.md).
-- `tests/`: tests σε Python (`pytest`, `oracledb`) πάνω σε ζωντανή βάση.
+Τα δεδομένα των tests ξεκινούν με `TST` και σβήνονται στο τέλος. Κάθε test τελειώνει με το `MM_CHECK` άδειο.
+
+---
+
+<div align="center">
+<sub>Ιδιωτικό έργο · Οι βιβλιοθήκες τρίτων στο <a href="THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a></sub>
+</div>
