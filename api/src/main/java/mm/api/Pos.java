@@ -69,9 +69,7 @@ final class Pos {
 
     static Object post(Connection c, Api.User u, String[] p, Map<String, Object> in) throws SQLException {
         if (p.length == 2 && "settings".equals(p[1])) {
-            if (!u.atLeast("MANAGER")) {
-                throw new Http.Fail(403, "forbidden", "only MANAGER or above");
-            }
+            // (the right of it: Rights.check)
             for (String k : new String[] {"header", "footer"}) {
                 String v = Http.text(in, k, false);
                 if (v != null && v.length() > 400) {
@@ -160,9 +158,7 @@ final class Pos {
                 if (p.length != 3) {
                     break;
                 }
-                if (!u.atLeast("MANAGER")) {
-                    throw new Http.Fail(403, "forbidden", "only MANAGER or above");
-                }
+                // (the right of it: Rights.check)
                 if (draft(c, reg) != null) {
                     throw new Http.Fail(409, "receipt_open", "Η απόδειξη που γράφεται: πρώτα πληρωμή ή ακύρωση");
                 }

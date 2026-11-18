@@ -159,9 +159,7 @@ final class Orders {
                     return order(c, id);
                 }
                 case "note" -> {
-                    if (!u.atLeast("MANAGER")) {
-                        throw new Http.Fail(403, "forbidden", "only MANAGER or above");
-                    }
+                    // (the right of it: Rights.check)
                     long d;
                     try (CallableStatement cs = c.prepareCall("begin ? := mm_core.deliver_note(?); end;")) {
                         cs.registerOutParameter(1, Types.NUMERIC);
