@@ -977,6 +977,22 @@ final class Api {
                         select nvl(sum(case ? when 'LAST' then cost_last else cost end), 0) cost from mm_move_cost
                         where kind = 'ADJ' and move_at >= ? and move_at < ? + 1""", m, f, t).get(0).get("cost"));
             }
+            case "consumption" -> {        // the consumptions (DAN): by warehouse, reason, item, at cost
+                String m = costMethod(c, q);
+                String wh = q.get("warehouse") == null || q.get("warehouse").isBlank() ? null : q.get("warehouse").trim();
+                out.put("from", f.toString());
+                out.put("to", t.toString());
+                out.put("method", m);
+                out.put("warehouse", wh);
+                out.put("rows", Db.rows(c, """
+                        select warehouse, warehouse_name, reason, code, name, unit, sum(qty) qty,
+                               round(sum(case ? when 'LAST' then cost_last else cost_fifo end), 2) cost, count(distinct doc_id) docs
+                        from mm_consumption
+                        where day between ? and ? and (? is null or warehouse = upper(?))
+                        group by warehouse, warehouse_name, reason, code, name, unit
+                        order by warehouse, reason, sum(case ? when 'LAST' then cost_last else cost_fifo end) desc, code""",
+                        m, f, t, wh, wh, m));
+            }
             case "stock-value" -> {        // the value of the stock now: FIFO and by the last cost
                 String m = costMethod(c, q);
                 out.put("method", m);

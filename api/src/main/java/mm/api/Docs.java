@@ -21,6 +21,8 @@ import java.util.Map;
  *   GET  /api/docs/{id}                            one: its lines; an invoice its notes, a note its invoice
  *   POST /api/docs {doc_type, customer_id|supplier_id, payment, doc_date, warehouse_id}   a new draft
  *   POST /api/docs {doc_type DEN, warehouse_id, to_warehouse_id}   a transfer between two warehouses (at cost)
+ *   POST /api/docs {doc_type DAN, warehouse_id, reason}   a consumption: out of a warehouse at cost, for a reason
+ *                                                  (USE, DAMAGE, SAMPLE, EXPIRED); POST /api/docs/{id}/reason {reason}
  *   POST /api/docs {from_note, doc_date}           a new draft invoice of a note (invoice_from)
  *   POST /api/docs/{id}/lines {code, qty, price, discount, expires}   a line (a card of a sale: qty of them);
  *                                                  expires YYYY-MM-DD: goods received (DPA, TAD)
@@ -142,7 +144,7 @@ final class Docs {
                        t.mydata_type, d.mydata_state, d.mydata_mark, d.mydata_uid, d.mydata_qr, d.mydata_error,
                        d.mydata_at, d.mydata_cancel_mark,
                        d.warehouse_id, wf.code warehouse, wf.name warehouse_name,
-                       d.to_warehouse_id, wt.code to_warehouse, wt.name to_warehouse_name
+                       d.to_warehouse_id, wt.code to_warehouse, wt.name to_warehouse_name, d.reason
                 from mm_doc d
                 join mm_doc_type t on t.code = d.doc_type
                 left join mm_warehouse wf on wf.id = d.warehouse_id
@@ -262,10 +264,14 @@ final class Docs {
             String pay = String.valueOf(in.getOrDefault("payment", "CREDIT")).toUpperCase(java.util.Locale.ROOT);
             Object wh = in.get("warehouse_id");
             Object to = in.get("to_warehouse_id");
-            return doc(c, fn(c, "begin ? := mm_core.new_doc(?, ?, ?, null, ?, ?, ?, ?); end;", type,
+            long nd = fn(c, "begin ? := mm_core.new_doc(?, ?, ?, null, ?, ?, ?, ?); end;", type,
                     cu == null ? null : idOf(cu, "customer_id"), su == null ? null : idOf(su, "supplier_id"),
                     pay, dateOf(in, "doc_date"), wh == null ? null : idOf(wh, "warehouse_id"),
-                    to == null ? null : idOf(to, "to_warehouse_id")));
+                    to == null ? null : idOf(to, "to_warehouse_id"));
+            if (in.get("reason") != null) {               // a consumption (DAN): why
+                call(c, "begin mm_core.set_reason(?, ?); end;", nd, Http.text(in, "reason", false));
+            }
+            return doc(c, nd);
         }
         if (p.length == 2 && "from-min-stock".equals(p[1])) {   // the orders to the suppliers (drafts DPA)
             Object sup = in.get("supplier_id");
@@ -323,6 +329,10 @@ final class Docs {
                 }
                 case "notes" -> {
                     call(c, "begin mm_core.add_note(?, ?); end;", id, idOf(in.get("note_id"), "note_id"));
+                    return doc(c, id);
+                }
+                case "reason" -> {                   // a consumption (DAN), a draft: why
+                    call(c, "begin mm_core.set_reason(?, ?); end;", id, Http.text(in, "reason", false));
                     return doc(c, id);
                 }
                 case "post" -> {

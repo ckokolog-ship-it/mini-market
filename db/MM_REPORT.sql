@@ -93,6 +93,17 @@ from mm_item i
 join mm_category c on c.id = i.category_id
 where i.active = 'Y' and i.is_model = 'N' and i.kit = 'N' and i.stock + 0 < i.min_stock;
 
+-- the consumptions (DAN, posted): of each warehouse, for each reason, each item: how many, what they cost (the
+-- layers they took: FIFO; the last cost of the item then)
+create or replace view mm_consumption as
+select d.id doc_id, d.doc_no, d.doc_date day, d.warehouse_id, w.code warehouse, w.name warehouse_name,
+       nvl(d.reason, 'USE') reason, i.id item_id, i.code, i.name, i.unit, -m.qty qty, m.cost cost_fifo, m.cost_last
+from mm_doc d
+join mm_warehouse w on w.id = d.warehouse_id
+join mm_move_cost m on m.doc_id = d.id
+join mm_item i on i.id = m.item_id
+where d.doc_type = 'DAN' and d.status = 'P';
+
 -- the sales by document (receipts, invoices, less credit notes): its day, its warehouse, its register, who posted
 -- it, its value, what it cost (FIFO, the last cost); the reports by store, by register, by cashier
 create or replace view mm_sales_doc as

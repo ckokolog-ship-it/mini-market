@@ -33,6 +33,10 @@ create or replace package mm_core as
                    p_doc_date date default trunc(sysdate), p_warehouse_id number default null,
                    p_to_warehouse_id number default null) return number;
   function main_warehouse return number;              -- MM_WAREHOUSE MAIN Y
+  -- a consumption (Δελτίο ανάλωσης, DAN): new_doc('DAN', p_warehouse_id => its warehouse), its lines as a
+  -- transfer (at the cost of the layers), its reason (a draft): USE, DAMAGE, SAMPLE, EXPIRED (none: USE when
+  -- posted); posted: out of its warehouse, no sale, no VAT, no profit; cancelled: back
+  procedure set_reason(p_doc_id number, p_reason varchar2);
   -- a transfer (Δελτίο ενδοδιακίνησης, DEN): new_doc('DEN', p_warehouse_id => from, p_to_warehouse_id => to);
   -- its lines at the cost of each layer of FIFO they take in the warehouse it goes from (a line for each
   -- cost; no VAT; a price given is not taken); posted: its lines once more by the layers, out of the one,
@@ -361,6 +365,18 @@ create or replace package body mm_core as
     return v;
   end;
 
+  procedure set_reason(p_doc_id number, p_reason varchar2) is
+    d mm_doc%rowtype := draft(p_doc_id);
+  begin
+    if d.doc_type <> 'DAN' then
+      fail(94, 'Αιτία έχει μόνο το δελτίο ανάλωσης');
+    end if;
+    if p_reason is not null and upper(p_reason) not in ('USE', 'DAMAGE', 'SAMPLE', 'EXPIRED') then
+      fail(94, 'Αιτία ανάλωσης: USE (ανάλωση), DAMAGE (φθορά), SAMPLE (δείγμα), EXPIRED (λήξη)');
+    end if;
+    update mm_doc set reason = upper(p_reason) where id = p_doc_id;
+  end;
+
   function new_doc(p_doc_type varchar2, p_customer_id number default null, p_supplier_id number default null,
                    p_register_id number default null, p_payment varchar2 default 'CASH',
                    p_doc_date date default trunc(sysdate), p_warehouse_id number default null,
@@ -371,11 +387,17 @@ create or replace package body mm_core as
   begin
     if t.side = 'T' then                  -- a transfer: two warehouses, no partner, no register
       if p_customer_id is not null or p_supplier_id is not null or p_register_id is not null then
-        fail(94, 'Η ενδοδιακίνηση δεν έχει πελάτη, προμηθευτή ή ταμείο');
+        fail(94, 'Η ενδοδιακίνηση και η ανάλωση δεν έχουν πελάτη, προμηθευτή ή ταμείο');
       end if;
-      select count(*) into v from mm_warehouse where id = p_to_warehouse_id and active = 'Y';
-      if v = 0 or p_to_warehouse_id = nvl(wh, main_warehouse) then
-        fail(94, 'Η ενδοδιακίνηση θέλει άλλη ενεργή αποθήκη παραλαβής');
+      if t.code = 'DAN' then              -- a consumption: one warehouse, out of it
+        if p_to_warehouse_id is not null then
+          fail(94, 'Η ανάλωση δεν έχει αποθήκη παραλαβής');
+        end if;
+      else
+        select count(*) into v from mm_warehouse where id = p_to_warehouse_id and active = 'Y';
+        if v = 0 or p_to_warehouse_id = nvl(wh, main_warehouse) then
+          fail(94, 'Η ενδοδιακίνηση θέλει άλλη ενεργή αποθήκη παραλαβής');
+        end if;
       end if;
     elsif p_to_warehouse_id is not null then
       fail(94, 'Αποθήκη παραλαβής έχει μόνο η ενδοδιακίνηση');
@@ -1059,8 +1081,12 @@ create or replace package body mm_core as
         update mm_item set cost = round(l.net / l.qty, 4) where id = l.item_id;   -- the last cost
       end if;
     end loop;
-    -- a transfer: into the warehouse it goes to, with the layers its lines took (fifo_apply)
-    if t.side = 'T' then
+    -- a transfer: into the warehouse it goes to, with the layers its lines took (fifo_apply); a
+    -- consumption: nowhere (its reason: USE, none given)
+    if t.code = 'DAN' then
+      update mm_doc set reason = nvl(reason, 'USE') where id = p_doc_id;
+    end if;
+    if t.side = 'T' and d.to_warehouse_id is not null then
       for l in (select id, item_id, qty from mm_doc_line where doc_id = p_doc_id order by line_no) loop
         stock_move(l.item_id, 'DOC', l.qty, p_doc_id, l.id, p_warehouse_id => d.to_warehouse_id);
       end loop;
