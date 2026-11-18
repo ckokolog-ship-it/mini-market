@@ -993,6 +993,8 @@ begin
   add_col('MM_REGISTER', 'WAREHOUSE_ID', 'warehouse_id number constraint mm_register_wh_fk references mm_warehouse');
   -- a transfer between two warehouses (Δελτίο ενδοδιακίνησης, DEN: side T): the warehouse it goes to
   add_col('MM_DOC', 'TO_WAREHOUSE_ID', 'to_warehouse_id number constraint mm_doc_to_wh_fk references mm_warehouse');
+  -- a consumption (DAN): why the goods went out: USE (used by the shop), DAMAGE, SAMPLE, EXPIRED
+  add_col('MM_DOC', 'REASON', 'reason varchar2(10) constraint mm_doc_reason_ck check (reason in (''USE'', ''DAMAGE'', ''SAMPLE'', ''EXPIRED''))');
   -- a count of the stock is of one warehouse (what it finds, a move there)
   add_col('MM_COUNT', 'WAREHOUSE_ID', 'warehouse_id number constraint mm_count_wh_fk references mm_warehouse');
   for c in (select search_condition_vc s from user_constraints where constraint_name = 'MM_DOC_TYPE_SIDE_CK') loop

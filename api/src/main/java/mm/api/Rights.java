@@ -193,6 +193,7 @@ final class Rights {
         return switch (name) {
             case "sales" -> "REP_SALES";
             case "sales-by" -> "REP_SALES_BY";
+            case "consumption" -> "REP_CONSUMPTION";
             case "vat" -> "REP_VAT";
             case "min-stock" -> "REP_MIN_STOCK";
             case "trial-items" -> "TRIAL_ITEMS";

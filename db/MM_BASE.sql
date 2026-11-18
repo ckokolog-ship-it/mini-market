@@ -32,7 +32,10 @@ using (select * from (values
          ('TAD', 'Τιμολόγιο - δελτίο παραλαβής',     'P',  1,  1,  1, 'N', 'Y', null),
          -- a transfer from a warehouse to another (side T): out of the one of the document, into its
          -- TO_WAREHOUSE_ID, at the costs of the layers it takes (FIFO); no partner, no VAT, no profit
-         ('DEN', 'Δελτίο ενδοδιακίνησης',                   'T', -1,  0,  0, 'N', 'N', null)
+         ('DEN', 'Δελτίο ενδοδιακίνησης',                   'T', -1,  0,  0, 'N', 'N', null),
+         -- a consumption (side T, no warehouse it goes to): out of the stock of its warehouse at the costs
+         -- of the layers (FIFO), for a reason (MM_DOC.REASON): used by the shop, damaged, a sample, expired
+         ('DAN', 'Δελτίο ανάλωσης',                         'T', -1,  0,  0, 'N', 'N', null)
        ) v (code, name, side, stock_sign, partner_sign, vat_sign, prices_incl_vat, partner_needed, ref_type)) s
 on (t.code = s.code)
 when matched then update set t.name = s.name, t.side = s.side, t.stock_sign = s.stock_sign,

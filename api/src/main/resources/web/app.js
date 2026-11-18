@@ -19,7 +19,8 @@ const MENU = [
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
   ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/chart', 'Γράφημα πωλήσεων', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
-    ['#/reports/min-stock', 'Ελάχιστο απόθεμα', 'MANAGER'], ['#/reports/sales-by', 'Πωλήσεις ανά κατάστημα', 'MANAGER'], ['#/reports/trial-items', 'Ισοζύγιο ειδών', 'MANAGER'],
+    ['#/reports/min-stock', 'Ελάχιστο απόθεμα', 'MANAGER'], ['#/reports/sales-by', 'Πωλήσεις ανά κατάστημα', 'MANAGER'],
+    ['#/reports/consumption', 'Αναλώσεις', 'MANAGER'], ['#/reports/trial-items', 'Ισοζύγιο ειδών', 'MANAGER'],
     ['#/reports/trial-customers', 'Ισοζύγιο πελατών', 'MANAGER'], ['#/reports/trial-suppliers', 'Ισοζύγιο προμηθευτών', 'MANAGER'],
     ['#/reports/profit', 'Μικτό κέρδος', 'MANAGER'], ['#/reports/stock-value', 'Αξία αποθήκης', 'MANAGER']]],
 ];
@@ -532,7 +533,8 @@ async function ledgerPage(what, id, params) {
 async function reportPage(name, params) {
   const titles = { sales: 'Πωλήσεις ανά ημέρα', vat: 'ΦΠΑ πωλήσεων και αγορών', 'min-stock': 'Είδη κάτω από το ελάχιστο απόθεμα',
     'trial-items': 'Ισοζύγιο ειδών', 'trial-customers': 'Ισοζύγιο πελατών', 'trial-suppliers': 'Ισοζύγιο προμηθευτών',
-    profit: 'Μικτό κέρδος', 'stock-value': 'Αξία αποθήκης', 'sales-by': 'Πωλήσεις ανά κατάστημα, ταμείο και ταμία' };
+    profit: 'Μικτό κέρδος', 'stock-value': 'Αξία αποθήκης', 'sales-by': 'Πωλήσεις ανά κατάστημα, ταμείο και ταμία',
+    consumption: 'Αναλώσεις (δελτία ανάλωσης)' };
   if (!titles[name]) { show(el('h1', {}, 'Δεν υπάρχει αυτή η αναφορά')); return; }
   const trial = name.startsWith('trial-');
   const all = el('input', { type: 'checkbox', name: 'all', checked: params.get('all') === '1' });
@@ -540,12 +542,12 @@ async function reportPage(name, params) {
   const to = el('input', { type: 'date', value: params.get('to') || isoToday() });
   const out = el('div');
   // the costs (the gross profit, the value of the stock): FIFO or the last purchase; the one of the shop by default
-  const costs = name === 'profit' || name === 'stock-value' || (name === 'sales-by' && may('PROFIT'));
+  const costs = name === 'profit' || name === 'stock-value' || name === 'consumption' || (name === 'sales-by' && may('PROFIT'));
   // the sales by: store, register, cashier
   const by = el('select', { name: 'by' }, [['warehouse', 'Κατάστημα'], ['register', 'Ταμείο'], ['user', 'Ταμίας']]
     .map(([k, t]) => el('option', { value: k, selected: (params.get('by') || 'warehouse') === k }, t)));
   let rwhs = [];
-  if (name === 'stock-value') {
+  if (name === 'stock-value' || name === 'consumption') {
     try { rwhs = (await api('warehouses')).rows; } catch (e) { rwhs = []; }
   }
   const rwh = el('select', { name: 'warehouse' }, ...options(rwhs, 'code', (w) => `${w.code} ${w.name}`, params.get('warehouse') || '', 'Όλες οι αποθήκες'));
@@ -568,7 +570,8 @@ async function reportPage(name, params) {
       first = false;
       if (costs) { method.value = r.method; makeDefault.hidden = !r.default_method || r.method === r.default_method || !act('STOCK_VALUE', 'COST_METHOD'); }
       out.replaceChildren(trial ? trialTable(name, r, from.value, to.value) : name === 'sales' ? salesTable(r.rows) : name === 'vat' ? vatTable(r.rows)
-        : name === 'profit' ? profitTable(r) : name === 'stock-value' ? stockValueTable(r) : name === 'sales-by' ? salesByTable(r) : minTable(r.rows));
+        : name === 'profit' ? profitTable(r) : name === 'stock-value' ? stockValueTable(r) : name === 'sales-by' ? salesByTable(r)
+          : name === 'consumption' ? consumptionTable(r) : minTable(r.rows));
       if (name === 'min-stock' && r.rows.length && act('REP_MIN_STOCK', 'ORDER')) out.append(orderBox(r.rows));
     } catch (e) { fail(e); }
   };
@@ -582,6 +585,25 @@ async function reportPage(name, params) {
       el('button', { class: 'primary', type: 'submit' }, 'Εμφάνιση'), costs ? makeDefault : null);
   show(el('h1', {}, titles[name]), form, out);
   go();
+}
+// the consumptions: by warehouse and reason, their items, how many, what they cost; a subtotal of each
+function consumptionTable(r) {
+  if (!r.rows.length) return el('p', { class: 'muted' }, 'Καμία ανάλωση σε αυτό το διάστημα.');
+  const out = [];
+  let key = null;
+  let sub = 0;
+  let all = 0;
+  const close = () => { if (key !== null) out.push(el('tr', { class: 'total' }, el('td', { colspan: 4 }, 'Σύνολο ' + key), num(sub))); };
+  for (const x of r.rows) {
+    const k = `${x.warehouse} · ${REASONS[x.reason] || x.reason}`;
+    if (k !== key) { close(); key = k; sub = 0; out.push(el('tr', { class: 'group' }, el('th', { colspan: 5 }, k))); }
+    sub += x.cost || 0;
+    all += x.cost || 0;
+    out.push(el('tr', {}, el('td', {}, x.code), el('td', { class: 'wrap' }, x.name), num(x.qty, qty), el('td', { class: 'num hide-phone' }, x.docs), num(x.cost)));
+  }
+  close();
+  out.push(el('tr', { class: 'total' }, el('td', { colspan: 4 }, `Γενικό σύνολο (${r.method === 'LAST' ? 'τελευταία τιμή αγοράς' : 'FIFO'})`), num(all)));
+  return table([['Κωδικός'], ['Είδος'], ['Ποσότητα', 'num'], ['Δελτία', 'num hide-phone'], ['Κόστος', 'num']], out);
 }
 // the sales by store, register or cashier: documents (receipts and invoices, less credit notes), net, total, the
 // average; with a right to the gross profit, what they cost and the profit
@@ -974,6 +996,8 @@ async function chartPage(params) {
 
 // -- the expiry of the goods: the receipts with a date, what is left of each (FIFO: the oldest goes
 // first), expired and expiring in N days; one taken out of the stock (a move by hand, its reason the date)
+// the reasons of a consumption (Δελτίο ανάλωσης, DAN)
+const REASONS = { USE: 'Ανάλωση (χρήση του καταστήματος)', DAMAGE: 'Φθορά', SAMPLE: 'Δείγμα', EXPIRED: 'Λήξη' };
 async function expiryPage(params) {
   const sel = el('select', { name: 'days' });
   const out = el('div');
@@ -2006,6 +2030,9 @@ async function printDoc(d) {
       el('div', { class: 'dp-title' }, el('div', { class: 'dp-type' }, order ? 'Παραγγελία προς προμηθευτή' : d.type_name),
         order ? null : el('div', {}, `${d.doc_type} ${d.doc_no || ''}`),
         el('div', {}, day(d.doc_date)), d.status === 'C' ? el('div', { class: 'dp-cancel' }, 'ΑΚΥΡΩΘΗΚΕ') : null)),
+    d.doc_type === 'DAN' ? el('div', { class: 'dp-partner' }, el('div', { class: 'dp-label' }, 'Ανάλωση'),
+      el('div', { class: 'dp-name' }, `Αποθήκη: ${d.warehouse} ${d.warehouse_name}`), el('div', {}, 'Αιτία: ' + REASONS[d.reason || 'USE']),
+      el('div', {}, 'Στην τιμή κόστους κάθε παραλαβής (FIFO), χωρίς ΦΠΑ')) :
     d.side === 'T' ? el('div', { class: 'dp-partner' }, el('div', { class: 'dp-label' }, 'Ενδοδιακίνηση'),
       el('div', { class: 'dp-name' }, `Από: ${d.warehouse} ${d.warehouse_name}`), el('div', { class: 'dp-name' }, `Προς: ${d.to_warehouse} ${d.to_warehouse_name}`),
       el('div', {}, 'Στην τιμή κόστους κάθε παραλαβής (FIFO), χωρίς ΦΠΑ')) :
@@ -2235,13 +2262,17 @@ async function docsPage(params) {
   try { whs = (await api('warehouses')).rows.filter((w) => w.active === 'Y'); } catch (e) { whs = []; }
   fromWh.replaceChildren(...options(whs, 'id', (w) => `${w.code} ${w.name}`, whs.length ? whs[0].id : ''));
   toWh.replaceChildren(...options(whs, 'id', (w) => `${w.code} ${w.name}`, whs.length > 1 ? whs[1].id : '', '— αποθήκη —'));
+  const reason = el('select', { name: 'reason' }, Object.entries(REASONS).map(([k, v]) => el('option', { value: k }, v)));
   const fill = async () => {
     const t = types.find((x) => x.code === type.value);
     const transfer = t.side === 'T';
+    const consumption = t.code === 'DAN';
     partnerBox.hidden = transfer;
     payBox.hidden = transfer;
     fromBox.hidden = !transfer;
-    toBox.hidden = !transfer;
+    toBox.hidden = !transfer || consumption;
+    reasonBox.hidden = !consumption;
+    fromBox.firstChild.textContent = consumption ? 'Αποθήκη' : 'Από αποθήκη';
     if (transfer) return;
     try {
       const rows = await partnersOf(t.side === 'S' ? 'customers' : 'suppliers');
@@ -2252,6 +2283,8 @@ async function docsPage(params) {
   const payBox = el('label', {}, 'Πληρωμή', pay);
   const fromBox = el('label', {}, 'Από αποθήκη', fromWh);
   const toBox = el('label', {}, 'Προς αποθήκη', toWh);
+  const reasonBox = el('label', {}, 'Αιτία', reason);
+  reasonBox.hidden = true;
   type.addEventListener('change', fill);
   const form = el('form', {
     class: 'panel row',
@@ -2259,7 +2292,10 @@ async function docsPage(params) {
       ev.preventDefault();
       const t = types.find((x) => x.code === type.value);
       const body = { doc_type: t.code, payment: pay.value, doc_date: date.value || null };
-      if (t.side === 'T') {
+      if (t.code === 'DAN') {
+        body.warehouse_id = Number(fromWh.value);
+        body.reason = reason.value;
+      } else if (t.side === 'T') {
         body.warehouse_id = Number(fromWh.value);
         body.to_warehouse_id = toWh.value ? Number(toWh.value) : null;
       } else if (partner.value) body[t.side === 'S' ? 'customer_id' : 'supplier_id'] = Number(partner.value);
@@ -2268,7 +2304,7 @@ async function docsPage(params) {
         location.hash = '#/doc/' + d.id;
       } catch (e) { fail(e); }
     },
-  }, el('label', {}, 'Είδος', type), partnerBox, fromBox, toBox,
+  }, el('label', {}, 'Είδος', type), partnerBox, fromBox, toBox, reasonBox,
   payBox, el('label', {}, 'Ημερομηνία', date), el('button', { class: 'primary', type: 'submit' }, 'Νέο'));
   // the notes not in an invoice yet: an invoice of one of them
   const notes = el('div');
@@ -2337,13 +2373,18 @@ async function docPage(id) {
   };
   // goods received from a supplier (DPA, TAD): each line its date of expiry
   const receiving = () => d && d.side === 'P' && d.stock_sign === 1;
+  const reasonPick = () => el('select', {
+    'aria-label': 'Αιτία',
+    onchange: (ev) => run('reason', { reason: ev.target.value }),
+  }, Object.entries(REASONS).map(([k, v]) => el('option', { value: k, selected: (d.reason || 'USE') === k }, v)));
   const draw = () => {
     const draft = d.status === 'D';
     title.textContent = `${d.type_name} ${d.doc_no || '(πρόχειρο)'}`;
     expBox.hidden = !receiving();
     head.replaceChildren(el('dl', { class: 'kv' }, [
       ['Είδος', `${d.doc_type} ${d.type_name}`], ['Ημερομηνία', day(d.doc_date)], ['Κατάσταση', DOC_ST[d.status]],
-      ...(d.side === 'T' ? [['Από αποθήκη', `${d.warehouse} ${d.warehouse_name}`], ['Προς αποθήκη', `${d.to_warehouse} ${d.to_warehouse_name}`]]
+      ...(d.doc_type === 'DAN' ? [['Αποθήκη', `${d.warehouse} ${d.warehouse_name}`], ['Αιτία', d.status === 'D' ? reasonPick() : REASONS[d.reason || 'USE']]]
+        : d.side === 'T' ? [['Από αποθήκη', `${d.warehouse} ${d.warehouse_name}`], ['Προς αποθήκη', `${d.to_warehouse} ${d.to_warehouse_name}`]]
         : [[d.side === 'S' ? 'Πελάτης' : 'Προμηθευτής', d.partner], ['Πληρωμή', { CREDIT: 'πίστωση', CASH: 'μετρητά', CARD: 'κάρτα' }[d.payment]]]),
       ['Από', d.ref_text], ['Στο τιμολόγιο', d.invoice_text],
       ['Δελτία του', d.notes_in.length ? d.notes_in.map(docText).join(', ') : null],
@@ -2567,7 +2608,7 @@ function render() {
   const need = (screen, fn) => (may(screen) ? fn() : show(el('h1', {}, 'Δεν επιτρέπεται'),
     el('p', { class: 'muted' }, 'Δεν έχεις δικαίωμα σε αυτή τη σελίδα.')));
   const partner = (k) => (k === 'customers' || k === 'customer' ? 'CUSTOMERS' : 'SUPPLIERS');
-  const REPORT = { 'sales-by': 'REP_SALES_BY', sales: 'REP_SALES', vat: 'REP_VAT', 'min-stock': 'REP_MIN_STOCK', 'trial-items': 'TRIAL_ITEMS',
+  const REPORT = { consumption: 'REP_CONSUMPTION', 'sales-by': 'REP_SALES_BY', sales: 'REP_SALES', vat: 'REP_VAT', 'min-stock': 'REP_MIN_STOCK', 'trial-items': 'TRIAL_ITEMS',
     'trial-customers': 'TRIAL_CUSTOMERS', 'trial-suppliers': 'TRIAL_SUPPLIERS', profit: 'PROFIT', 'stock-value': 'STOCK_VALUE' };
   switch (p[0]) {
     case 'pos': return need('POS', () => posPage(params));
