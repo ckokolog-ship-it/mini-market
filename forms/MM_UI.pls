@@ -40,6 +40,7 @@ PACKAGE BODY ui IS
   g_lto VARCHAR2(10);
 
   PROCEDURE pos_refresh;            -- (the till: below)
+  PROCEDURE place_defaults;         -- (where the user works: below)
 
   FUNCTION num(p_item VARCHAR2) RETURN NUMBER IS
   BEGIN
@@ -157,6 +158,7 @@ PACKAGE BODY ui IS
     END IF;
     NULL; -- ROLES
     read_only;
+    place_defaults;
     IF c_block IS NOT NULL THEN          -- (the menu has no block of a table)
       go_block(c_block);
       set_block_property(c_block, DEFAULT_WHERE, c_where);
@@ -207,17 +209,46 @@ PACKAGE BODY ui IS
     END IF;
   END;
 
-  -- the register of the box CTL.REG_CODE (T1 by default)
+  -- the register of the box CTL.REG_CODE (T1 by default): one the user may work on (its store, its
+  -- register: mm_auth.may_use)
   FUNCTION register_id RETURN NUMBER IS
     c VARCHAR2(10) := upper(nvl(name_in('CTL.REG_CODE'), 'T1'));
     r NUMBER;
   BEGIN
     SELECT id INTO r FROM mm_register WHERE code = c;
+    IF g_uid IS NOT NULL AND mm_auth.may_use(g_uid, r) <> 'Y' THEN   -- (g_uid: the login of ui.init)
+      message('Το ταμείο ' || c || ' δεν είναι του καταστήματός σου');
+      RAISE form_trigger_failure;
+    END IF;
     RETURN r;
   EXCEPTION
     WHEN no_data_found THEN
       message('Δεν υπάρχει ταμείο ' || c);
       RAISE form_trigger_failure;
+  END;
+
+  -- where the user works: its register (the till opens on it; else the first it may use), its store (a
+  -- new document of it)
+  PROCEDURE place_defaults IS
+    r VARCHAR2(10);
+    w VARCHAR2(10);
+    wid NUMBER;
+  BEGIN
+    IF c_block = 'PL' THEN
+      SELECT max(g.code) INTO r FROM mm_user u, mm_register g WHERE u.id = g_uid AND g.id = u.register_id;
+      IF r IS NULL THEN
+        SELECT min(g.code) INTO r FROM mm_register g WHERE g.active = 'Y' AND mm_auth.may_use(g_uid, g.id) = 'Y';
+      END IF;
+      IF r IS NOT NULL THEN
+        copy(r, 'CTL.REG_CODE');
+      END IF;
+    ELSIF c_block = 'DOC' THEN
+      SELECT max(w.code), max(w.id) INTO w, wid FROM mm_user u, mm_warehouse w WHERE u.id = g_uid AND w.id = u.warehouse_id;
+      IF wid IS NOT NULL THEN
+        copy(w, 'CTL.D_WH');
+        copy(to_char(wid), 'CTL.D_WH_ID');
+      END IF;
+    END IF;
   END;
 
   -- the buttons of the cards and of the reservations: MM_CORE, then COMMIT (MM_CORE does not commit)
@@ -292,7 +323,11 @@ PACKAGE BODY ui IS
     z NUMBER := mm_core.open_z_of(r);
     n NUMBER;
     a DATE;
+    w VARCHAR2(100);
   BEGIN
+    SELECT max(w.code || ' ' || w.name) INTO w FROM mm_register g, mm_warehouse w
+    WHERE g.id = r AND w.id = nvl(g.warehouse_id, mm_core.main_warehouse);
+    copy(w, 'CTL.WH_TEXT');
     IF z IS NULL THEN
       copy('Κλειστό: «Άνοιγμα Ζ» για να ξεκινήσεις', 'CTL.Z_TEXT');
     ELSE
@@ -386,6 +421,12 @@ PACKAGE BODY ui IS
     ELSIF p_item = 'CTL.UNLOCK' THEN
       mm_auth.unlock(name_in('USR.USERNAME'));
       forms_ddl('COMMIT');
+      again(c_block);
+    ELSIF p_item = 'CTL.SETPLACE' THEN
+      mm_auth.set_place(name_in('USR.USERNAME'), num('CTL.U_WH_ID'), num('CTL.U_REG_ID'));
+      forms_ddl('COMMIT');
+      message('Κατάστημα και ταμείο του ' || name_in('USR.USERNAME') || ': ' || nvl(name_in('CTL.U_WH'), '-') || ' / '
+              || nvl(name_in('CTL.U_REG'), '-'));
       again(c_block);
     ELSIF p_item = 'CTL.TOGGLEPIN' THEN
       s_ := upper(name_in('USR.USERNAME'));
@@ -533,7 +574,8 @@ PACKAGE BODY ui IS
     -- an invoice from its notes
     ELSIF p_item = 'CTL.NEWDOC' THEN
       v := mm_core.new_doc(upper(name_in('CTL.D_TYPE')), num('CTL.CUST_ID'), num('CTL.SUPP_ID'), NULL,
-                           upper(nvl(name_in('CTL.D_PAY'), 'CREDIT')), date_in('CTL.D_DATE'));
+                           upper(nvl(name_in('CTL.D_PAY'), 'CREDIT')), date_in('CTL.D_DATE'),
+                           num('CTL.D_WH_ID'), num('CTL.D_TO_WH_ID'));
       forms_ddl('COMMIT');
       show_only(v);
       message('Νέο πρόχειρο: βάλε τις γραμμές του και καταχώρισέ το');
@@ -921,6 +963,7 @@ PACKAGE BODY ui IS
   PROCEDURE post_query(p_block VARCHAR2) IS
     n VARCHAR2(1000);
     st_ VARCHAR2(1);
+    w2_ VARCHAR2(10);
     mark_ NUMBER;
     cmark_ NUMBER;
     z VARCHAR2(40);
@@ -956,6 +999,15 @@ PACKAGE BODY ui IS
       ELSIF id_ IS NOT NULL THEN
         SELECT name INTO n FROM mm_supplier WHERE id = id_;
       END IF;
+      a := num('DOC.WAREHOUSE_ID');
+      s := num('DOC.TO_WAREHOUSE_ID');
+      IF s IS NOT NULL THEN                 -- a transfer (DEN): from the one to the other
+        SELECT max(f.code), max(t.code) INTO z, w2_ FROM mm_warehouse f, mm_warehouse t WHERE f.id = a AND t.id = s;
+        n := 'Ενδοδιακίνηση ' || z || ' → ' || w2_;
+      ELSIF a IS NOT NULL AND a <> mm_core.main_warehouse THEN
+        SELECT max(code) INTO z FROM mm_warehouse WHERE id = a;
+        n := n || ' · ' || z;
+      END IF;
       copy(n, 'DOC.PARTNER_TEXT');
       -- a note: the invoice it is in
       id_ := num('DOC.INVOICE_ID');
@@ -988,6 +1040,11 @@ PACKAGE BODY ui IS
       ELSE
         copy('N', 'USR.PIN_OK');
       END IF;
+      n := lower(n);
+      SELECT max(w.code) || CASE WHEN max(g.code) IS NOT NULL THEN ' / ' || max(g.code) END INTO z
+      FROM mm_user u, mm_warehouse w, mm_register g
+      WHERE u.username = n AND w.id (+) = u.warehouse_id AND g.id (+) = u.register_id;
+      copy(z, 'USR.PLACE_TEXT');
     ELSIF p_block = 'PAY' THEN
       c_ := num('PAY.CUSTOMER_ID');
       id_ := num('PAY.SUPPLIER_ID');
