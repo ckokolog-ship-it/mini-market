@@ -56,6 +56,10 @@ end;""",
     "create or replace function default_where return number is begin return 4; end;",
     "create or replace function format_mask return number is begin return 5; end;",
     "create or replace function enabled return number is begin return 11; end;",
+    "create or replace function visible return number is begin return 12; end;",
+    "create or replace function update_allowed return number is begin return 13; end;",
+    "create or replace function insert_allowed return number is begin return 14; end;",
+    "create or replace function delete_allowed return number is begin return 15; end;",
     "create or replace function property_false return varchar2 is begin return 'FALSE'; end;",
     """create or replace procedure default_value(v varchar2, p varchar2) is
 begin if not fstub.items.exists(upper(p)) then fstub.items(upper(p)) := v; end if; end;""",
@@ -104,7 +108,8 @@ begin
   return fstub.lov_answer;
 end;""",
 ]
-DROP = ['package ui', 'package web', 'function enabled', 'function property_false', 'procedure default_value',
+DROP = ['package ui', 'package web', 'function enabled', 'function visible', 'function update_allowed',
+        'function insert_allowed', 'function delete_allowed', 'function property_false', 'procedure default_value',
         'function get_window_property', 'function lov_name', 'function get_item_property', 'function status', 'function query_status', 'procedure set_record_property',
         'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block', 'procedure go_item',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
@@ -975,31 +980,61 @@ def test_login_form(cur):
 
 @needs_db
 def test_roles_of_the_forms(cur):
-    """no login: to MM_LOGIN; a cashier: not the office (back to the first menu), its buttons and the
-    items of the bar that open the office off; an administrator: all on"""
+    """the rights (MM_RIGHTS) in the forms: no login: to MM_LOGIN; a cashier: the items read only, without
+    their cost (its blocks without insert, update, delete; the cost not shown); not the documents (back
+    to the first menu); its buttons and the items of the bar that open the office off; an administrator:
+    all on; a role of the shop: a button of an action off, a field read only"""
     compile_ui(cur, 'MM_ITEMS')
     run(cur, 'ui.init;', GLOBAL__MM_TOKEN='')
     assert prop(cur, 'NEW_FORM') == 'MM_LOGIN'
     cashier = login_as(cur, LOGIN['cashier'])
     run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
-    assert prop(cur, 'NEW_FORM') == 'MM_MAIN' and 'MANAGER' in msgs(cur)
+    assert prop(cur, 'NEW_FORM') is None                                      # the items: read
+    assert prop(cur, 'BLOCK ITEM#14') == 'FALSE' and prop(cur, 'BLOCK ITEM#13') == 'FALSE' and prop(cur, 'BLOCK ITEM#15') == 'FALSE'
+    assert prop(cur, 'ITEM.COST#12') == 'FALSE' and prop(cur, 'ITEM.PRICE#12') is None
+    run(cur, 'ui.init;')                                                      # the administrator: all
+    assert prop(cur, 'BLOCK ITEM#14') is None and prop(cur, 'ITEM.COST#12') is None
+    compile_ui(cur, 'MM_INVOICES')
+    run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
+    assert prop(cur, 'NEW_FORM') == 'MM_MAIN' and 'δικαίωμα' in msgs(cur)
     cur.execute('begin :v := fstub.queries; end;', v=(q := cur.var(str)))
     assert q.getvalue() is None                                               # nothing shown
     compile_ui(cur, 'MM_MAIN')
     run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
     assert prop(cur, 'NEW_FORM') is None
-    assert prop(cur, 'CTL.GO_MM_ITEMS#11') == 'FALSE' and prop(cur, 'CTL.GO_MM_USERS#11') == 'FALSE'
+    assert prop(cur, 'CTL.GO_MM_INVOICES#11') == 'FALSE' and prop(cur, 'CTL.GO_MM_USERS#11') == 'FALSE'
     assert prop(cur, 'CTL.GO_MM_POS#11') is None and prop(cur, 'CTL.GO_MM_RESERVATIONS#11') is None
+    assert prop(cur, 'CTL.GO_MM_ITEMS#11') is None and prop(cur, 'CTL.GO_MM_POS#2') == 'Ταμείο'   # (its name in the menu)
     assert prop(cur, 'MENU SALES_MENU.INVOICES#11') == 'FALSE' and prop(cur, 'MENU SALES_MENU.POS#11') is None
     assert prop(cur, 'MENU FILE_MENU.USERS#11') == 'FALSE'
     run(cur, 'ui.init;')                                                      # the administrator
-    assert prop(cur, 'CTL.GO_MM_ITEMS#11') is None and prop(cur, 'MENU FILE_MENU.USERS#11') is None
+    assert prop(cur, 'CTL.GO_MM_INVOICES#11') is None and prop(cur, 'MENU FILE_MENU.USERS#11') is None
     compile_ui(cur, 'MM_POS')
     run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
-    assert prop(cur, 'NEW_FORM') is None                                     # the till: a cashier's
+    assert prop(cur, 'NEW_FORM') is None and prop(cur, 'CTL.OPENZ#11') is None   # the till: a cashier's
     compile_ui(cur, 'MM_USERS')
     run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
     assert prop(cur, 'NEW_FORM') == 'MM_MAIN'                                # the users: administrators only
+    # a role of the shop: the documents read, posted, not made; the customers without their tax number
+    role = 'TSTF_' + LOGIN['cashier'][-6:].upper()
+    try:
+        cur.callfunc('mm_rights.create_role', int, [role, 'Test forms'])
+        for g in (('DOCS', None, 'R'), ('DOCS', 'POST', 'W'), ('CUSTOMERS', None, 'W'), ('CUSTOMERS', 'AFM', 'R')):
+            cur.callproc('mm_rights.set_grant', [role, *g])
+        cur.callproc('mm_rights.add_user_role', [LOGIN['cashier'], role])
+        cur.connection.commit()
+        compile_ui(cur, 'MM_INVOICES')
+        run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
+        assert prop(cur, 'NEW_FORM') is None
+        assert prop(cur, 'CTL.NEWDOC#11') == 'FALSE' and prop(cur, 'CTL.CANCELDOC#11') == 'FALSE'
+        assert prop(cur, 'CTL.POSTDOC#11') is None
+        compile_ui(cur, 'MM_CUSTOMERS')
+        run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
+        assert prop(cur, 'PARTNER.AFM#13') == 'FALSE' and prop(cur, 'PARTNER.AFM#12') is None
+        assert prop(cur, 'PARTNER.PHONE#13') is None and prop(cur, 'BLOCK PARTNER#14') is None
+    finally:
+        cur.execute('delete from mm_role where code = :r', r=role)
+        cur.connection.commit()
 
 
 @needs_db
