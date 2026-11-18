@@ -823,6 +823,22 @@ create table if not exists mm_audit_log (
   detail      varchar2(1000)
 );
 create index if not exists mm_audit_log_at_ix on mm_audit_log (at);
+-- who made a document, who posted it (MM_AUDIT.sql: its trigger, as the history of what was done: the user of
+-- the pages or the forms, else of the database)
+declare
+  procedure add_col(c varchar2, ddl varchar2) is
+    n number;
+  begin
+    select count(*) into n from user_tab_cols where table_name = 'MM_DOC' and column_name = c;
+    if n = 0 then
+      execute immediate 'alter table mm_doc add (' || ddl || ')';
+    end if;
+  end;
+begin
+  add_col('CREATED_BY', 'created_by varchar2(64)');
+  add_col('POSTED_BY', 'posted_by varchar2(64)');
+end;
+/
 create index if not exists mm_audit_log_ref_ix on mm_audit_log (ref_type, ref_id);
 
 -- the totals of each month (MM_MONTHS.sql: kept by triggers): the ledgers take what was before a

@@ -19,7 +19,7 @@ const MENU = [
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
   ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/chart', 'Γράφημα πωλήσεων', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
-    ['#/reports/min-stock', 'Ελάχιστο απόθεμα', 'MANAGER'], ['#/reports/trial-items', 'Ισοζύγιο ειδών', 'MANAGER'],
+    ['#/reports/min-stock', 'Ελάχιστο απόθεμα', 'MANAGER'], ['#/reports/sales-by', 'Πωλήσεις ανά κατάστημα', 'MANAGER'], ['#/reports/trial-items', 'Ισοζύγιο ειδών', 'MANAGER'],
     ['#/reports/trial-customers', 'Ισοζύγιο πελατών', 'MANAGER'], ['#/reports/trial-suppliers', 'Ισοζύγιο προμηθευτών', 'MANAGER'],
     ['#/reports/profit', 'Μικτό κέρδος', 'MANAGER'], ['#/reports/stock-value', 'Αξία αποθήκης', 'MANAGER']]],
 ];
@@ -532,7 +532,7 @@ async function ledgerPage(what, id, params) {
 async function reportPage(name, params) {
   const titles = { sales: 'Πωλήσεις ανά ημέρα', vat: 'ΦΠΑ πωλήσεων και αγορών', 'min-stock': 'Είδη κάτω από το ελάχιστο απόθεμα',
     'trial-items': 'Ισοζύγιο ειδών', 'trial-customers': 'Ισοζύγιο πελατών', 'trial-suppliers': 'Ισοζύγιο προμηθευτών',
-    profit: 'Μικτό κέρδος', 'stock-value': 'Αξία αποθήκης' };
+    profit: 'Μικτό κέρδος', 'stock-value': 'Αξία αποθήκης', 'sales-by': 'Πωλήσεις ανά κατάστημα, ταμείο και ταμία' };
   if (!titles[name]) { show(el('h1', {}, 'Δεν υπάρχει αυτή η αναφορά')); return; }
   const trial = name.startsWith('trial-');
   const all = el('input', { type: 'checkbox', name: 'all', checked: params.get('all') === '1' });
@@ -540,7 +540,10 @@ async function reportPage(name, params) {
   const to = el('input', { type: 'date', value: params.get('to') || isoToday() });
   const out = el('div');
   // the costs (the gross profit, the value of the stock): FIFO or the last purchase; the one of the shop by default
-  const costs = name === 'profit' || name === 'stock-value';
+  const costs = name === 'profit' || name === 'stock-value' || (name === 'sales-by' && may('PROFIT'));
+  // the sales by: store, register, cashier
+  const by = el('select', { name: 'by' }, [['warehouse', 'Κατάστημα'], ['register', 'Ταμείο'], ['user', 'Ταμίας']]
+    .map(([k, t]) => el('option', { value: k, selected: (params.get('by') || 'warehouse') === k }, t)));
   let rwhs = [];
   if (name === 'stock-value') {
     try { rwhs = (await api('warehouses')).rows; } catch (e) { rwhs = []; }
@@ -560,23 +563,39 @@ async function reportPage(name, params) {
     try {
       const m = costs ? (first ? params.get('method') || '' : method.value) : '';
       const r = await api(`reports/${name}?from=${from.value}&to=${to.value}` + (trial && all.checked ? '&all=1' : '') + (m ? '&method=' + m : '')
+        + (name === 'sales-by' ? '&by=' + by.value : '')
         + (rwhs.length > 1 && rwh.value ? '&warehouse=' + encodeURIComponent(rwh.value) : ''));
       first = false;
-      if (costs) { method.value = r.method; makeDefault.hidden = r.method === r.default_method; }
+      if (costs) { method.value = r.method; makeDefault.hidden = !r.default_method || r.method === r.default_method || !act('STOCK_VALUE', 'COST_METHOD'); }
       out.replaceChildren(trial ? trialTable(name, r, from.value, to.value) : name === 'sales' ? salesTable(r.rows) : name === 'vat' ? vatTable(r.rows)
-        : name === 'profit' ? profitTable(r) : name === 'stock-value' ? stockValueTable(r) : minTable(r.rows));
+        : name === 'profit' ? profitTable(r) : name === 'stock-value' ? stockValueTable(r) : name === 'sales-by' ? salesByTable(r) : minTable(r.rows));
       if (name === 'min-stock' && r.rows.length && act('REP_MIN_STOCK', 'ORDER')) out.append(orderBox(r.rows));
     } catch (e) { fail(e); }
   };
   const form = name === 'min-stock' ? null
     : el('form', { class: 'panel row', onsubmit: (ev) => { ev.preventDefault(); go(); } },
       name === 'stock-value' ? null : el('label', {}, 'Από', from), name === 'stock-value' ? null : el('label', {}, 'Έως', to),
+      name === 'sales-by' ? el('label', {}, 'Ανά', by) : null,
       costs ? el('label', {}, 'Μέθοδος κόστους', method) : null,
       rwhs.length > 1 ? el('label', {}, 'Αποθήκη', rwh) : null,
       trial ? el('label', { class: 'check' }, all, 'Και όσα έχουν μηδέν παντού') : null,
       el('button', { class: 'primary', type: 'submit' }, 'Εμφάνιση'), costs ? makeDefault : null);
   show(el('h1', {}, titles[name]), form, out);
   go();
+}
+// the sales by store, register or cashier: documents (receipts and invoices, less credit notes), net, total, the
+// average; with a right to the gross profit, what they cost and the profit
+function salesByTable(r) {
+  const cost = r.rows.some((x) => x.cost !== null);
+  const head = { warehouse: 'Κατάστημα', register: 'Ταμείο', user: 'Ταμίας' }[r.by];
+  const sum = (k) => r.rows.reduce((a, x) => a + (x[k] || 0), 0);
+  return table([[head], ['Παραστατικά', 'num'], ['Καθαρά', 'num'], ['Σύνολο', 'num'], ['Μέση απόδειξη', 'num hide-phone'],
+    ...(cost ? [['Κόστος', 'num hide-phone'], ['Μικτό κέρδος', 'num']] : [])],
+  [...r.rows.map((x) => el('tr', {}, el('td', {}, x.name || (r.by === 'register' ? 'Γραφείο (τιμολόγια)' : '-')),
+    el('td', { class: 'num' }, x.docs), num(x.net), num(x.total), num(x.avg_total, money, 'num hide-phone'),
+    ...(cost ? [num(x.cost, money, 'num hide-phone'), num(x.profit)] : []))),
+  el('tr', { class: 'total' }, el('td', {}, 'Σύνολο'), el('td', { class: 'num' }, sum('docs')), num(sum('net')), num(sum('total')),
+    el('td', { class: 'hide-phone' }), ...(cost ? [num(sum('cost'), money, 'num hide-phone'), num(sum('profit'))] : []))]);
 }
 // rows under their month, with the subtotal of each month and the grand total
 function byMonth(rows, keyOf, cells, sums, label) {
@@ -807,7 +826,12 @@ async function dayPage(params) {
         pair('Backup', (BACKUP_STATE[b.state] || b.state) + (b.ok_at ? ' · ' + day(b.ok_at) : ''), b.state !== 'OK'))),
       r.min_stock > 0 ? el('p', { class: 'no-print' }, el('a', { href: '#/reports/min-stock' }, 'Τα είδη κάτω από το ελάχιστο ›')) : null,
       r.expiry.expired + r.expiry.soon > 0 ? el('p', { class: 'no-print' }, el('a', { href: '#/expiry' }, 'Οι λήξεις ›')) : null)),
-    box('Τα 10 είδη με τις περισσότερες πωλήσεις', top));
+    box('Τα 10 είδη με τις περισσότερες πωλήσεις', top),
+    // the sales of the day by store and by cashier
+    (r.by_warehouse || []).length > 1 ? box('Ανά κατάστημα', table([['Κατάστημα'], ['Παραστατικά', 'num'], ['Σύνολο', 'num']],
+      r.by_warehouse.map((x) => el('tr', {}, el('td', {}, `${x.code} ${x.name}`), el('td', { class: 'num' }, x.docs), num(x.total))))) : null,
+    (r.by_user || []).length ? box('Ανά ταμία', table([['Ταμίας'], ['Παραστατικά', 'num'], ['Σύνολο', 'num']],
+      r.by_user.map((x) => el('tr', {}, el('td', {}, x.name || x.username), el('td', { class: 'num' }, x.docs), num(x.total))))) : null);
 }
 
 // -- the charts of the sales: by day (bars) with the same day a year before (a line), by hour (bars); the
@@ -1910,6 +1934,7 @@ async function printReceipt(reg, id, extra = {}) {
     el('div', { class: 'rc-head' }, lines(r.header)),
     el('div', { class: 'rc-title' }, 'ΑΠΟΔΕΙΞΗ ΛΙΑΝΙΚΗΣ ΠΩΛΗΣΗΣ'),
     pair('ΑΛΠ ' + r.doc_no, day(r.created_at)), pair('Ταμείο ' + r.register, r.z_no ? 'Ζ ' + r.z_no : ''),
+    r.cashier ? pair('Ταμίας', r.cashier) : null,
     r.status === 'C' ? el('div', { class: 'rc-title' }, '*** ΑΚΥΡΩΘΗΚΕ ***') : null,
     el('hr'),
     r.lines.map((x) => el('div', { class: 'rc-line' }, el('div', {}, x.name),
@@ -2529,7 +2554,7 @@ function render() {
   const need = (screen, fn) => (may(screen) ? fn() : show(el('h1', {}, 'Δεν επιτρέπεται'),
     el('p', { class: 'muted' }, 'Δεν έχεις δικαίωμα σε αυτή τη σελίδα.')));
   const partner = (k) => (k === 'customers' || k === 'customer' ? 'CUSTOMERS' : 'SUPPLIERS');
-  const REPORT = { sales: 'REP_SALES', vat: 'REP_VAT', 'min-stock': 'REP_MIN_STOCK', 'trial-items': 'TRIAL_ITEMS',
+  const REPORT = { 'sales-by': 'REP_SALES_BY', sales: 'REP_SALES', vat: 'REP_VAT', 'min-stock': 'REP_MIN_STOCK', 'trial-items': 'TRIAL_ITEMS',
     'trial-customers': 'TRIAL_CUSTOMERS', 'trial-suppliers': 'TRIAL_SUPPLIERS', profit: 'PROFIT', 'stock-value': 'STOCK_VALUE' };
   switch (p[0]) {
     case 'pos': return need('POS', () => posPage(params));

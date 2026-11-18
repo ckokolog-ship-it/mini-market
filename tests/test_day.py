@@ -26,7 +26,8 @@ def test_the_summary_of_a_day(api, env, users):
     test_core.close_open_z(db, ids['reg'])
     r0 = get(api, '/api/day')
     assert r0['date'] == today
-    assert set(r0) == {'date', 'zs', 'sales', 'vat', 'top', 'scratch', 'orders', 'mydata', 'min_stock', 'expiry', 'backup', 'profit'}
+    assert set(r0) == {'date', 'zs', 'sales', 'vat', 'top', 'scratch', 'orders', 'mydata', 'min_stock', 'expiry', 'backup', 'profit',
+                       'by_warehouse', 'by_user'}
     assert r0['backup']['state'] in ('OK', 'OLD', 'FAILED', 'NEVER')
     # a day at the till: a Z, 3 x b (2,26, 13%) paid by card, a prize of a scratch ticket from the drawer
     pos = '/api/pos/tst'

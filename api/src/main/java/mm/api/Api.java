@@ -908,6 +908,28 @@ final class Api {
         LocalDate t = to(q);
         Map<String, Object> out = new LinkedHashMap<>();
         switch (name) {
+            case "sales-by" -> {           // the sales of each store, register, cashier (MM_SALES_DOC)
+                String by = q.getOrDefault("by", "warehouse");
+                String m = costMethod(c, q);
+                String[] k = switch (by) {
+                    case "warehouse" -> new String[] {"s.warehouse_id",
+                        "(select w.code || ' ' || w.name from mm_warehouse w where w.id = s.warehouse_id)"};
+                    case "register" -> new String[] {"s.register_id",
+                        "nvl((select g.code || ' ' || g.name from mm_register g where g.id = s.register_id), '-')"};
+                    case "user" -> new String[] {"s.posted_by",
+                        "nvl((select u.full_name from mm_user u where u.username = s.posted_by), s.posted_by)"};
+                    default -> throw new Http.Fail(400, "bad_by", "by: warehouse, register or user");
+                };
+                out.put("from", f.toString());
+                out.put("to", t.toString());
+                out.put("by", by);
+                out.put("method", m);
+                out.put("rows", Db.rows(c, "select to_char(" + k[0] + ") key, " + k[1] + " name, sum(s.docs) docs, sum(s.net) net, "
+                        + "sum(s.total) total, round(sum(s.total) / nullif(sum(s.docs), 0), 2) avg_total, "
+                        + "round(sum(case ? when 'LAST' then s.cost_last else s.cost_fifo end), 2) cost, "
+                        + "sum(s.net) - round(sum(case ? when 'LAST' then s.cost_last else s.cost_fifo end), 2) profit "
+                        + "from mm_sales_doc s where s.day between ? and ? group by " + k[0] + " order by sum(s.total) desc", m, m, f, t));
+            }
             case "sales" -> {
                 out.put("from", f.toString());
                 out.put("to", t.toString());

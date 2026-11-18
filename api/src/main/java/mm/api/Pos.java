@@ -561,7 +561,8 @@ final class Pos {
                        d.total - d.deposit due, r.code register, r.name register_name, z.z_no,
                        d.disc_amount, d.disc_reason, d.points_used, cu.name customer, cu.card, cu.points,
                        (select nvl(sum(m.points), 0) from mm_points m where m.doc_id = d.id
-                          and m.note = 'Αγορά') points_earned
+                          and m.note = 'Αγορά') points_earned,
+                       (select nvl(max(us.full_name), d.posted_by) from mm_user us where us.username = d.posted_by) cashier
                 from mm_doc d join mm_register r on r.id = d.register_id left join mm_z z on z.id = d.z_id
                 left join mm_customer cu on cu.id = d.customer_id
                 where d.id = ? and d.register_id = ? and d.doc_type = 'ALP' and d.status in ('P', 'C')""", id, reg);
