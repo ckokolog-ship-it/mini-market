@@ -141,6 +141,10 @@ button.cam { font-size: 18px; line-height: 1; padding: 6px 10px; }
 /* the office: a cancelled move; the list of the notes folded */
 tr.cancelled td { color: var(--muted); text-decoration: line-through; }
 tr.cancelled td:last-child { text-decoration: none; }
+/* the rights: a group of the menu in a table; the roles of a user; the role chosen */
+tr.group th, tr.group td { text-align: left; background: var(--line, #eee); }
+.roles label.check { display: block; white-space: nowrap; }
+tr.on td { font-weight: 600; }
 details { margin-bottom: 14px; }
 summary { cursor: pointer; padding: 6px 0; }
 

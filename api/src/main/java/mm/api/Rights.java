@@ -110,6 +110,7 @@ final class Rights {
                 }
                 case "expiry" -> need(u, "EXPIRY", null, "R");
                 case "users" -> need(u, "USERS", null, "R");
+                case "roles", "menu" -> need(u, "ROLES", null, "R");
                 case "chart" -> need(u, "CHART", null, "R");
                 case "day", "backup" -> need(u, "DAY", null, "R");
                 case "reports" -> {
@@ -168,7 +169,14 @@ final class Rights {
             } : null, "W");
             case "warehouses" -> need(u, "WAREHOUSES", n == 1 ? "CREATE" : "min".equals(a2) ? "MIN"
                     : "transfer".equals(a2) ? "TRANSFER" : null, "W");
-            case "users" -> need(u, "USERS", n == 1 ? "CREATE" : null, "W");
+            case "users" -> {
+                if (n == 3 && "roles".equals(a2)) {
+                    need(u, "ROLES", null, "W");                    // (the roles of a user: its rights)
+                } else {
+                    need(u, "USERS", n == 1 ? "CREATE" : null, "W");
+                }
+            }
+            case "roles", "menu" -> need(u, "ROLES", null, "W");
             case "reports" -> need(u, "STOCK_VALUE", "COST_METHOD", "W");
             case "expiry" -> need(u, "EXPIRY", "WITHDRAW", "W");
             case "customers" -> need(u, "CUSTOMERS", "card".equals(a2) ? "CARD" : null, "W");
