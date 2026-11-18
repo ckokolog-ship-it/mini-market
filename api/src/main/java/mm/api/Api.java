@@ -286,6 +286,21 @@ final class Api {
                 return warehouses(c);
             }
         }
+        if ("roles".equals(p[0]) || "menu".equals(p[0])) {
+            return Roles.post(c, p, in);
+        }
+        if ("users".equals(p[0]) && n == 3 && "roles".equals(p[2])) {   // the roles of a user (ROLES W: Rights)
+            List<Map<String, Object>> r = Db.rows(c, "select username from mm_user where id = ?", Http.id(p[1]));
+            if (r.isEmpty()) {
+                throw new Http.Fail(404, "not_found", "no such user: " + p[1]);
+            }
+            Object codes = in.get("roles");
+            if (!(codes instanceof List<?> l)) {
+                throw new Http.Fail(400, "bad_roles", "roles: a list of the codes of roles");
+            }
+            Roles.userRoles(c, (String) r.get(0).get("username"), l);
+            return users(c);
+        }
         if ("users".equals(p[0])) {               // a new user; one changed: role, active, password, place
             // (its password, its place: actions of their own; an administrator, made or changed: only by one
             // who has all the rights, so that a right to the users is not a way to all of them)
@@ -430,7 +445,9 @@ final class Api {
                 select u.id, u.username, u.full_name, u.role, u.active,
                        case when u.locked_until > sysdate then 'Y' else 'N' end locked,
                        u.warehouse_id, w.code warehouse, w.name warehouse_name, u.register_id, g.code register,
-                       (select max(l.at) from mm_auth_log l where l.username = u.username and l.event = 'LOGIN') last_login
+                       (select max(l.at) from mm_auth_log l where l.username = u.username and l.event = 'LOGIN') last_login,
+                       (select listagg(r.code, ',') within group (order by r.system desc, r.id) from mm_user_role ur
+                        join mm_role r on r.id = ur.role_id where ur.user_id = u.id) roles
                 from mm_user u left join mm_warehouse w on w.id = u.warehouse_id left join mm_register g on g.id = u.register_id
                 order by u.username"""));
     }
@@ -598,6 +615,9 @@ final class Api {
                 if (n == 1) {
                     return Expiry.get(c, q);
                 }
+            }
+            case "roles", "menu" -> {       // the roles, their rights, the menu (Roles)
+                return Roles.get(c, p);
             }
             case "users" -> {               // the users: their role, store, register (ADMIN)
                 if (n == 1) {

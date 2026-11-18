@@ -101,11 +101,13 @@ def test_an_invoice_to_mydata_and_its_credit_note(api, shop, users):
         sum(float(r.findtext('i:netValue', namespaces=NS)) for r in rows), 2)
     assert s.findtext('i:incomeClassification/c:classificationType', namespaces=NS) == 'E3_561_001'
     # sent: its MARK, UID, QR from AADE; the account in the headers; once only
-    n0 = len(aade.got)
+    # (the sender in the background, every 2 seconds, may send another one of the queue meanwhile: its MARK
+    # after the one before, not above the last; its call the one with its number)
+    n0, m0 = len(aade.got), aade.mark
     r = post(api, '/api/docs/%d/mydata' % d)
-    assert r['mydata_state'] == 'S' and r['mydata_mark'] == aade.mark and len(r['mydata_uid']) == 40
+    assert r['mydata_state'] == 'S' and m0 < r['mydata_mark'] <= aade.mark and len(r['mydata_uid']) == 40
     assert r['mydata_qr'].startswith('https://') and r['mydata_error'] is None
-    path, headers, body = aade.got[n0]
+    path, headers, body = [g for g in aade.got[n0:] if '<aa>%d</aa>' % no in g[2]][0]
     assert path == '/SendInvoices' and headers['aade-user-id'] == 'tst-user' and '<invoiceType>1.1' in body
     assert post(api, '/api/docs/%d/mydata' % d, status=400)['error'] == 'MM-189'               # sent already
     # its credit note (goods back: the return note, its credit note): 5.1, the MARK of the invoice
@@ -122,9 +124,10 @@ def test_an_invoice_to_mydata_and_its_credit_note(api, shop, users):
     # cancelled: not here while it is at AADE; at AADE first (its MARK), then here
     assert db.one('select count(*) from mm_doc where id = :d', d=ppy)[0] == 1
     db.fails(189, 'cancel_doc', ppy)
+    m0 = aade.mark
     c = post(api, '/api/docs/%d/mydata/cancel' % ppy)
-    assert (c['status'], c['mydata_state'], c['mydata_cancel_mark']) == ('C', 'X', aade.mark)
-    assert aade.got[-1][0] == '/CancelInvoice?mark=%d' % c['mydata_mark']
+    assert (c['status'], c['mydata_state']) == ('C', 'X') and m0 < c['mydata_cancel_mark'] <= aade.mark
+    assert '/CancelInvoice?mark=%d' % c['mydata_mark'] in [g[0] for g in aade.got]
     assert get(api, '/api/docs/%d' % ppy)['mydata_state'] == 'X'
     assert get(api, '/api/docs/%d/mydata' % d, status=403, token='CASHIER')['error'] == 'forbidden'
 

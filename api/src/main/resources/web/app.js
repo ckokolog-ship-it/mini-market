@@ -15,7 +15,7 @@ const MENU = [
   ['Πωλήσεις', [['#/pos', 'Ταμείο', 'CASHIER'], ['#/orders', 'Παραγγελίες', 'CASHIER']]],
   ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER'], ['#/expiry', 'Λήξεις', 'MANAGER'],
     ['#/warehouses', 'Αποθήκες', 'MANAGER']]],
-  ['Διαχείριση', [['#/users', 'Χρήστες', 'ADMIN']]],
+  ['Διαχείριση', [['#/users', 'Χρήστες', 'ADMIN'], ['#/roles', 'Ρόλοι και δικαιώματα', 'ADMIN']]],
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
   ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/chart', 'Γράφημα πωλήσεων', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
@@ -1096,7 +1096,22 @@ async function usersPage() {
     regs.map((r) => el('option', { value: r.id, selected: r.id === v }, `${r.code} ${r.name}`)));
   const num_ = (v) => (v ? Number(v) : null);
   const out = el('div');
-  const draw = (r) => out.replaceChildren(table([['Χρήστης'], ['Όνομα', 'hide-phone'], ['Ρόλος'], ['Κατάστημα'], ['Ταμείο'], ['Ενεργός'],
+  let allRoles = [];
+  if (act('ROLES')) { try { allRoles = (await api('roles')).rows.filter((x) => x.active === 'Y'); } catch (e) { allRoles = []; } }
+  // the roles of a user (more than one: the most of each); only with a right to change the roles
+  const rolesOf = (x) => {
+    const mine = new Set((x.roles || '').split(',').filter(Boolean));
+    if (!allRoles.length) return el('span', {}, [...mine].join(', '));
+    const boxes = allRoles.map((r) => el('label', { class: 'check' }, el('input', {
+      type: 'checkbox', checked: mine.has(r.code), value: r.code, 'aria-label': `Ρόλος ${r.code} ${x.username}`,
+      onchange: async () => {
+        const roles = boxes.map((b) => b.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
+        try { draw(await api(`users/${x.id}/roles`, { roles })); toast('Οι ρόλοι του ' + x.username); } catch (e) { fail(e); draw(await api('users')); }
+      },
+    }), ' ' + r.name));
+    return el('div', { class: 'roles' }, boxes);
+  };
+  const draw = (r) => out.replaceChildren(table([['Χρήστης'], ['Όνομα', 'hide-phone'], ['Επίπεδο'], ['Ρόλοι'], ['Κατάστημα'], ['Ταμείο'], ['Ενεργός'],
     ['Τελευταία σύνδεση', 'hide-phone'], ['']],
   r.rows.map((x) => {
     const full = el('input', { value: x.full_name || '', maxlength: 100, 'aria-label': 'Όνομα ' + x.username });
@@ -1115,7 +1130,7 @@ async function usersPage() {
     };
     return el('tr', { class: x.active === 'Y' ? null : 'cancelled' },
       el('td', {}, x.username + (x.locked === 'Y' ? ' (κλειδωμένος)' : '')), el('td', { class: 'hide-phone' }, full),
-      el('td', {}, role), el('td', {}, w), el('td', {}, g), el('td', {}, act),
+      el('td', {}, role), el('td', {}, rolesOf(x)), el('td', {}, w), el('td', {}, g), el('td', {}, act),
       el('td', { class: 'hide-phone' }, x.last_login ? day(x.last_login) : ''),
       el('td', { class: 'num' }, pw, el('button', { type: 'button', onclick: save }, 'Αποθήκευση')));
   })));
@@ -1145,6 +1160,129 @@ async function usersPage() {
     el('button', { class: 'primary', type: 'submit' }, 'Νέος χρήστης')),
     out);
   try { draw(await api('users')); } catch (e) { fail(e); }
+}
+
+// -- the roles and their rights (MM_RIGHTS): the roles (new, renamed, active, out; the rights of another
+// copied); of one role, the menu with what it may do: each screen N R W, its fields (as the screen, or N R
+// W, never above it) and actions (as the screen: allowed when it is W; or N W); what it comes to
+const LEVELS = { N: 'Τίποτα', R: 'Ανάγνωση', W: 'Αλλαγή' };
+async function rolesPage(code) {
+  const out = el('div');
+  const head = el('div');
+  const newCode = el('input', { name: 'role_code', maxlength: 30, placeholder: 'STORE_MGR', class: 'w11' });
+  const newName = el('input', { name: 'role_name', maxlength: 100, placeholder: 'Υπεύθυνος καταστήματος' });
+  const drawRoles = (r) => head.replaceChildren(table([['Κωδικός'], ['Όνομα'], ['Χρήστες', 'num'], ['Δικαιώματα', 'num hide-phone'], ['Ενεργός'], ['']],
+    r.rows.map((x) => {
+      const nm = el('input', { value: x.name, maxlength: 100, 'aria-label': 'Όνομα ρόλου ' + x.code });
+      return el('tr', { class: (x.active === 'Y' ? '' : 'cancelled ') + (x.code === code ? 'on' : '') || null },
+        el('td', {}, el('a', { href: '#/roles/' + x.code }, x.code), x.system === 'Y' ? ' (συστήματος)' : ''), el('td', {}, nm),
+        el('td', { class: 'num' }, x.users), el('td', { class: 'num hide-phone' }, x.all_rights === 'Y' ? 'όλα' : x.grants),
+        el('td', {}, x.system === 'Y' ? 'ναι' : el('input', {
+          type: 'checkbox', checked: x.active === 'Y', 'aria-label': 'Ενεργός ρόλος ' + x.code,
+          onchange: async (ev) => { try { drawRoles(await api('roles/' + x.code, { name: nm.value, active: ev.target.checked })); } catch (e) { fail(e); } },
+        })),
+        el('td', { class: 'num' },
+          el('button', { type: 'button', onclick: async () => { try { drawRoles(await api('roles/' + x.code, { name: nm.value, active: x.active === 'Y' })); toast('Αποθηκεύτηκε'); } catch (e) { fail(e); } } }, 'Αποθήκευση'),
+          x.system === 'Y' ? null : el('button', {
+            type: 'button', class: 'danger',
+            onclick: async () => {
+              if (!confirm(`Διαγραφή του ρόλου ${x.code}; Οι χρήστες του τον χάνουν.`)) return;
+              try { drawRoles(await api(`roles/${x.code}/delete`, {})); if (x.code === code) location.hash = '#/roles'; } catch (e) { fail(e); }
+            },
+          }, 'Διαγραφή')));
+    })));
+  // the rights of one role
+  const drawGrants = (g, roles) => {
+    const role = g.role;
+    const all = role.all_rights === 'Y';
+    const set = (screen, item) => async (ev) => {
+      try { drawGrants(await api(`roles/${role.code}/grants`, { screen, item, level: ev.target.value || null }), roles); } catch (e) { fail(e); }
+    };
+    const pick = (v, opts, label, on) => el('select', { 'aria-label': label, disabled: all, onchange: on },
+      opts.map(([k, t]) => el('option', { value: k, selected: (v || '') === k }, t)));
+    const from = el('select', { 'aria-label': 'Αντιγραφή από' }, roles.filter((x) => x.code !== role.code && x.all_rights !== 'Y')
+      .map((x) => el('option', { value: x.code }, `${x.code} ${x.name}`)));
+    let group = null;
+    const rows = [];
+    for (const sc of g.screens) {
+      if (sc.group_code !== group) {
+        group = sc.group_code;
+        rows.push(el('tr', { class: 'group' }, el('th', { colspan: 3 }, sc.group_name || '')));
+      }
+      const where = [sc.route ? 'σελίδα' : null, sc.form ? 'φόρμα ' + sc.form : null].filter(Boolean).join(', ');
+      const items = sc.items.length ? el('details', {}, el('summary', {}, `Πεδία και ενέργειες (${sc.items.length})`),
+        table([['Πεδίο / ενέργεια'], ['Δικαίωμα'], ['Ισχύει']], sc.items.map((i) => el('tr', {},
+          el('td', {}, (i.kind === 'A' ? 'Ενέργεια: ' : 'Πεδίο: ') + i.name),
+          el('td', {}, pick(i.grant, i.kind === 'A' ? [['', 'Όπως η οθόνη'], ['N', 'Όχι'], ['W', 'Ναι']]
+            : [['', 'Όπως η οθόνη'], ['N', LEVELS.N], ['R', LEVELS.R], ['W', LEVELS.W]], `${sc.code}.${i.code}`, set(sc.code, i.code))),
+          el('td', { class: i.lvl === 'N' ? 'muted' : null }, i.kind === 'A' ? (i.lvl === 'W' ? 'ναι' : 'όχι') : LEVELS[i.lvl]))))) : null;
+      rows.push(el('tr', { class: sc.active === 'Y' ? null : 'cancelled' },
+        el('td', { class: 'wrap' }, el('b', {}, sc.name), el('div', { class: 'muted' }, where), items),
+        el('td', {}, pick(sc.grant || 'N', [['N', LEVELS.N], ['R', LEVELS.R], ['W', LEVELS.W]], sc.code, set(sc.code, null))),
+        el('td', { class: sc.lvl === 'N' ? 'muted' : null }, LEVELS[sc.lvl])));
+    }
+    out.replaceChildren(el('h2', {}, `Τα δικαιώματα του ρόλου ${role.code}: ${role.name}`),
+      all ? el('p', {}, 'Ο ρόλος αυτός έχει όλα τα δικαιώματα, πάντα.') : el('div', { class: 'panel row' },
+        el('label', {}, 'Αντιγραφή από', from), el('button', {
+          type: 'button',
+          onclick: async () => {
+            if (!confirm(`Τα δικαιώματα του ${role.code} γίνονται ίδια με του ${from.value};`)) return;
+            try { drawGrants(await api(`roles/${role.code}/copy`, { from: from.value }), roles); toast('Αντιγράφηκαν'); } catch (e) { fail(e); }
+          },
+        }, 'Αντιγραφή')),
+      el('p', { class: 'muted' }, 'Οθόνη: τίποτα, ανάγνωση ή αλλαγή. Πεδίο: όπως η οθόνη, ή λιγότερο. Ενέργεια: όπως η οθόνη (επιτρέπεται με «Αλλαγή»), ή ρητά ναι/όχι. Ένας χρήστης με πολλούς ρόλους παίρνει το περισσότερο του καθενός.'),
+      table([['Οθόνη'], ['Δικαίωμα'], ['Ισχύει']], rows));
+  };
+  show(el('h1', {}, 'Ρόλοι και δικαιώματα'),
+    el('p', {}, el('a', { href: '#/menu' }, 'Το μενού (ονόματα, σειρά, ομάδες) ›'), ' · ', el('a', { href: '#/users' }, 'Οι χρήστες και οι ρόλοι τους ›')),
+    head,
+    el('form', {
+      class: 'panel row',
+      onsubmit: async (ev) => {
+        ev.preventDefault();
+        try {
+          drawRoles(await api('roles', { code: newCode.value.trim().toUpperCase(), name: newName.value.trim() }));
+          location.hash = '#/roles/' + newCode.value.trim().toUpperCase();
+        } catch (e) { fail(e); }
+      },
+    }, el('label', {}, 'Κωδικός', newCode), el('label', { class: 'grow' }, 'Όνομα', newName), el('button', { class: 'primary', type: 'submit' }, 'Νέος ρόλος')),
+    out);
+  try {
+    const r = await api('roles');
+    drawRoles(r);
+    if (code) drawGrants(await api(`roles/${encodeURIComponent(code)}/grants`), r.rows);
+    else out.replaceChildren(el('p', { class: 'muted' }, 'Διάλεξε έναν ρόλο για τα δικαιώματά του.'));
+  } catch (e) { fail(e); }
+}
+
+// -- the menu (MM_RIGHTS): its groups and screens renamed, their order, the group of a screen, (not) active;
+// the same menu for the pages and the forms
+async function menuPage() {
+  const out = el('div');
+  const draw = (r) => {
+    const groups = r.rows.filter((x) => x.kind === 'G');
+    out.replaceChildren(table([['Κωδικός'], ['Όνομα'], ['Ομάδα'], ['Σειρά', 'num'], ['Ενεργό'], ['']], r.rows.map((x) => {
+      const nm = el('input', { value: x.name, maxlength: 100, 'aria-label': 'Όνομα ' + x.code });
+      const sort = el('input', { type: 'number', value: x.sort_no, class: 'w6', 'aria-label': 'Σειρά ' + x.code });
+      const grp = x.kind === 'G' ? null : el('select', { 'aria-label': 'Ομάδα ' + x.code },
+        groups.map((g) => el('option', { value: g.code, selected: g.code === x.group_code }, g.name)));
+      const on = el('input', { type: 'checkbox', checked: x.active === 'Y', 'aria-label': 'Ενεργό ' + x.code });
+      return el('tr', { class: (x.kind === 'G' ? 'group ' : '') + (x.active === 'Y' ? '' : 'cancelled') || null },
+        el('td', {}, x.code), el('td', {}, nm), el('td', {}, grp || 'ομάδα'), el('td', { class: 'num' }, sort), el('td', {}, on),
+        el('td', { class: 'num' }, el('button', {
+          type: 'button',
+          onclick: async () => {
+            try {
+              draw(await api('menu/' + x.code, { name: nm.value.trim(), sort_no: Number(sort.value || 0), group: grp ? grp.value : null, active: on.checked }));
+              await loadRights(); navBar(); toast('Αποθηκεύτηκε');
+            } catch (e) { fail(e); }
+          },
+        }, 'Αποθήκευση')));
+    })));
+  };
+  show(el('h1', {}, 'Μενού'), el('p', { class: 'muted' }, 'Τα ίδια ονόματα, η ίδια σειρά και οι ίδιες ομάδες για τις σελίδες και τις φόρμες. Μια οθόνη που δεν είναι ενεργή δεν φαίνεται σε κανέναν.'),
+    el('p', {}, el('a', { href: '#/roles' }, '‹ Ρόλοι και δικαιώματα')), out);
+  try { draw(await api('menu')); } catch (e) { fail(e); }
 }
 
 // -- the scratch tickets (σκρατς): bought in packs, sold one by one by the barcode of each (its game 4
@@ -2281,7 +2419,7 @@ async function paymentsPage() {
 
 // -- the pages, by the address (#/...) -------------------------------------------------------------
 // the pages of a page: where its group is (an item is of the items, a ledger of its own list ...)
-const SECTION = { item: '#/items', partner: '#/partners/', ledger: '#/partners/', count: '#/counts', order: '#/orders', doc: '#/docs' };
+const SECTION = { menu: '#/roles', item: '#/items', partner: '#/partners/', ledger: '#/partners/', count: '#/counts', order: '#/orders', doc: '#/docs' };
 function navBar() {
   $('#top').hidden = false;
   $('#who').textContent = `${session.username} (${session.role})` + (session.warehouse ? ` · ${session.warehouse_name || session.warehouse}` : '');
@@ -2362,6 +2500,8 @@ function render() {
     case 'warehouses': return need('WAREHOUSES', () => warehousesPage());
     case 'warehouse': return need('WAREHOUSES', () => warehousePage(p[1]));
     case 'users': return need('USERS', () => usersPage());
+    case 'roles': return need('ROLES', () => rolesPage(p[1]));
+    case 'menu': return need('ROLES', () => menuPage());
     case 'count': return need('COUNTS', () => countPage(p[1]));
     default: {
       // the items, else the first page of the menu

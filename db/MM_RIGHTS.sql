@@ -83,6 +83,9 @@ create or replace package mm_rights as
   -- the roles of a user
   procedure add_user_role(p_username varchar2, p_role varchar2);
   procedure drop_user_role(p_username varchar2, p_role varchar2);
+  -- the menu: a group or a screen renamed, its place (its order; a screen: its group), (not) active (not
+  -- the roles and the rights themselves: the way back to them)
+  procedure set_object(p_code varchar2, p_name varchar2, p_sort number, p_group varchar2, p_active varchar2 default 'Y');
 end mm_rights;
 /
 
@@ -269,6 +272,37 @@ create or replace package body mm_rights as
     delete from mm_user_role where role_id = r
       and user_id = (select id from mm_user where username = lower(p_username));
     keep_an_admin(r);
+  end;
+
+  procedure set_object(p_code varchar2, p_name varchar2, p_sort number, p_group varchar2, p_active varchar2 default 'Y') is
+    o mm_object%rowtype;
+    g number;
+  begin
+    begin
+      select * into o from mm_object where code = upper(p_code);
+    exception
+      when no_data_found then fail(98, 'Δεν υπάρχει στο μενού ' || p_code);
+    end;
+    if trim(p_name) is null or length(trim(p_name)) > 100 then
+      fail(98, 'Το όνομα στο μενού: 1 έως 100 χαρακτήρες');
+    end if;
+    if nvl(p_active, 'Y') not in ('Y', 'N') then
+      fail(98, 'Ενεργό: Y ή N');
+    end if;
+    select max(parent_id) into g from mm_object where code = 'ROLES';
+    if p_active = 'N' and (o.code = 'ROLES' or o.id = g) then
+      fail(98, 'Οι ρόλοι και τα δικαιώματα μένουν στο μενού');
+    end if;
+    g := null;
+    if o.kind = 'S' then
+      begin
+        select id into g from mm_object where code = upper(p_group) and kind = 'G';
+      exception
+        when no_data_found then fail(98, 'Δεν υπάρχει ομάδα του μενού ' || p_group);
+      end;
+    end if;
+    update mm_object set name = trim(p_name), sort_no = nvl(p_sort, sort_no), parent_id = g, active = nvl(p_active, 'Y')
+    where id = o.id;
   end;
 end mm_rights;
 /
