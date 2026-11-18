@@ -39,13 +39,14 @@ prompt == the tables
 @MM_TABLES.sql
 prompt == the VAT and the kinds of documents
 @MM_BASE.sql
-prompt == the packages MM_PIN (the PINs of the cards), MM_CORE, MM_LEDGER (the ledgers), MM_REPORT (sales, VAT, minimum stock), MM_AUTH (the users), MM_MONTHS (the totals of the months), and MM_TEXT (the Greek of the forms)
+prompt == the packages MM_PIN (the PINs of the cards), MM_CORE, MM_LEDGER (the ledgers), MM_REPORT (sales, VAT, minimum stock), MM_AUTH (the users), MM_RIGHTS (roles, menu, rights), MM_MONTHS (the totals of the months), and MM_TEXT (the Greek of the forms)
 whenever sqlerror continue
 @MM_PIN.sql
 @MM_CORE.sql
 @MM_LEDGER.sql
 @MM_REPORT.sql
 @MM_AUTH.sql
+@MM_RIGHTS.sql
 @MM_MONTHS.sql
 @MM_TEXT.sql
 whenever sqlerror exit failure rollback
@@ -68,10 +69,10 @@ set serveroutput off
 declare
   n number;
 begin
-  select count(*) into n from user_errors where name in ('MM_CORE', 'MM_LEDGER', 'MM_REPORT', 'MM_MONTHS', 'MM_TEXT',
+  select count(*) into n from user_errors where name in ('MM_CORE', 'MM_LEDGER', 'MM_REPORT', 'MM_MONTHS', 'MM_TEXT', 'MM_RIGHTS',
                                                      'MM_STOCK_MOVE_MONTH', 'MM_DOC_MONTH', 'MM_PAYMENT_MONTH');
   if n > 0 then
-    raise_application_error(-20002, 'MM_CORE/MM_LEDGER/MM_REPORT/MM_MONTHS/MM_TEXT: ' || n || ' errors (show errors package body mm_core)');
+    raise_application_error(-20002, 'MM_CORE/MM_LEDGER/MM_REPORT/MM_MONTHS/MM_TEXT/MM_RIGHTS: ' || n || ' errors (show errors package body mm_core)');
   end if;
 end;
 /
