@@ -28,8 +28,10 @@ PACKAGE BODY ui IS
   c_detail CONSTANT VARCHAR2(30) := ''; -- DETAIL
   c_detail2 CONSTANT VARCHAR2(30) := ''; -- DETAIL2
   c_role CONSTANT VARCHAR2(10) := ''; -- ROLE
-  g_user VARCHAR2(30);              -- who logged in (MM_LOGIN: the token in GLOBAL.MM_TOKEN), and the role
-  g_role VARCHAR2(10);
+  c_screen CONSTANT VARCHAR2(30) := ''; -- SCREEN
+  g_user VARCHAR2(30);              -- who logged in (MM_LOGIN: the token in GLOBAL.MM_TOKEN), its role
+  g_role VARCHAR2(10);              -- (its level) and its id (its rights: MM_RIGHTS)
+  g_uid NUMBER;
   g_master NUMBER;                  -- the master whose detail is on the screen
   g_detail NUMBER;                  -- the record of the detail whose own detail is on the screen
   g_lwhat VARCHAR2(1);              -- the ledger on the screen (MM_LEDGER): I, C or S, its id, period
@@ -55,26 +57,67 @@ PACKAGE BODY ui IS
     RAISE form_trigger_failure;
   END;
 
-  -- the roles: CASHIER < MANAGER < ADMIN
-  FUNCTION rank(p_role VARCHAR2) RETURN NUMBER IS
+  -- the rights of the user (MM_RIGHTS: its roles; the same as the pages): a screen, a field or an action
+  -- of it, at least the level (R read, W write)
+  FUNCTION may(p_screen VARCHAR2, p_item VARCHAR2 DEFAULT NULL, p_level VARCHAR2 DEFAULT 'R') RETURN BOOLEAN IS
   BEGIN
-    IF p_role = 'ADMIN' THEN
-      RETURN 3;
-    ELSIF p_role = 'MANAGER' THEN
-      RETURN 2;
-    ELSIF p_role = 'CASHIER' THEN
-      RETURN 1;
-    END IF;
-    RETURN 0;
+    RETURN mm_rights.can(g_uid, p_screen, p_item, p_level) = 'Y';
   END;
 
-  FUNCTION can(p_role VARCHAR2) RETURN BOOLEAN IS
+  -- a field of the screen on the form: not readable, not shown; read only, not changed
+  PROCEDURE field(p_screen VARCHAR2, p_item VARCHAR2, p_form_item VARCHAR2) IS
+    l VARCHAR2(1) := mm_rights.lvl(g_uid, p_screen, p_item);
   BEGIN
-    RETURN rank(g_role) >= rank(p_role);
+    IF l = 'N' THEN
+      set_item_property(p_form_item, VISIBLE, PROPERTY_FALSE);
+    ELSIF l = 'R' THEN
+      set_item_property(p_form_item, UPDATE_ALLOWED, PROPERTY_FALSE);
+      set_item_property(p_form_item, INSERT_ALLOWED, PROPERTY_FALSE);
+    END IF;
+  END;
+
+  -- a button: off without the right (an action: W; a field to show: R)
+  PROCEDURE button(p_screen VARCHAR2, p_item VARCHAR2, p_level VARCHAR2, p_form_item VARCHAR2) IS
+  BEGIN
+    IF NOT may(p_screen, p_item, p_level) THEN
+      set_item_property(p_form_item, ENABLED, PROPERTY_FALSE);
+    END IF;
+  END;
+
+  -- a screen read only: its blocks without insert, update, delete
+  PROCEDURE read_only_block(p_block VARCHAR2) IS
+  BEGIN
+    IF p_block IS NOT NULL THEN
+      set_block_property(p_block, INSERT_ALLOWED, PROPERTY_FALSE);
+      set_block_property(p_block, UPDATE_ALLOWED, PROPERTY_FALSE);
+      set_block_property(p_block, DELETE_ALLOWED, PROPERTY_FALSE);
+    END IF;
+  END;
+
+  PROCEDURE read_only IS
+  BEGIN
+    IF c_screen IS NULL OR may(c_screen, NULL, 'W') THEN
+      RETURN;
+    END IF;
+    read_only_block(c_block);
+    read_only_block(c_detail);
+    read_only_block(c_detail2);
+  END;
+
+  -- the name of a screen in the menu (MM_OBJECT: as the shop named it)
+  PROCEDURE label_of(p_screen VARCHAR2, p_target VARCHAR2, p_menu BOOLEAN) IS
+    n VARCHAR2(100);
+  BEGIN
+    SELECT max(name) INTO n FROM mm_object WHERE code = p_screen;
+    IF n IS NOT NULL AND p_menu THEN
+      set_menu_item_property(p_target, LABEL, n);
+    ELSIF n IS NOT NULL THEN
+      set_item_property(p_target, LABEL, n);
+    END IF;
   END;
 
   -- the login of this form: the token of MM_LOGIN still good (the user active, the same role), and a
-  -- role enough for the form; else to the login, or back to the first menu. The database knows who it
+  -- right to its screen (MM_RIGHTS: at least read; read only: its blocks too, read_only); else to the login, or back to the first menu. The database knows who it
   -- is (CLIENT_IDENTIFIER: the PINs)
   FUNCTION session_ok RETURN BOOLEAN IS
     u NUMBER;
@@ -87,6 +130,7 @@ PACKAGE BODY ui IS
     t := name_in('GLOBAL.MM_TOKEN');
     BEGIN
       mm_auth.check_token(t, u, g_user, g_role);
+      g_uid := u;
       forms_ddl('COMMIT');                -- (its last_seen)
     EXCEPTION
       WHEN OTHERS THEN
@@ -97,8 +141,8 @@ PACKAGE BODY ui IS
     END;
     dbms_session.set_identifier(g_user);
     set_window_property('WIN', TITLE, get_window_property('WIN', TITLE) || '  [' || g_user || ']');
-    IF NOT can(c_role) THEN
-      message('Η φόρμα αυτή θέλει ρόλο ' || c_role || ': ο ' || g_user || ' είναι ' || g_role);
+    IF c_screen IS NOT NULL AND NOT may(c_screen) THEN
+      message('Δεν έχεις δικαίωμα σε αυτή τη φόρμα: ' || g_user);
       new_form('MM_MAIN');
       RETURN FALSE;
     END IF;
@@ -112,6 +156,7 @@ PACKAGE BODY ui IS
       RETURN;
     END IF;
     NULL; -- ROLES
+    read_only;
     IF c_block IS NOT NULL THEN          -- (the menu has no block of a table)
       go_block(c_block);
       set_block_property(c_block, DEFAULT_WHERE, c_where);

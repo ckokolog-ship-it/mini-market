@@ -632,6 +632,44 @@ FORM_ROLES = {'MM_LOGIN': None, 'MM_MAIN': 'CASHIER', 'MM_POS': 'CASHIER', 'MM_R
               'MM_KITS': 'MANAGER', 'MM_PROMOS': 'MANAGER', 'MM_VARIANTS': 'MANAGER', 'MM_INVOICES': 'MANAGER',
               'MM_PAYMENTS': 'MANAGER', 'MM_LEDGER': 'MANAGER', 'MM_REPORTS': 'MANAGER', 'MM_USERS': 'ADMIN'}
 
+# the screen of each form in the rights (MM_RIGHTS, MM_OBJECT.FORM: the same as the pages): the form opens with
+# a right to read it (ui.session_ok; read only: its blocks too); its menu, buttons and items of the bar
+# that open a form: off without the right to it
+FORM_SCREENS = {'MM_POS': 'POS', 'MM_RESERVATIONS': 'RESERVATIONS', 'MM_ITEMS': 'ITEMS', 'MM_CUSTOMERS': 'CUSTOMERS',
+                'MM_SUPPLIERS': 'SUPPLIERS', 'MM_CARDS': 'CARDS', 'MM_KITS': 'KITS', 'MM_PROMOS': 'PROMOS',
+                'MM_VARIANTS': 'VARIANTS', 'MM_INVOICES': 'DOCS', 'MM_PAYMENTS': 'PAYMENTS', 'MM_LEDGER': 'LEDGERS',
+                'MM_REPORTS': 'REPORTS_PDF', 'MM_USERS': 'USERS'}
+# the fields (F: not readable, not shown; read only, not changed) and the buttons (B: off without the
+# right, an action W, a field to show R) of the screens on each form: (kind, screen, item, level, form item)
+FORM_RIGHTS = {
+    'MM_ITEMS': [('F', 'ITEMS', f, None, 'ITEM.' + f) for f in ('PRICE', 'WHOLESALE_PRICE', 'COST', 'MIN_STOCK', 'STOCK')],
+    'MM_CUSTOMERS': [('F', 'CUSTOMERS', 'AFM', None, 'PARTNER.AFM'), ('F', 'CUSTOMERS', 'AFM', None, 'PARTNER.DOY')] +
+                    [('F', 'CUSTOMERS', 'CONTACT', None, 'PARTNER.' + f) for f in ('ADDRESS', 'PHONE', 'EMAIL')],
+    'MM_SUPPLIERS': [('F', 'SUPPLIERS', 'AFM', None, 'PARTNER.AFM'), ('F', 'SUPPLIERS', 'AFM', None, 'PARTNER.DOY')] +
+                    [('F', 'SUPPLIERS', 'CONTACT', None, 'PARTNER.' + f) for f in ('ADDRESS', 'PHONE', 'EMAIL')],
+    'MM_CARDS': [('B', 'CARDS', 'LOAD', 'W', 'CTL.LOAD'), ('B', 'CARDS', 'PIN', 'R', 'CTL.PIN'),
+                 ('F', 'CARDS', 'PIN', None, 'SER.PIN_SHOW'), ('F', 'ITEMS', 'PRICE', None, 'CARD.PRICE')],
+    'MM_RESERVATIONS': [('B', 'RESERVATIONS', 'CREATE', 'W', 'CTL.NEWRES'), ('B', 'RESERVATIONS', 'DELIVER', 'W', 'CTL.DELIVER'),
+                        ('B', 'RESERVATIONS', 'CANCEL', 'W', 'CTL.CANCELRES'), ('F', 'CUSTOMERS', 'CONTACT', None, 'RES.PHONE')],
+    'MM_KITS': [('B', 'KITS', 'ASSEMBLE', 'W', 'CTL.ASSEMBLE'), ('F', 'ITEMS', 'PRICE', None, 'KIT.PRICE'),
+                ('F', 'ITEMS', 'COST', None, 'KIT.COST'), ('F', 'ITEMS', 'STOCK', None, 'KIT.STOCK')],
+    'MM_PROMOS': [('B', 'PROMOS', 'CREATE', 'W', 'CTL.NEWPROMO'), ('B', 'PROMOS', 'ACTIVE', 'W', 'CTL.TOGGLE')],
+    'MM_VARIANTS': [('B', 'VARIANTS', 'CREATE', 'W', 'CTL.NEWVAR'), ('B', 'ITEMS', 'PRICE', 'W', 'CTL.MPRICE'),
+                    ('F', 'ITEMS', 'PRICE', None, 'MODEL.PRICE'), ('F', 'ITEMS', 'PRICE', None, 'VG.PRICE'),
+                    ('F', 'ITEMS', 'STOCK', None, 'VG.STOCK')],
+    'MM_INVOICES': [('B', 'DOCS', 'CREATE', 'W', 'CTL.' + b) for b in ('NEWDOC', 'CREDIT', 'FROMNOTE')] +
+                   [('B', 'DOCS', 'POST', 'W', 'CTL.POSTDOC'), ('B', 'DOCS', 'CANCEL', 'W', 'CTL.CANCELDOC'),
+                    ('B', 'DOCS', 'MYDATA', 'W', 'CTL.MYDATA')],
+    'MM_PAYMENTS': [('B', 'PAYMENTS', 'CREATE', 'W', 'CTL.NEWPAY'), ('B', 'PAYMENTS', 'CANCEL', 'W', 'CTL.CANCELPAY')],
+    'MM_POS': [('B', 'POS', 'OPEN_Z', 'W', 'CTL.OPENZ'), ('B', 'POS', 'CLOSE_Z', 'W', 'CTL.CLOSEZ'),
+               ('B', 'POS', 'VOID', 'W', 'CTL.VOIDREC')],
+    'MM_REPORTS': [('B', s_, None, 'R', 'CTL.' + b) for b, s_ in (('RPT_SALES', 'REP_SALES'), ('RPT_VAT', 'REP_VAT'),
+                   ('RPT_MIN', 'REP_MIN_STOCK'), ('RPT_TRIAL_I', 'TRIAL_ITEMS'), ('RPT_TRIAL_C', 'TRIAL_CUSTOMERS'),
+                   ('RPT_TRIAL_S', 'TRIAL_SUPPLIERS'))] + [('B', 'REP_MIN_STOCK', 'ORDER', 'W', 'CTL.ORDERMIN')],
+    'MM_USERS': [('B', 'USERS', 'CREATE', 'W', 'CTL.NEWUSER'), ('B', 'USERS', 'PASSWORD', 'W', 'CTL.SETPW'),
+                 ('B', 'ROLES', None, 'W', 'CTL.SETROLE')],
+}
+
 # the menu: a button for each form (CALL_FORM: closing it comes back here), and the exit
 MENU_FORMS = [('MM_ITEMS', 'Είδη'), ('MM_CUSTOMERS', 'Πελάτες'), ('MM_SUPPLIERS', 'Προμηθευτές'),
               ('MM_CARDS', 'Κάρτες κινητής'), ('MM_RESERVATIONS', 'Κρατήσεις'), ('MM_KITS', 'Καλάθια και σετ'),
@@ -772,29 +810,42 @@ def program(name, f, texts):
                         "c_detail2 CONSTANT VARCHAR2(30) := '%s';" % f.get('detail2', ''))
     body = body.replace("c_role CONSTANT VARCHAR2(10) := ''; -- ROLE",
                         "c_role CONSTANT VARCHAR2(10) := '%s';" % (FORM_ROLES.get(name) or ''))
+    body = body.replace("c_screen CONSTANT VARCHAR2(30) := ''; -- SCREEN",
+                        "c_screen CONSTANT VARCHAR2(30) := '%s';" % (FORM_SCREENS.get(name) or ''))
     body = body.replace('NULL; -- TEXTS', ('\n' + ' ' * 4).join(texts))
     body = body.replace('NULL; -- ROLES', ('\n' + ' ' * 4).join(role_lines(name, f)))
     return spec, body
 
 
 def role_lines(name, f):
-    """after the login: the buttons of the first menu and the items of the bar that open a form the
-    role may not open, off (the form itself would refuse it too: ui.session_ok)"""
+    """after the login (MM_RIGHTS): the buttons of the first menu and the items of the bar that open a form
+    the user may not read, off (the form itself would refuse it too: ui.session_ok), with the names of the
+    screens in the menu of the shop (a form opened by one item only); the fields and buttons of the form
+    (FORM_RIGHTS)"""
     out = []
     for c in f.get('ctl', []):
-        if c[0].startswith('GO_'):
-            r = FORM_ROLES.get(c[0][3:])
-            if r and r != 'CASHIER':
-                out.append("IF NOT can('%s') THEN SET_ITEM_PROPERTY('CTL.%s', ENABLED, PROPERTY_FALSE); END IF;"
-                           % (r, c[0]))
+        if c[0].startswith('GO_') and FORM_SCREENS.get(c[0][3:]):
+            sc = FORM_SCREENS[c[0][3:]]
+            out.append("label_of('%s', 'CTL.%s', FALSE);" % (sc, c[0]))
+            out.append("IF NOT may('%s') THEN SET_ITEM_PROPERTY('CTL.%s', ENABLED, PROPERTY_FALSE); END IF;" % (sc, c[0]))
     if FORM_ROLES.get(name):
+        forms = [re.match(r"new_form\('(\w+)'\);$", code) for _, _, items in MENU_BAR for _, _, code in items]
+        once = {g.group(1) for g in forms if g and sum(1 for h in forms if h and h.group(1) == g.group(1)) == 1}
         for m, _, items in MENU_BAR:
             for i, _, code in items:
                 g = re.match(r"new_form\('(\w+)'\);$", code)
-                r = FORM_ROLES.get(g.group(1)) if g else None
-                if r and r != 'CASHIER':
-                    out.append("IF NOT can('%s') THEN SET_MENU_ITEM_PROPERTY('%s_MENU.%s', ENABLED, PROPERTY_FALSE); END IF;"
-                               % (r, m, i))
+                sc = FORM_SCREENS.get(g.group(1)) if g else None
+                if sc:
+                    if g.group(1) in once:
+                        out.append("label_of('%s', '%s_MENU.%s', TRUE);" % (sc, m, i))
+                    out.append("IF NOT may('%s') THEN SET_MENU_ITEM_PROPERTY('%s_MENU.%s', ENABLED, PROPERTY_FALSE); END IF;"
+                               % (sc, m, i))
+    for kind, sc, item, level, target in FORM_RIGHTS.get(name, []):
+        it = "'%s'" % item if item else 'NULL'
+        if kind == 'F':
+            out.append("field('%s', %s, '%s');" % (sc, it, target))
+        else:
+            out.append("button('%s', %s, '%s', '%s');" % (sc, it, level, target))
     return out or ['NULL;']
 
 

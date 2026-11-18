@@ -75,7 +75,7 @@ def test_the_roles_of_the_system(people):
     assert lvl(db, c, 'NO_SUCH') == 'N'
     # the menu of a cashier: its screens in their groups
     db.cur.execute('select group_code, code, route from mm_user_menu where user_id = :u order by group_sort, sort_no', u=c)
-    assert [(g, s) for g, s, _ in db.cur] == [('SALES', 'POS'), ('SALES', 'ORDERS'), ('STORE', 'ITEMS'), ('STORE', 'LABELS'),
+    assert [(g, s) for g, s, _ in db.cur] == [('SALES', 'POS'), ('SALES', 'ORDERS'), ('SALES', 'RESERVATIONS'), ('STORE', 'ITEMS'), ('STORE', 'LABELS'),
                                               ('STORE', 'COUNTS')]
     assert db.one("select route from mm_user_menu where user_id = :u and code = 'ITEMS'", u=c) == ('#/items',)
     # need: the name of what is not allowed
