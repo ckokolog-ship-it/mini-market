@@ -6,6 +6,7 @@ N days; one taken out of the stock; what is refused.
     MM_DSN=mm/<password>@localhost:1521/FREEPDB1 python3 -m pytest tests
 """
 import datetime
+import itertools
 
 import pytest
 
@@ -16,6 +17,7 @@ from test_api import get, post
 pytestmark = pytest.mark.skipif(not test_api.DSN, reason='MM_DSN not set')
 api, env, users = test_api.api, test_api.env, test_api.users
 TODAY = datetime.date.today()
+SEQ = itertools.count()
 
 
 def iso(days):
@@ -28,11 +30,12 @@ def milk(env):
     db, ids = env
     cat = db.one('select min(id) from mm_category')[0]
     v = db.cur.var(int)
+    code = 'TST%sM%s' % (ids['tag'], next(SEQ) or '')
     db.cur.execute("insert into mm_item (code, name, category_id, vat_code, price, cost) "
                    "values (:c, 'Test γάλα', :cat, 'B', 1.50, 0.90) returning id into :v",
-                   c='TST%sM' % ids['tag'], cat=cat, v=v)
+                   c=code, cat=cat, v=v)
     db.commit()
-    return db, ids, v.getvalue()[0], 'TST%sM' % ids['tag']
+    return db, ids, v.getvalue()[0], code
 
 
 def left(db, item):
@@ -98,3 +101,38 @@ def test_expiry_by_fifo(api, milk, users):
         db.commit()
     assert get(api, '/api/expiry', 403, token='CASHIER')['error'] == 'forbidden'
     test_core.close_open_z(db, ids['reg'])
+
+
+def test_expiry_by_warehouse(api, milk, users):
+    """the expiry goes with the goods: received with a date in the main store, sent to a branch (DEN): its
+    layer there with the same date; the list of one warehouse; one taken out of the branch only"""
+    db, ids, item, code = milk
+    w = db.cur.var(int)
+    db.cur.execute("insert into mm_warehouse (code, name) values (:c, 'Test λήξεις') returning id into :v",
+                   c='TSTE' + ids['tag'][:4], v=w)
+    w, wcode = w.getvalue()[0], 'TSTE' + ids['tag'][:4]
+    main = db.fn('main_warehouse', int)
+    d = post(api, '/api/docs', {'doc_type': 'DPA', 'supplier_id': ids['supplier']})['id']
+    post(api, '/api/docs/%d/lines' % d, {'code': code, 'qty': 10, 'expires': iso(5)})
+    post(api, '/api/docs/%d/post' % d)
+    t = db.fn('new_doc', int, 'DEN', p_warehouse_id=main, p_to_warehouse_id=w)
+    db.fn('add_line', int, t, item, 4)
+    db.fn('post_doc', int, t)
+    db.commit()
+    db.cur.execute('select warehouse, to_char(expires, \'YYYY-MM-DD\'), left_, doc_type, supplier from mm_expiry '
+                   'where item_id = :i order by warehouse', i=item)
+    rows = sorted(db.cur.fetchall())
+    assert rows == sorted([('K', iso(5), 6, 'DPA', 'Test %s' % ids['tag']), (wcode, iso(5), 4, 'DEN', 'Test %s' % ids['tag'])])
+    # the list of the branch; one taken out there: its stock there, not the main one's
+    r = get(api, '/api/expiry?warehouse=%s' % wcode.lower())
+    mine = [x for x in r['rows'] if x['item_id'] == item]
+    assert r['warehouse'] == wcode.lower() and [(x['warehouse'], x['left_']) for x in mine] == [(wcode, 4)]
+    post(api, '/api/expiry/withdraw', {'fifo_id': mine[0]['fifo_id'], 'qty': 3})
+    db.cur.execute('select warehouse_id, stock from mm_warehouse_stock where item_id = :i order by warehouse_id', i=item)
+    assert dict((a, float(b)) for a, b in db.cur) == {main: 6, w: 1}
+    # FIFO built again: the same expiries
+    db.proc('fifo_rebuild', item)
+    db.commit()
+    db.cur.execute('select warehouse, to_char(expires, \'YYYY-MM-DD\'), left_ from mm_expiry where item_id = :i', i=item)
+    assert sorted(db.cur.fetchall()) == sorted([('K', iso(5), 6), (wcode, iso(5), 1)])
+    assert db.one("select count(*) from mm_check where what in ('FIFO', 'FIFO_WH')")[0] == 0

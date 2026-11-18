@@ -977,37 +977,50 @@ async function chartPage(params) {
 async function expiryPage(params) {
   const sel = el('select', { name: 'days' });
   const out = el('div');
+  // more than one warehouse: the goods of each (a transfer takes their expiry with it); the store of the user first
+  let whs = [];
+  try { whs = (await api('warehouses')).rows.filter((w) => w.active === 'Y'); } catch (e) { whs = []; }
+  const mine = whs.find((w) => w.id === session.warehouse_id);
+  const wh = el('select', { name: 'warehouse' }, ...options(whs, 'code', (w) => `${w.code} ${w.name}`,
+    params.get('warehouse') || (mine ? mine.code : ''), 'Όλες οι αποθήκες'));
   const draw = (r) => {
     const opts = [...new Set([r.days, 7, 14, 30, 60])].sort((a, b) => a - b);
     sel.replaceChildren(...opts.map((v) => el('option', { value: v, selected: v === r.days }, `${v} ημέρες`)));
     const when = (x) => (x.days_left < 0 ? `έληξε πριν ${-x.days_left} ${-x.days_left === 1 ? 'ημέρα' : 'ημέρες'}`
       : x.days_left === 0 ? 'λήγει σήμερα' : `σε ${x.days_left} ${x.days_left === 1 ? 'ημέρα' : 'ημέρες'}`);
-    out.replaceChildren(r.rows.length ? table([['Λήξη'], ['Πότε'], ['Κωδικός', 'hide-phone'], ['Είδος'], ['Μένουν', 'num'], ['Παραλαβή', 'hide-phone'], ['Προμηθευτής', 'hide-phone'], ['']],
+    const many = whs.length > 1;
+    out.replaceChildren(r.rows.length ? table([['Λήξη'], ['Πότε'], ['Κωδικός', 'hide-phone'], ['Είδος'], ...(many ? [['Αποθήκη']] : []), ['Μένουν', 'num'], ['Παραλαβή', 'hide-phone'], ['Προμηθευτής', 'hide-phone'], ['']],
       r.rows.map((x) => el('tr', { class: x.days_left < 0 ? 'expired' : null },
         el('td', {}, day(x.expires)), el('td', { class: x.days_left < 0 ? 'neg' : null }, (x.days_left < 0 ? '⚠ ' : '') + when(x)),
-        el('td', { class: 'hide-phone' }, x.code), el('td', { class: 'wrap' }, x.name),
-        num(x.left_, qty), el('td', { class: 'hide-phone' }, el('a', { href: '#/doc/' + x.doc_id }, `${x.doc_type} ${x.doc_no} · ${day(x.doc_date)}`)),
+        el('td', { class: 'hide-phone' }, x.code), el('td', { class: 'wrap' }, x.name), many ? el('td', {}, x.warehouse) : null,
+        num(x.left_, qty), el('td', { class: 'hide-phone' }, x.doc_id ? el('a', { href: '#/doc/' + x.doc_id }, `${x.doc_type} ${x.doc_no} · ${day(x.doc_date)}`) : ''),
         el('td', { class: 'hide-phone wrap' }, x.supplier || ''),
         el('td', { class: 'num' }, el('button', {
           type: 'button',
           class: x.days_left < 0 ? 'danger' : null,
           onclick: async () => {
-            const n = prompt(`Απόσυρση από το απόθεμα: ${x.code} ${x.name}, λήξη ${day(x.expires)}. Πόσα;`, String(x.left_));
+            const n = prompt(`Απόσυρση από το απόθεμα${many ? ' της ' + x.warehouse : ''}: ${x.code} ${x.name}, λήξη ${day(x.expires)}. Πόσα;`, String(x.left_));
             if (n === null || !n.trim()) return;
             try {
-              const w = await api('expiry/withdraw', { line_id: x.line_id, qty: Number(n.replace(',', '.')) });
+              const w = await api('expiry/withdraw', { fifo_id: x.fifo_id, qty: Number(n.replace(',', '.')) });
+              await load();                          // (the list of the warehouse chosen, then the message)
               toast(`Αποσύρθηκαν ${qty(w.withdrawn)} ${x.code}`);
-              draw(w);
             } catch (e) { fail(e); }
           },
         }, 'Απόσυρση')))))
       : el('p', { class: 'muted' }, `Τίποτα δεν λήγει τις επόμενες ${r.days} ημέρες, και τίποτα δεν έχει λήξει.`));
   };
-  const load = async () => { try { draw(await api('expiry' + (sel.value ? '?days=' + sel.value : params.get('days') ? '?days=' + params.get('days') : ''))); } catch (e) { fail(e); } };
+  const load = async () => {
+    const q = new URLSearchParams();
+    if (sel.value || params.get('days')) q.set('days', sel.value || params.get('days'));
+    if (whs.length > 1 && wh.value) q.set('warehouse', wh.value);
+    try { draw(await api('expiry?' + q)); } catch (e) { fail(e); }
+  };
   sel.addEventListener('change', load);
+  wh.addEventListener('change', load);
   show(el('h1', {}, 'Λήξεις'), el('p', { class: 'muted' },
-    'Η ημερομηνία λήξης μπαίνει σε κάθε γραμμή της παραλαβής (δελτίο παραλαβής ή τιμολόγιο - δελτίο παραλαβής). Το «Μένουν» είναι εκτίμηση από το απόθεμα: τα παλιότερα φεύγουν πρώτα.'),
-  el('div', { class: 'panel row' }, el('label', {}, 'Λήγουν μέσα σε', sel)), out);
+    'Η ημερομηνία λήξης μπαίνει σε κάθε γραμμή της παραλαβής (δελτίο παραλαβής ή τιμολόγιο - δελτίο παραλαβής) και πηγαίνει με τα είδη όταν μεταφέρονται σε άλλη αποθήκη. Το «Μένουν» είναι ό,τι μένει από την παραλαβή στην αποθήκη: τα παλιότερα φεύγουν πρώτα.'),
+  el('div', { class: 'panel row' }, el('label', {}, 'Λήγουν μέσα σε', sel), whs.length > 1 ? el('label', {}, 'Αποθήκη', wh) : null), out);
   await load();
 }
 
