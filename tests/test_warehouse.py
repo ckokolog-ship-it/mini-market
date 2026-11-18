@@ -130,6 +130,9 @@ def test_the_warehouses_in_the_pages(two, api, users):
     r = post(api, '/api/warehouses', {'code': tag.lower(), 'name': 'Test νέα'})
     new = [w for w in r['rows'] if w['code'] == tag][0]
     assert (new['main'], new['active'], new['items'], new['value']) == ('N', 'Y', 0, 0)
+    k = [w for w in r['rows'] if w['main'] == 'Y'][0]                 # (a register of no warehouse: the main one's)
+    assert k['registers'] == db.one("select count(*) from mm_register where active = 'Y' and "
+                                    "nvl(warehouse_id, :m) = :m", m=k['id'])[0] > 0
     assert post(api, '/api/warehouses', {'code': tag, 'name': 'x'}, status=400)['error'] == 'bad_warehouse'
     assert post(api, '/api/warehouses', {'code': 'a b', 'name': 'x'}, status=400)['error'] == 'bad_warehouse'
     r = post(api, '/api/warehouses/%d' % new['id'], {'name': 'Test άλλο', 'active': False})

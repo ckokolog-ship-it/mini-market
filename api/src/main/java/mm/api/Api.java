@@ -350,7 +350,8 @@ final class Api {
                 select w.id, w.code, w.name, w.main, w.active,
                        (select count(*) from mm_warehouse_stock s where s.warehouse_id = w.id and s.stock <> 0) items,
                        (select nvl(sum(f.left_ * f.unit_cost), 0) from mm_fifo f where f.warehouse_id = w.id) value,
-                       (select count(*) from mm_register r where nvl(r.warehouse_id, -1) = w.id and r.active = 'Y') registers
+                       (select count(*) from mm_register r where nvl(r.warehouse_id, mm_core.main_warehouse) = w.id
+                          and r.active = 'Y') registers
                 from mm_warehouse w
                 order by case w.main when 'Y' then 0 else 1 end, w.code"""));
     }

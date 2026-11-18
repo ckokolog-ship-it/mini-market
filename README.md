@@ -43,7 +43,7 @@ Oracle Forms ──────────────────────�
 ## Φάκελοι
 
 - **Ενημέρωση μετά από merge** (backup, βάση, mm-api, φόρμες, reports): όλες οι εντολές μαζί στο [docs/ODIGIES_ENIMEROSI.md](docs/ODIGIES_ENIMEROSI.md).
-- `db/`: η βάση (`CREATE_USER.sql`, `INSTALL.sql`, `UNINSTALL.sql`) και το `MM_CORE.sql`. Ένας χρόνος δεδομένων για τα reports: `MM_DEMO_BIG.sql`· αγορές σε πολλές τιμές για το FIFO: `MM_DEMO_FIFO.sql`· ο έλεγχος ότι όλα συμφωνούν: `MM_CHECK.sql`. Το backup κάθε βράδυ και η επαναφορά: `backup.ps1` (§14). Οδηγίες στο [docs/ODIGIES_VASI.md](docs/ODIGIES_VASI.md).
+- `db/`: η βάση (`CREATE_USER.sql`, `INSTALL.sql`, `UNINSTALL.sql`) και το `MM_CORE.sql`. Ένας χρόνος δεδομένων για τα reports: `MM_DEMO_BIG.sql`· αγορές σε πολλές τιμές για το FIFO: `MM_DEMO_FIFO.sql`· υποκαταστήματα με ταμεία, μεταφορές και πωλήσεις: `MM_DEMO_WAREHOUSES.sql`· ο έλεγχος ότι όλα συμφωνούν: `MM_CHECK.sql`. Το backup κάθε βράδυ και η επαναφορά: `backup.ps1` (§14). Οδηγίες στο [docs/ODIGIES_VASI.md](docs/ODIGIES_VASI.md).
 - `forms/`: οι φόρμες (`mkforms.py` → `MM_*.xml`, `build_forms.ps1`). Οδηγίες στο [docs/ODIGIES_FORMS.md](docs/ODIGIES_FORMS.md).
 - `reports/`: τα reports (`mkreports.py` → `MM_LEDGER_*.xml`, `build_reports.ps1` → `.rdf`). Οδηγίες στο [docs/ODIGIES_REPORTS.md](docs/ODIGIES_REPORTS.md).
 - `api/`: η υπηρεσία REST (`mm-api.jar`, `run_api.ps1`) και οι σελίδες web. Οδηγίες στο [docs/ODIGIES_REST.md](docs/ODIGIES_REST.md) και στο [docs/ODIGIES_WEB.md](docs/ODIGIES_WEB.md).
