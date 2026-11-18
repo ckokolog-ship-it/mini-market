@@ -9,11 +9,13 @@ import { canScan, codeOf, scanOnce } from './scan.js';
 const $ = (sel) => document.querySelector(sel);
 const main = () => $('#main');
 const RANK = { CASHIER: 1, MANAGER: 2, ADMIN: 3 };
-// the menu: its groups and their pages (by role: CASHIER the till, the store; MANAGER the office too)
+// the pages the web has (the menu itself, its groups, their order, names: from the database, MM_RIGHTS: only
+// the screens with a page here and a right to read them)
 const MENU = [
   ['Πωλήσεις', [['#/pos', 'Ταμείο', 'CASHIER'], ['#/orders', 'Παραγγελίες', 'CASHIER']]],
   ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER'], ['#/expiry', 'Λήξεις', 'MANAGER'],
-    ['#/warehouses', 'Αποθήκες', 'MANAGER'], ['#/users', 'Χρήστες', 'ADMIN']]],
+    ['#/warehouses', 'Αποθήκες', 'MANAGER']]],
+  ['Διαχείριση', [['#/users', 'Χρήστες', 'ADMIN']]],
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
   ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/chart', 'Γράφημα πωλήσεων', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
@@ -49,6 +51,18 @@ function el(tag, attrs, ...kids) {
   return e;
 }
 const can = (role) => session && RANK[session.role] >= RANK[role];
+// the rights of the user (MM_RIGHTS, /api/auth/rights): a screen (e.g. ITEMS), a field or an action of it
+// (ITEMS.COST, DOCS.POST): N none, R read, W write; the server checks them too
+const LV = { N: 0, R: 1, W: 2 };
+const may = (screen, item, level = 'R') => !!(session && session.rights)
+  && LV[session.rights[item ? `${screen}.${item}` : screen] || 'N'] >= LV[level];
+const act = (screen, item) => may(screen, item, 'W');
+async function loadRights() {
+  const r = await api('auth/rights');
+  session.rights = r.rights;
+  session.menu = r.menu;
+  sessionStorage.setItem('mm', JSON.stringify(session));
+}
 const nf2 = new Intl.NumberFormat('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const nf3 = new Intl.NumberFormat('el-GR', { maximumFractionDigits: 3 });
 const money = (v) => (v === null || v === undefined ? '' : nf2.format(v));
@@ -202,7 +216,7 @@ function bellBadge() {
   document.title = (n ? `(${n}) ` : '') + bell.title;
 }
 async function bellCheck() {
-  if (!session || !can('CASHIER')) return;
+  if (!session || !may('ORDERS')) return;
   let r;
   try { r = await api('orders/new'); } catch (e) { return; }      // the network: next time
   bell.count = r.count || 0;
@@ -230,7 +244,7 @@ function bellStart() {
 const backupCheck = { timer: null };
 async function backupNotice() {
   const box = $('#notice');
-  if (!session || !can('MANAGER')) { box.hidden = true; return; }
+  if (!session || !may('DAY')) { box.hidden = true; return; }
   let r;
   try { r = await api('backup'); } catch (e) { return; }
   const text = {
@@ -299,6 +313,7 @@ function loginPage() {
         session = { token: r.token, username: r.username, role: r.role, warehouse_id: r.warehouse_id, warehouse: r.warehouse,
           warehouse_name: r.warehouse_name, register: r.register };
         sessionStorage.setItem('mm', JSON.stringify(session));
+        await loadRights();
         pw.value = '';
         if (!location.hash || location.hash === '#/login') location.hash = '#/items';
         render();
@@ -350,21 +365,25 @@ async function itemsPage(params) {
 async function itemPage(code) {
   try {
     const x = await api('items/' + encodeURIComponent(code));
+    // (a field the user may not read: not there)
+    const f = (item, row) => (may('ITEMS', item) ? [row] : []);
     const rows = [['Κωδικός', x.code], ['Barcode', x.barcode], ['Κατηγορία', x.category], ['Μονάδα', x.unit],
-      ['Τιμή λιανικής', money(x.price)], ['Χονδρική', money(x.wholesale_price)], ['ΦΠΑ', x.vat_code + ' ' + x.vat_rate + '%'],
-      ['Απόθεμα', qty(x.stock)], ['Δεσμευμένα', qty(x.reserved)], ['Διαθέσιμα', qty(x.available)],
-      ['Ελάχιστο', qty(x.min_stock)]];
+      ...f('PRICE', ['Τιμή λιανικής', money(x.price)]), ...f('WHOLESALE_PRICE', ['Χονδρική', money(x.wholesale_price)]),
+      ['ΦΠΑ', x.vat_code + ' ' + x.vat_rate + '%'],
+      ...f('STOCK', ['Απόθεμα', qty(x.stock)]), ...f('STOCK', ['Δεσμευμένα', qty(x.reserved)]), ...f('STOCK', ['Διαθέσιμα', qty(x.available)]),
+      ...f('MIN_STOCK', ['Ελάχιστο', qty(x.min_stock)])];
     if (x.serial_tracked === 'Y') rows.push(['Διαθέσιμες κάρτες', x.cards]);
-    if (can('MANAGER')) rows.splice(6, 0, ['Κόστος (τελευταία αγορά)', money(x.cost)], ['Κόστος FIFO (επόμενο)', x.fifo_next === null ? '' : money4(x.fifo_next)]);
+    if (may('ITEMS', 'COST')) rows.splice(6, 0, ['Κόστος (τελευταία αγορά)', money(x.cost)]);
+    if (may('ITEMS', 'FIFO')) rows.splice(7, 0, ['Κόστος FIFO (επόμενο)', x.fifo_next === null ? '' : money4(x.fifo_next)]);
     show(el('h1', {}, x.name),
       el('div', { class: 'panel' }, el('dl', { class: 'kv' }, rows.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v ?? '')]))),
       // more than one warehouse (the central store, the branches): its stock in each
-      x.warehouses && x.warehouses.length > 1 ? el('div', { class: 'panel' }, el('h2', {}, 'Απόθεμα ανά αποθήκη'),
+      x.warehouses && x.warehouses.length > 1 && may('ITEMS', 'STOCK') ? el('div', { class: 'panel' }, el('h2', {}, 'Απόθεμα ανά αποθήκη'),
         table([['Αποθήκη'], ['Απόθεμα', 'num'], ['Ελάχιστο', 'num']], x.warehouses.map((w) => el('tr', {},
           el('td', {}, `${w.code} ${w.name}` + (w.main === 'Y' ? ' (κεντρική)' : '')),
           el('td', { class: 'num' + (w.stock < w.min_stock ? ' neg' : '') }, qty(w.stock)),
-          el('td', { class: 'num' }, can('MANAGER') && w.main !== 'Y' ? el('a', { href: '#/warehouse/' + w.id }, qty(w.min_stock)) : qty(w.min_stock)))))) : null,
-      can('MANAGER') && x.fifo.length ? el('div', { class: 'panel' }, el('h2', {}, `Το απόθεμα ανά παραλαβή (FIFO): ${money(x.fifo_value)} €`),
+          el('td', { class: 'num' }, may('WAREHOUSES') && w.main !== 'Y' ? el('a', { href: '#/warehouse/' + w.id }, qty(w.min_stock)) : qty(w.min_stock)))))) : null,
+      may('ITEMS', 'FIFO') && x.fifo && x.fifo.length ? el('div', { class: 'panel' }, el('h2', {}, `Το απόθεμα ανά παραλαβή (FIFO): ${money(x.fifo_value)} €`),
         el('p', { class: 'muted' }, 'Πρώτα φεύγουν τα παλιότερα, με το κόστος τους.'),
         table([['Παραλαβή'], ['Από'], ['Ποσότητα', 'num'], ['Μένουν', 'num'], ['Κόστος', 'num'], ['Αξία', 'num']],
           fifoRows(x.fifo).map((f) => el('tr', { class: f.left_ < 0 ? 'expired' : null },
@@ -374,7 +393,7 @@ async function itemPage(code) {
       el('div', { class: 'row' },
         el('button', { onclick: () => history.back() }, 'Πίσω'),
         el('button', { onclick: () => { labelAdd(x, 1); location.hash = '#/labels'; } }, 'Ετικέτα'),
-        can('MANAGER') && el('button', { class: 'primary', onclick: () => { location.hash = '#/ledger/item/' + x.id; } }, 'Καρτέλα')));
+        may('LEDGERS') && el('button', { class: 'primary', onclick: () => { location.hash = '#/ledger/item/' + x.id; } }, 'Καρτέλα')));
   } catch (e) {
     fail(e);
     show(el('h1', {}, 'Είδη'), el('p', { class: 'muted' }, 'Δεν βρέθηκε: ' + code), el('a', { href: '#/items' }, 'Στα είδη'));
@@ -535,6 +554,7 @@ async function reportPage(name, params) {
       try { await api('reports/cost-method', { method: method.value }); toast('Η μέθοδος κόστους του συστήματος: ' + method.selectedOptions[0].text); go(); } catch (e) { fail(e); }
     },
   }, 'Να είναι η μέθοδος του συστήματος');
+  makeDefault.hidden = !act('STOCK_VALUE', 'COST_METHOD');
   let first = true;
   const go = async () => {
     try {
@@ -545,7 +565,7 @@ async function reportPage(name, params) {
       if (costs) { method.value = r.method; makeDefault.hidden = r.method === r.default_method; }
       out.replaceChildren(trial ? trialTable(name, r, from.value, to.value) : name === 'sales' ? salesTable(r.rows) : name === 'vat' ? vatTable(r.rows)
         : name === 'profit' ? profitTable(r) : name === 'stock-value' ? stockValueTable(r) : minTable(r.rows));
-      if (name === 'min-stock' && r.rows.length) out.append(orderBox(r.rows));
+      if (name === 'min-stock' && r.rows.length && act('REP_MIN_STOCK', 'ORDER')) out.append(orderBox(r.rows));
     } catch (e) { fail(e); }
   };
   const form = name === 'min-stock' ? null
@@ -1221,7 +1241,7 @@ async function countsPage() {
     } catch (e) { fail(e); }
   };
   show(el('h1', {}, 'Απογραφή'),
-    can('MANAGER') && el('form', {
+    act('COUNTS', 'CREATE') && el('form', {
       class: 'panel row',
       onsubmit: async (ev) => {
         ev.preventDefault();
@@ -1250,7 +1270,7 @@ async function countPage(id) {
       open = c.status === 'O';
       title.textContent = `${c.name} (${open ? 'ανοιχτή' : c.status === 'P' ? 'καταχωρήθηκε' : 'ακυρώθηκε'})`;
       form.hidden = !open;
-      actions.hidden = !(open && can('MANAGER'));
+      actions.hidden = !(open && (act('COUNTS', 'POST') || act('COUNTS', 'CANCEL')));
       out.replaceChildren(table([['Κωδικός'], ['Περιγραφή'], ['Μετρήθηκαν', 'num'], ['Σύστημα', 'num'], ['Διαφορά', 'num'], ['Συσκευή', 'hide-phone']],
         c.lines.map((x) => el('tr', {}, el('td', {}, x.code), el('td', { class: 'wrap' }, x.name), num(x.counted_qty, qty),
           num(x.system_qty, qty), num(x.diff, qty), el('td', { class: 'hide-phone' }, x.device || '')))));
@@ -1276,7 +1296,7 @@ async function countPage(id) {
     },
   }, el('label', {}, 'Σάρωση (Enter)', code), camera(code), el('label', {}, 'Ποσότητα', n), el('label', {}, 'Τρόπος', mode),
   el('button', { class: 'primary', type: 'submit' }, 'Βάλε'));
-  const act = (what, ask) => async () => {
+  const doIt = (what, ask) => async () => {
     if (!confirm(ask)) return;
     try {
       await api(`counts/${id}/${what}`, {});
@@ -1285,8 +1305,8 @@ async function countPage(id) {
     } catch (e) { fail(e); }
   };
   const actions = el('div', { class: 'row' },
-    el('button', { class: 'primary', onclick: act('post', 'Καταχώριση της απογραφής στο απόθεμα;') }, 'Καταχώριση'),
-    el('button', { class: 'danger', onclick: act('cancel', 'Ακύρωση της απογραφής;') }, 'Ακύρωση'));
+    act('COUNTS', 'POST') && el('button', { class: 'primary', onclick: doIt('post', 'Καταχώριση της απογραφής στο απόθεμα;') }, 'Καταχώριση'),
+    act('COUNTS', 'CANCEL') && el('button', { class: 'danger', onclick: doIt('cancel', 'Ακύρωση της απογραφής;') }, 'Ακύρωση'));
   show(title, form, last, out, el('h2', {}), actions, el('p', {}, el('a', { href: '#/counts' }, 'Όλες οι απογραφές')));
   await load();
   code.focus();
@@ -1470,7 +1490,7 @@ async function posPage(params) {
     // more than one warehouse: the one of the register (its sales from there); a manager changes it
     whBox.replaceChildren();
     if (posWhs.length > 1) {
-      const sel = el('select', { name: 'register_warehouse', disabled: !can('MANAGER') || !!st.receipt, 'aria-label': 'Αποθήκη του ταμείου' },
+      const sel = el('select', { name: 'register_warehouse', disabled: !act('POS', 'WAREHOUSE') || !!st.receipt, 'aria-label': 'Αποθήκη του ταμείου' },
         ...options(posWhs, 'id', (w) => `${w.code} ${w.name}`, st.warehouse_id));
       sel.addEventListener('change', async () => {
         if (await run('/warehouse', { warehouse_id: Number(sel.value) })) toast('Οι πωλήσεις του ταμείου από: ' + sel.selectedOptions[0].text);
@@ -1501,13 +1521,13 @@ async function posPage(params) {
             if (!confirm(`Κλείσιμο του Ζ ${z.z_no};`)) return;
             const r = await run('/close', {});
             if (r && r.closed) toast(`Ζ ${r.closed.z_no} έκλεισε: σύνολο ${money(r.closed.total)}, μετρητά ${money(r.closed.cash)}, κάρτα ${money(r.closed.card)}`);
-            if (r && r.closed && can('MANAGER') && confirm('Να ανοίξει η σύνοψη της ημέρας;')) location.hash = '#/day';
+            if (r && r.closed && may('DAY') && confirm('Να ανοίξει η σύνοψη της ημέρας;')) location.hash = '#/day';
           },
         }, 'Κλείσιμο Ζ'));
     } else {
       const cash = el('input', { type: 'number', step: '0.01', min: '0', value: '0', class: 'w8' });
       zBox.replaceChildren(el('label', {}, 'Αρχικό ταμείο', cash),
-        el('button', { type: 'button', class: 'primary', onclick: () => run('/open', { cash: Number(cash.value || 0) }) }, 'Άνοιγμα Ζ'));
+        act('POS', 'OPEN_Z') ? el('button', { type: 'button', class: 'primary', onclick: () => run('/open', { cash: Number(cash.value || 0) }) }, 'Άνοιγμα Ζ') : null);
     }
     scan.hidden = !z;
     pay.hidden = !st.receipt;
@@ -1639,7 +1659,7 @@ async function posPage(params) {
   // of the receipts (a manager)
   const autoPrint = el('input', { type: 'checkbox', name: 'autoprint', checked: !!store('mm.autoprint', false) });
   autoPrint.addEventListener('change', () => keep('mm.autoprint', autoPrint.checked));
-  const setup = can('MANAGER') ? el('details', { class: 'receipt-setup' }, el('summary', {}, 'Επικεφαλίδα και υποσέλιδο της απόδειξης')) : null;
+  const setup = act('POS', 'SETTINGS') ? el('details', { class: 'receipt-setup' }, el('summary', {}, 'Επικεφαλίδα και υποσέλιδο της απόδειξης')) : null;
   if (setup) {
     const head = el('textarea', { name: 'header', rows: 4, maxlength: 400, placeholder: 'π.χ. MINI MARKET Ο ΓΙΑΝΝΗΣ\nΑγ. Νικολάου 10, Πάτρα\nΑΦΜ 123456789 ΔΟΥ Α΄ Πατρών' });
     const foot = el('textarea', { name: 'footer', rows: 2, maxlength: 400, placeholder: 'π.χ. Ευχαριστούμε!' });
@@ -1806,7 +1826,7 @@ async function ordersPage(params) {
   const notes = el('input', { name: 'notes', autocomplete: 'off' });
   const cust = el('select', { name: 'customer_id' }, el('option', { value: '' }, '—'));
   const out = el('div');
-  if (can('MANAGER')) {
+  if (may('CUSTOMERS')) {
     api('customers?limit=500').then((r) => r.rows.forEach((x) => cust.append(el('option', { value: x.id }, x.name))))
       .catch(fail);
     cust.addEventListener('change', async () => {
@@ -1831,7 +1851,7 @@ async function ordersPage(params) {
       } catch (e) { fail(e); }
     },
   }, el('label', {}, 'Όνομα', name), el('label', {}, 'Τηλέφωνο', phone), el('label', {}, 'Για', date),
-  can('MANAGER') ? el('label', {}, 'Πελάτης (χονδρική)', cust) : null, el('label', { class: 'grow' }, 'Σημείωση', notes),
+  may('CUSTOMERS') ? el('label', {}, 'Πελάτης (χονδρική)', cust) : null, el('label', { class: 'grow' }, 'Σημείωση', notes),
   el('button', { class: 'primary', type: 'submit' }, 'Νέα παραγγελία'));
   try {
     const r = await api('orders' + (all ? '?status=all' : ''));
@@ -1909,7 +1929,7 @@ async function orderPage(id) {
       o.ready_at ? btn('Όχι έτοιμη', () => run('ready', { ready: false }))
         : btn('Έτοιμη (όλα μαζεύτηκαν)', () => run('ready', { ready: true }), 'primary'),
       btn('Στο ταμείο', () => { location.hash = '#/pos?order=' + o.id; }),
-      can('MANAGER') && o.customer_id ? btn('Δελτίο αποστολής', async () => {
+      act('ORDERS', 'NOTE') && o.customer_id ? btn('Δελτίο αποστολής', async () => {
         if (!confirm('Δελτίο αποστολής (με πίστωση) για όλη την παραγγελία;')) return;
         if (await run('note', {})) toast('Το δελτίο αποστολής καταχωρήθηκε');
       }) : null,
@@ -2128,7 +2148,7 @@ async function docPage(id) {
     const isInvoice = !!d.ref_type;
     const canInvoice = d.status === 'P' && !d.invoice_id && docTypes && docTypes.some((t) => t.ref_type === d.doc_type);
     actions.replaceChildren(...[
-      draft ? btn('Καταχώριση', ask('Καταχώριση;', async () => { if (await run('post', {})) toast('Καταχωρήθηκε με αριθμό ' + d.doc_no); }), 'primary') : null,
+      draft && act('DOCS', 'POST') ? btn('Καταχώριση', ask('Καταχώριση;', async () => { if (await run('post', {})) toast('Καταχωρήθηκε με αριθμό ' + d.doc_no); }), 'primary') : null,
       draft ? btn('Σβήσε πρόχειρο', ask('Σβήσιμο του πρόχειρου;', async () => {
         try { await api(`docs/${id}/delete`, {}); location.hash = '#/docs'; } catch (e) { fail(e); }
       }), 'danger') : null,
@@ -2149,7 +2169,7 @@ async function docPage(id) {
       }) : null,
       d.status !== 'D' ? btn('Εκτύπωση', () => printDoc(d)) : null,
       draft && d.doc_type === 'DPA' && d.lines.length ? btn('Εκτύπωση παραγγελίας', () => printDoc(d)) : null,
-      d.status === 'P' && d.mydata_state === 'S'
+      !act('DOCS', 'CANCEL') ? null : d.status === 'P' && d.mydata_state === 'S'
         ? btn('Ακύρωση (και στο myDATA)', ask('Ακύρωση στην ΑΑΔΕ (myDATA) και εδώ;', () => run('mydata/cancel', {})), 'danger')
         : d.status === 'P' ? btn('Ακύρωση', ask('Ακύρωση του παραστατικού;', () => run('cancel', {})), 'danger') : null,
     ].filter(Boolean));
@@ -2225,7 +2245,7 @@ async function paymentsPage() {
         r.rows.map((x) => el('tr', { class: x.status === 'C' ? 'cancelled' : null }, el('td', {}, day(x.pay_date)),
           el('td', {}, x.kind === 'R' ? 'Είσπραξη' : 'Πληρωμή'), el('td', { class: 'wrap' }, x.partner + (x.notes ? ' · ' + x.notes : '')),
           el('td', { class: 'hide-phone' }, { CASH: 'μετρητά', CARD: 'κάρτα', BANK: 'έμβασμα' }[x.method] + (x.register ? ' (' + x.register + ')' : '')),
-          num(x.amount), el('td', { class: 'num' }, x.status === 'C' ? 'ακυρώθηκε' : el('button', {
+          num(x.amount), el('td', { class: 'num' }, x.status === 'C' ? 'ακυρώθηκε' : !act('PAYMENTS', 'CANCEL') ? '' : el('button', {
             type: 'button', class: 'danger',
             onclick: async () => {
               if (!confirm('Ακύρωση της κίνησης;')) return;
@@ -2270,11 +2290,12 @@ function navBar() {
   const here = (h) => hash.startsWith(h) || (SECTION[first] && h.startsWith(SECTION[first]));
   let open = null;
   try { open = sessionStorage.getItem('mm.menu'); } catch (e) { open = null; }
-  $('#nav').replaceChildren(...MENU.map(([group, pages]) => {
-    const mine = pages.filter(([, , r]) => can(r));
+  const known = new Set(MENU.flatMap(([, ps]) => ps.map(([h]) => h)));
+  const groups = (session.menu || []).map((g) => [g.name, g.screens.filter((x) => known.has(x.route)).map((x) => [x.route, x.name])]);
+  $('#nav').replaceChildren(...groups.map(([group, mine]) => {
     if (!mine.length) return null;
     const current = mine.some(([h]) => here(h));
-    const d = el('details', { name: 'menu', open: current || (!MENU.some(([, ps]) => ps.some(([h]) => here(h))) && open === group) },
+    const d = el('details', { name: 'menu', open: current || (!groups.some(([, ps]) => ps.some(([h]) => here(h))) && open === group) },
       el('summary', {}, group),
       mine.map(([h, t]) => el('a', { href: h, class: here(h) ? 'on' : null, 'aria-current': here(h) ? 'page' : null }, t)));
     d.addEventListener('toggle', () => { if (d.open) { try { sessionStorage.setItem('mm.menu', group); } catch (e) { /* */ } } });
@@ -2303,38 +2324,52 @@ function render() {
     loginPage();
     return;
   }
+  if (!session.rights) {
+    loadRights().then(render, (e) => { fail(e); logoutLocal(); });
+    return;
+  }
   navBar();
   bellStart();
   backupStart();
   const [path, query] = (location.hash.slice(1) || '/items').split('?');
   const params = new URLSearchParams(query || '');
   const p = path.split('/').filter(Boolean).map(decodeURIComponent);
-  const need = (role, fn) => (can(role) ? fn() : show(el('h1', {}, 'Δεν επιτρέπεται'),
-    el('p', { class: 'muted' }, 'Η σελίδα αυτή θέλει ρόλο ' + role + '.')));
+  // a page: its screen (MM_RIGHTS), at least read
+  const need = (screen, fn) => (may(screen) ? fn() : show(el('h1', {}, 'Δεν επιτρέπεται'),
+    el('p', { class: 'muted' }, 'Δεν έχεις δικαίωμα σε αυτή τη σελίδα.')));
+  const partner = (k) => (k === 'customers' || k === 'customer' ? 'CUSTOMERS' : 'SUPPLIERS');
+  const REPORT = { sales: 'REP_SALES', vat: 'REP_VAT', 'min-stock': 'REP_MIN_STOCK', 'trial-items': 'TRIAL_ITEMS',
+    'trial-customers': 'TRIAL_CUSTOMERS', 'trial-suppliers': 'TRIAL_SUPPLIERS', profit: 'PROFIT', 'stock-value': 'STOCK_VALUE' };
   switch (p[0]) {
-    case 'pos': return posPage(params);
-    case 'orders': return ordersPage(params);
-    case 'poster': return posterPage();
-    case 'docs': return need('MANAGER', () => docsPage(params));
-    case 'doc': return need('MANAGER', () => docPage(p[1]));
-    case 'payments': return need('MANAGER', () => paymentsPage());
-    case 'order': return orderPage(p[1]);
-    case 'labels': return labelsPage();
-    case 'item': return itemPage(p[1]);
-    case 'partners': return need('MANAGER', () => partnersPage(p[1], params));
-    case 'partner': return need('MANAGER', () => partnerPage(p[1], p[2]));
-    case 'ledger': return need('MANAGER', () => ledgerPage(p[1], p[2], params));
-    case 'reports': return need('MANAGER', () => reportPage(p[1], params));
-    case 'counts': return countsPage();
-    case 'scratch': return need('MANAGER', () => scratchPage());
-    case 'day': return need('MANAGER', () => dayPage(params));
-    case 'chart': return need('MANAGER', () => chartPage(params));
-    case 'expiry': return need('MANAGER', () => expiryPage(params));
-    case 'warehouses': return need('MANAGER', () => warehousesPage());
-    case 'warehouse': return need('MANAGER', () => warehousePage(p[1]));
-    case 'users': return need('ADMIN', () => usersPage());
-    case 'count': return countPage(p[1]);
-    default: return itemsPage(params);
+    case 'pos': return need('POS', () => posPage(params));
+    case 'orders': return need('ORDERS', () => ordersPage(params));
+    case 'poster': return need('ORDERS', () => posterPage());
+    case 'docs': return need('DOCS', () => docsPage(params));
+    case 'doc': return need('DOCS', () => docPage(p[1]));
+    case 'payments': return need('PAYMENTS', () => paymentsPage());
+    case 'order': return need('ORDERS', () => orderPage(p[1]));
+    case 'labels': return need('LABELS', () => labelsPage());
+    case 'item': return need('ITEMS', () => itemPage(p[1]));
+    case 'partners': return need(partner(p[1]), () => partnersPage(p[1], params));
+    case 'partner': return need(partner(p[1]), () => partnerPage(p[1], p[2]));
+    case 'ledger': return need('LEDGERS', () => ledgerPage(p[1], p[2], params));
+    case 'reports': return need(REPORT[p[1]] || 'NONE', () => reportPage(p[1], params));
+    case 'counts': return need('COUNTS', () => countsPage());
+    case 'scratch': return need('SCRATCH', () => scratchPage());
+    case 'day': return need('DAY', () => dayPage(params));
+    case 'chart': return need('CHART', () => chartPage(params));
+    case 'expiry': return need('EXPIRY', () => expiryPage(params));
+    case 'warehouses': return need('WAREHOUSES', () => warehousesPage());
+    case 'warehouse': return need('WAREHOUSES', () => warehousePage(p[1]));
+    case 'users': return need('USERS', () => usersPage());
+    case 'count': return need('COUNTS', () => countPage(p[1]));
+    default: {
+      // the items, else the first page of the menu
+      if (may('ITEMS')) return itemsPage(params);
+      const first = (session.menu || []).flatMap((g) => g.screens).find((x) => x.route);
+      if (first && first.route !== '#/items') { location.hash = first.route; return null; }
+      return show(el('h1', {}, 'Καμία σελίδα'), el('p', { class: 'muted' }, 'Δεν έχεις δικαίωμα σε καμία σελίδα.'));
+    }
   }
 }
 

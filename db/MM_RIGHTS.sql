@@ -129,10 +129,16 @@ create or replace package body mm_rights as
     when no_data_found then fail(98, 'Δεν υπάρχει ρόλος ' || p_code);
   end;
 
-  -- the shop never stays without an active user of an active role of all rights
-  procedure keep_an_admin is
+  -- the shop never stays without an active user of an active role of all rights (checked when a role of
+  -- all rights is taken from a user, out, not active)
+  procedure keep_an_admin(p_role_id number) is
     n number;
+    a varchar2(1);
   begin
+    select max(all_rights) into a from mm_role where id = p_role_id;
+    if nvl(a, 'Y') = 'N' then
+      return;
+    end if;
     select count(*) into n from mm_user u
     join mm_user_role ur on ur.user_id = u.id
     join mm_role r on r.id = ur.role_id and r.active = 'Y' and r.all_rights = 'Y'
@@ -175,7 +181,7 @@ create or replace package body mm_rights as
       fail(98, 'Ο ρόλος ' || r.code || ' του συστήματος μένει ενεργός');
     end if;
     update mm_role set name = nvl(trim(p_name), name), active = nvl(p_active, 'Y') where id = r.id;
-    keep_an_admin;
+    keep_an_admin(r.id);
   end;
 
   procedure drop_role(p_code varchar2) is
@@ -187,7 +193,9 @@ create or replace package body mm_rights as
       fail(98, 'Ο ρόλος ' || r.code || ' του συστήματος δεν διαγράφεται');
     end if;
     delete from mm_role where id = r.id;                 -- (its grants, its users in it: with it)
-    keep_an_admin;
+    if r.all_rights = 'Y' then
+      keep_an_admin(null);
+    end if;
   end;
 
   procedure copy_role(p_from varchar2, p_to varchar2) is
@@ -260,7 +268,7 @@ create or replace package body mm_rights as
   begin
     delete from mm_user_role where role_id = r
       and user_id = (select id from mm_user where username = lower(p_username));
-    keep_an_admin;
+    keep_an_admin(r);
   end;
 end mm_rights;
 /

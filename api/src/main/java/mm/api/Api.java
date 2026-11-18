@@ -23,6 +23,7 @@ import java.util.Optional;
  * <pre>
  *   POST /api/auth/login {username, password}  its token (12 hours), role       (anyone)
  *   POST /api/auth/logout   GET /api/auth/me   the end of the session; who it is
+ *   GET /api/auth/rights                       its menu and its rights (Rights: every call is checked by them)
  *   /api/health                                the service and its database   (anyone)
  *   /api/items?q=&limit=&offset=               the items (code, barcode, name, price, stock ...)
  *   /api/items/{barcode or code}               one item, as the till finds it, with what is reserved
@@ -77,18 +78,8 @@ final class Api {
     }
 
     /** who is calling: from the token of the request (MM_AUTH) */
-    record User(long id, String username, String role, String token) {
-        boolean atLeast(String r) {
-            return rank(role) >= rank(r);
-        }
-
-        private static int rank(String r) {
-            return switch (r) {
-                case "ADMIN" -> 3;
-                case "MANAGER" -> 2;
-                default -> 1;
-            };
-        }
+    /** who is calling: from the token of the request (MM_AUTH); its rights (MM_RIGHTS, Rights) */
+    record User(long id, String username, String role, String token, Map<String, String> rights) {
     }
 
     /**
@@ -149,7 +140,8 @@ final class Api {
                                 : Shop.get(c, p, q);
                     } else {
                         User u = user(c, ex);
-                        body = "POST".equals(method) ? post(c, u, p, in) : route(c, u, p, q);
+                        Rights.check(u, method, p);                  // the screen, the action of the call
+                        body = "POST".equals(method) ? post(c, u, p, in) : Rights.mask(u, p, route(c, u, p, q));
                     }
                     c.commit();            // what a POST wrote (a GET: only the last_seen of its session)
                 } catch (SQLException | RuntimeException e) {
@@ -184,15 +176,10 @@ final class Api {
             cs.registerOutParameter(3, Types.VARCHAR);
             cs.registerOutParameter(4, Types.VARCHAR);
             cs.execute();
-            return new User(cs.getLong(2), cs.getString(3), cs.getString(4), token);
+            return new User(cs.getLong(2), cs.getString(3), cs.getString(4), token, Rights.load(c, cs.getLong(2)));
         }
     }
 
-    private static void need(User u, String role) {
-        if (!u.atLeast(role)) {
-            throw new Http.Fail(403, "forbidden", "only " + role + " or above");
-        }
-    }
 
     private static String client(HttpExchange ex) {
         String ua = ex.getRequestHeaders().getFirst("User-Agent");
@@ -237,15 +224,12 @@ final class Api {
             return Orders.post(c, u, p, in);
         }
         if ("docs".equals(p[0]) || "payments".equals(p[0])) {
-            need(u, "MANAGER");
             return Docs.post(c, p, in);
         }
         if ("scratch".equals(p[0])) {
-            need(u, "MANAGER");
             return Scratch.post(c, p, in);
         }
         if ("warehouses".equals(p[0])) {          // a new warehouse; one renamed, (not) active
-            need(u, "MANAGER");
             if (n == 1) {
                 String code = String.valueOf(Http.text(in, "code", true)).trim().toUpperCase(java.util.Locale.ROOT);
                 String name = String.valueOf(Http.text(in, "name", true)).trim();
@@ -303,7 +287,20 @@ final class Api {
             }
         }
         if ("users".equals(p[0])) {               // a new user; one changed: role, active, password, place
-            need(u, "ADMIN");
+            // (its password, its place: actions of their own; an administrator, made or changed: only by one
+            // who has all the rights, so that a right to the users is not a way to all of them)
+            if (in.get("password") != null && n == 2) {
+                Rights.need(u, "USERS", "PASSWORD", "W");
+            }
+            if (in.containsKey("warehouse_id") || in.containsKey("register_id")) {
+                Rights.need(u, "USERS", "PLACE", "W");
+            }
+            boolean admin = "ADMIN".equalsIgnoreCase(String.valueOf(in.get("role"))) || n == 2 && !Db.rows(c, """
+                    select 1 from mm_user_role ur join mm_role r on r.id = ur.role_id and r.all_rights = 'Y'
+                    where ur.user_id = ?""", Http.id(p[1])).isEmpty();
+            if (admin) {
+                Rights.need(u, "ROLES", null, "W");
+            }
             String name;
             if (n == 1) {
                 name = String.valueOf(Http.text(in, "username", true)).trim().toLowerCase(java.util.Locale.ROOT);
@@ -348,7 +345,6 @@ final class Api {
             return users(c);
         }
         if ("reports".equals(p[0]) && n == 2 && "cost-method".equals(p[1])) {   // the way the costs are counted
-            need(u, "MANAGER");
             String m = String.valueOf(Http.text(in, "method", true)).trim().toUpperCase(java.util.Locale.ROOT);
             if (!"FIFO".equals(m) && !"LAST".equals(m)) {
                 throw new Http.Fail(400, "bad_method", "method: FIFO or LAST");
@@ -360,18 +356,15 @@ final class Api {
             return Map.of("method", m);
         }
         if ("expiry".equals(p[0])) {
-            need(u, "MANAGER");
             return Expiry.post(c, p, in);
         }
         if ("customers".equals(p[0]) && n == 3 && "card".equals(p[2])) {   // a card for the points
-            need(u, "MANAGER");
             long id = Http.id(p[1]);
             Db.exec(c, "declare v varchar2(20); begin v := mm_core.new_card(?); end;", id);
             return partner(c, "mm_customer", "C", id);
         }
         if ("counts".equals(p[0])) {
             if (n == 1) {
-                need(u, "MANAGER");
                 try (CallableStatement cs = c.prepareCall("begin ? := mm_core.start_count(?, ?); end;")) {
                     cs.registerOutParameter(1, Types.NUMERIC);
                     cs.setString(2, Http.text(in, "name", false));
@@ -406,7 +399,6 @@ final class Api {
                         }
                     }
                     case "post", "cancel" -> {
-                        need(u, "MANAGER");
                         try (CallableStatement cs = c.prepareCall("post".equals(p[2])
                                 ? "begin mm_core.post_count(?); end;" : "begin mm_core.cancel_count(?); end;")) {
                             cs.setLong(1, id);
@@ -527,6 +519,9 @@ final class Api {
                 }
             }
             case "auth" -> {
+                if (n == 2 && "rights".equals(p[1])) {
+                    return Rights.of(c, u);
+                }
                 if (n == 2 && "me".equals(p[1])) {
                     Map<String, Object> out = new LinkedHashMap<>();
                     out.put("username", u.username());
@@ -542,7 +537,6 @@ final class Api {
                 return Orders.get(c, p, q);
             }
             case "docs", "doc-types", "payments" -> {
-                need(u, "MANAGER");
                 return Docs.get(c, p, q);
             }
             case "counts" -> {
@@ -567,7 +561,6 @@ final class Api {
                 }
             }
             case "customers", "suppliers" -> {
-                need(u, "MANAGER");
                 String table = "customers".equals(head) ? "mm_customer" : "mm_supplier";
                 String kind = "customers".equals(head) ? "C" : "S";
                 if (n == 1) {
@@ -578,7 +571,6 @@ final class Api {
                 }
             }
             case "ledger" -> {
-                need(u, "MANAGER");
                 if (n == 3) {
                     String what = switch (p[1]) {
                         case "item" -> "I";
@@ -590,7 +582,6 @@ final class Api {
                 }
             }
             case "scratch" -> {
-                need(u, "MANAGER");
                 if (n == 1) {
                     return Scratch.get(c);
                 }
@@ -600,42 +591,35 @@ final class Api {
                     return warehouses(c);
                 }
                 if (n == 2) {               // a branch and its minimum stock
-                    need(u, "MANAGER");
                     return warehouseMin(c, Http.id(p[1]));
                 }
             }
             case "expiry" -> {
-                need(u, "MANAGER");
                 if (n == 1) {
                     return Expiry.get(c, q);
                 }
             }
             case "users" -> {               // the users: their role, store, register (ADMIN)
-                need(u, "ADMIN");
                 if (n == 1) {
                     return users(c);
                 }
             }
             case "chart" -> {
-                need(u, "MANAGER");
                 if (n == 1) {
                     return Chart.get(c, q);
                 }
             }
             case "day" -> {
-                need(u, "MANAGER");
                 if (n == 1) {
                     return Day.get(c, q);
                 }
             }
             case "backup" -> {
-                need(u, "MANAGER");
                 if (n == 1) {
                     return Db.rows(c, "select state, days, ok_at, ok_file, failed_at, error from mm_backup_state").get(0);
                 }
             }
             case "reports" -> {
-                need(u, "MANAGER");
                 if (n == 2) {
                     return report(c, p[1], q);
                 }
