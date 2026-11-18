@@ -41,7 +41,8 @@ def test_a_consumption_at_cost(env, api, users):
     dan = r['id']
     post(api, '/api/docs/%d/post' % dan)
     assert float(db.one('select stock from mm_item where id = :i', i=item)[0]) == 3
-    db.cur.execute('select reason, qty, cost_fifo from mm_consumption where doc_id = :d and item_id = :i', d=dan, i=item)
+    db.cur.execute('select reason, sum(qty), sum(cost_fifo) from mm_consumption where doc_id = :d and item_id = :i '
+                   'group by reason', d=dan, i=item)                      # (a move for each line: 10 at 1.00, 2 at 1.50)
     assert [(a, float(b), float(c)) for a, b, c in db.cur] == [('DAMAGE', 12, 13)]
     assert db.one('select count(*) from mm_sales_doc where doc_id = :d', d=dan)[0] == 0              # (no sale)
     # the report: by warehouse and reason, at cost
@@ -62,8 +63,10 @@ def test_a_consumption_at_cost(env, api, users):
     # refused: a warehouse it goes to, a reason of another document, a reason of no one
     db.fails(194, 'new_doc', 'DAN', p_warehouse_id=main, p_to_warehouse_id=main, rtype=int)
     t = db.fn('new_doc', int, 'DAP', p_customer_id=ids['customer'], p_payment='CREDIT')
+    db.commit()
     db.fails(194, 'set_reason', t, 'USE')
     d = db.fn('new_doc', int, 'DAN', p_warehouse_id=main)
+    db.commit()                                                            # (fails: a rollback)
     db.fails(194, 'set_reason', d, 'LOST')
     post(api, '/api/docs/%d/reason' % d, {'reason': 'sample'})
     assert db.one('select reason from mm_doc where id = :d', d=d) == ('SAMPLE',)
