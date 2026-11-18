@@ -1084,6 +1084,7 @@ def build(name, f):
             '    <ProgramUnit Name="UI" ProgramUnitType="Package Body" ProgramUnitText=%s/>' % quoteattr(body),
             trigger('WHEN-NEW-FORM-INSTANCE', 'ui.init;', '    '),
             trigger('ON-ERROR', 'ui.on_error(ERROR_CODE, ERROR_TYPE, ERROR_TEXT, DBMS_ERROR_TEXT);', '    '),
+            trigger('ON-MESSAGE', 'ui.on_message(MESSAGE_CODE, MESSAGE_TYPE, MESSAGE_TEXT);', '    '),
             trigger('WHEN-WINDOW-CLOSED', 'exit_form;', '    '),
             trigger('WHEN-MOUSE-DOUBLECLICK', 'ui.dblclick(:SYSTEM.TRIGGER_ITEM);', '    '),
             '    <Window Name="%s" Title=%s XPosition="0" YPosition="0" Width="%d" Height="%d" '

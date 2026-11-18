@@ -8,6 +8,7 @@
 --   WHEN-VALIDATE-ITEM      ui.validate(:SYSTEM.TRIGGER_ITEM)
 --   POST-QUERY              ui.post_query(:SYSTEM.TRIGGER_BLOCK)
 --   ON-ERROR                ui.on_error(ERROR_CODE, ERROR_TYPE, ERROR_TEXT, DBMS_ERROR_TEXT)
+--   ON-MESSAGE              ui.on_message(MESSAGE_CODE, MESSAGE_TYPE, MESSAGE_TEXT)
 -- Items through NAME_IN and COPY (no :BLOCK.ITEM): so tests/test_forms.py compiles and runs it in
 -- the database, without the Forms. Every Greek string here becomes mm_text.t('T...') (mkforms.py).
 PACKAGE ui IS
@@ -19,6 +20,7 @@ PACKAGE ui IS
   PROCEDURE post_query(p_block VARCHAR2);
   PROCEDURE master(p_block VARCHAR2);
   PROCEDURE on_error(p_code NUMBER, p_type VARCHAR2, p_text VARCHAR2, p_dbtext VARCHAR2);
+  PROCEDURE on_message(p_code NUMBER, p_type VARCHAR2, p_text VARCHAR2);
   FUNCTION friendly(p_dbtext VARCHAR2) RETURN VARCHAR2;
 END;
 -- BODY
@@ -1151,5 +1153,15 @@ PACKAGE BODY ui IS
     ELSE
       message(p_type || '-' || to_char(p_code) || ': ' || p_text);
     END IF;
+  END;
+
+  -- the messages of the Forms: FRM-40350 (Query caused no records to be retrieved) not shown (a list of
+  -- nothing is no news: e.g. the till with no receipt being written, after each one paid); the rest as they are
+  PROCEDURE on_message(p_code NUMBER, p_type VARCHAR2, p_text VARCHAR2) IS
+  BEGIN
+    IF p_code = 40350 THEN
+      RETURN;
+    END IF;
+    message(p_type || '-' || to_char(p_code) || ': ' || p_text);
   END;
 END;

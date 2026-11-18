@@ -355,6 +355,14 @@ def test_error_messages(cur):
     assert msgs(cur) == 'Υπάρχει ήδη είδος με αυτό το barcode\n'
     run(cur, "ui.on_error(40100, 'FRM', 'At first record.', null);")
     assert msgs(cur) == 'FRM-40100: At first record.\n'
+    # the messages: a query of nothing (the till with no receipt being written) not shown; the rest as they are
+    run(cur, "ui.on_message(40350, 'FRM', 'Query caused no records to be retrieved.');")
+    assert msgs(cur) == ''
+    run(cur, "ui.on_message(40400, 'FRM', 'Transaction complete: 1 records applied and saved.');")
+    assert msgs(cur) == 'FRM-40400: Transaction complete: 1 records applied and saved.\n'
+    for name, (xml, _, _) in BUILT.items():                   # (every form: its trigger)
+        if name != 'MM_MENU':
+            assert "Trigger Name=\"ON-MESSAGE\" TriggerText=\"ui.on_message(MESSAGE_CODE, MESSAGE_TYPE, MESSAGE_TEXT);\"" in xml, name
 
 
 # -- the forms of the cards and of the reservations: the buttons, against MM_CORE (they commit) --------
