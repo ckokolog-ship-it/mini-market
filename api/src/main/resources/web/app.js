@@ -1377,9 +1377,14 @@ async function posPage(params) {
   const last = el('div');
   const cust = el('div', { class: 'panel row cust' });
   let st = null;
+  let seq = 0;              // (an answer after a newer call, or of a register left: not drawn)
   const run = async (path, body) => {
+    const reg = posReg;
+    const mine = ++seq;
     try {
-      st = await api(`pos/${encodeURIComponent(posReg)}${path}`, body);
+      const r = await api(`pos/${encodeURIComponent(reg)}${path}`, body);
+      if (mine !== seq || reg !== posReg) return r;
+      st = r;
       draw();
       return st;
     } catch (e) {
