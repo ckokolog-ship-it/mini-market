@@ -39,6 +39,10 @@ import java.util.Optional;
  *                                              what the central store has; its drafts DEN. POST .../min
  *                                              {code, min} (0: none), POST .../transfer: what is missing,
  *                                              a draft DEN from the central store (MANAGER)
+ *   /api/users   POST /api/users {username, full_name, role, password, warehouse_id, register_id}
+ *   POST /api/users/{id} {full_name, role, active, password, unlock, warehouse_id, register_id}
+ *                                              the users and where each works: its store, its register
+ *                                              (mm_auth.set_place; the till: mm_auth.may_use) (ADMIN)
  *   /api/expiry?days=   POST /api/expiry/withdraw   the goods expiring, expired; one taken out (Expiry.java)
  *   /api/chart?to=&days=                       the charts of the sales: by day (and a year before), by hour
  *                                              (MANAGER, Chart.java)
@@ -211,6 +215,7 @@ final class Api {
             out.put("username", name.toLowerCase(java.util.Locale.ROOT));
             out.put("role", cs.getString(5));
             out.put("expires", cs.getTimestamp(6).toLocalDateTime().toString());
+            out.putAll(place(c, name));
             return out;
         }
     }
@@ -297,6 +302,51 @@ final class Api {
                 return warehouses(c);
             }
         }
+        if ("users".equals(p[0])) {               // a new user; one changed: role, active, password, place
+            need(u, "ADMIN");
+            String name;
+            if (n == 1) {
+                name = String.valueOf(Http.text(in, "username", true)).trim().toLowerCase(java.util.Locale.ROOT);
+                try (CallableStatement cs = c.prepareCall("begin ? := mm_auth.create_user(?, ?, ?, ?); end;")) {
+                    cs.registerOutParameter(1, Types.NUMERIC);
+                    cs.setString(2, name);
+                    cs.setString(3, Http.text(in, "full_name", false));
+                    cs.setString(4, Http.text(in, "role", true));
+                    cs.setString(5, Http.text(in, "password", true));
+                    cs.execute();
+                }
+            } else if (n == 2) {
+                List<Map<String, Object>> r = Db.rows(c, "select username from mm_user where id = ?", Http.id(p[1]));
+                if (r.isEmpty()) {
+                    throw new Http.Fail(404, "not_found", "no such user: " + p[1]);
+                }
+                name = (String) r.get(0).get("username");
+                if (in.containsKey("full_name")) {
+                    Db.exec(c, "begin update mm_user set full_name = ? where username = ?; end;", Http.text(in, "full_name", false), name);
+                }
+                if (in.get("role") != null) {
+                    Db.exec(c, "begin mm_auth.set_role(?, ?); end;", name, Http.text(in, "role", true));
+                }
+                if (in.containsKey("active")) {
+                    Db.exec(c, "begin mm_auth.set_active(?, ?); end;", name, Boolean.TRUE.equals(in.get("active")) ? "Y" : "N");
+                }
+                if (in.get("password") != null) {
+                    Db.exec(c, "begin mm_auth.set_password(?, ?); end;", name, Http.text(in, "password", true));
+                }
+                if (Boolean.TRUE.equals(in.get("unlock"))) {
+                    Db.exec(c, "begin mm_auth.unlock(?); end;", name);
+                }
+            } else {
+                throw new Http.Fail(404, "not_found", "no such endpoint");
+            }
+            if (n == 1 || in.containsKey("warehouse_id") || in.containsKey("register_id")) {
+                Object wh = in.get("warehouse_id");
+                Object reg = in.get("register_id");
+                Db.exec(c, "begin mm_auth.set_place(?, ?, ?); end;", name,
+                        wh == null ? null : idOf(wh, "warehouse_id"), reg == null ? null : idOf(reg, "register_id"));
+            }
+            return users(c);
+        }
         if ("reports".equals(p[0]) && n == 2 && "cost-method".equals(p[1])) {   // the way the costs are counted
             need(u, "MANAGER");
             String m = String.valueOf(Http.text(in, "method", true)).trim().toUpperCase(java.util.Locale.ROOT);
@@ -370,6 +420,38 @@ final class Api {
             }
         }
         throw new Http.Fail(404, "not_found", "no such endpoint");
+    }
+
+    /** where a user works: its store (warehouse) and its register; null: everywhere */
+    static Map<String, Object> place(Connection c, String username) throws SQLException {
+        List<Map<String, Object>> r = Db.rows(c, """
+                select u.warehouse_id, w.code warehouse, w.name warehouse_name, u.register_id, g.code register,
+                       g.name register_name
+                from mm_user u left join mm_warehouse w on w.id = u.warehouse_id left join mm_register g on g.id = u.register_id
+                where u.username = lower(?)""", username);
+        return r.isEmpty() ? Map.of() : r.get(0);
+    }
+
+    /** the users (no password): role, active, locked, store, register, the last login */
+    static Map<String, Object> users(Connection c) throws SQLException {
+        return Map.of("rows", Db.rows(c, """
+                select u.id, u.username, u.full_name, u.role, u.active,
+                       case when u.locked_until > sysdate then 'Y' else 'N' end locked,
+                       u.warehouse_id, w.code warehouse, w.name warehouse_name, u.register_id, g.code register,
+                       (select max(l.at) from mm_auth_log l where l.username = u.username and l.event = 'LOGIN') last_login
+                from mm_user u left join mm_warehouse w on w.id = u.warehouse_id left join mm_register g on g.id = u.register_id
+                order by u.username"""));
+    }
+
+    private static long idOf(Object v, String name) {
+        if (v instanceof Number x) {
+            return x.longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(v).trim());
+        } catch (NumberFormatException e) {
+            throw new Http.Fail(400, "bad_" + name, name + ": a number");
+        }
     }
 
     /** the warehouses (the main one first), with what each has: items with stock, its value by FIFO */
@@ -446,7 +528,11 @@ final class Api {
             }
             case "auth" -> {
                 if (n == 2 && "me".equals(p[1])) {
-                    return Map.of("username", u.username(), "role", u.role());
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    out.put("username", u.username());
+                    out.put("role", u.role());
+                    out.putAll(place(c, u.username()));
+                    return out;
                 }
             }
             case "pos" -> {
@@ -522,6 +608,12 @@ final class Api {
                 need(u, "MANAGER");
                 if (n == 1) {
                     return Expiry.get(c, q);
+                }
+            }
+            case "users" -> {               // the users: their role, store, register (ADMIN)
+                need(u, "ADMIN");
+                if (n == 1) {
+                    return users(c);
                 }
             }
             case "chart" -> {

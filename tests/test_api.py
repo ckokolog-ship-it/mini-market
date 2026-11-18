@@ -142,7 +142,9 @@ def test_login_tokens_and_roles(api, users):
     assert post(api, '/api/auth/login', {'username': 'tstnobody', 'password': PW}, token=None,
                 status=401)['error'] == 'MM-177'                      # the same answer: no hint
     assert post(api, '/api/auth/login', {'username': users['CASHIER']}, token=None, status=400)['error'] == 'missing'
-    assert get(api, '/api/auth/me', token='CASHIER') == {'username': users['CASHIER'], 'role': 'CASHIER'}
+    me = get(api, '/api/auth/me', token='CASHIER')      # (where it works: no store, no register, everywhere)
+    assert me == {'username': users['CASHIER'], 'role': 'CASHIER', 'warehouse_id': None, 'warehouse': None,
+                  'warehouse_name': None, 'register_id': None, 'register': None, 'register_name': None}
     # the cashier: the items and the counts, not the office
     assert get(api, '/api/items?limit=1', token='CASHIER')['rows']
     for path in ('/api/customers', '/api/ledger/item/1', '/api/reports/sales'):

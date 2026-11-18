@@ -6,6 +6,7 @@
 --   mm_auth.check(token, user_id, username, role)                         who it is (else MM-179)
 --   mm_auth.logout(token)
 --   set_password, set_role, set_active, unlock
+--   mm_auth.set_place('maria', :store, :register)                       where she works (may_use: a register)
 --
 -- The password: PBKDF2-HMAC-SHA256, its own random salt of 16 bytes, C_ITER rounds (kept for each user:
 -- more rounds later take effect at its next password). The token: 32 random bytes as 64 hex
@@ -23,6 +24,12 @@ create or replace package mm_auth as
   procedure set_role(p_username varchar2, p_role varchar2);
   procedure set_active(p_username varchar2, p_active varchar2);
   procedure unlock(p_username varchar2);
+  -- the place of a user: its store (a warehouse) and its register (of that store: a register given alone,
+  -- its store too); null, null: everywhere. A cashier with a register works only on it; with a store,
+  -- on the registers of it; a manager, on the registers of its store; an administrator, everywhere.
+  procedure set_place(p_username varchar2, p_warehouse_id number, p_register_id number default null);
+  -- may the user work on the register: Y or N
+  function may_use(p_user_id number, p_register_id number) return varchar2;
   procedure login(p_username varchar2, p_password varchar2, p_client varchar2,
                   o_token out varchar2, o_role out varchar2, o_expires out date);
   procedure check_token(p_token varchar2, o_user_id out number, o_username out varchar2, o_role out varchar2);
@@ -162,6 +169,53 @@ create or replace package body mm_auth as
     end if;
     update mm_user set active = p_active where id = id_;
     note(lower(p_username), 'ACTIVE');
+  end;
+
+  procedure set_place(p_username varchar2, p_warehouse_id number, p_register_id number default null) is
+    id_ number := user_id(p_username);
+    wh number := p_warehouse_id;
+    rwh number;
+    n number;
+  begin
+    if p_register_id is not null then
+      begin
+        select nvl(warehouse_id, (select min(id) from mm_warehouse where main = 'Y')) into rwh
+        from mm_register where id = p_register_id and active = 'Y';
+      exception
+        when no_data_found then fail(96, 'Δεν υπάρχει ενεργό ταμείο ' || p_register_id);
+      end;
+      if wh is null then
+        wh := rwh;
+      elsif wh <> rwh then
+        fail(96, 'Το ταμείο του χρήστη πρέπει να είναι του καταστήματός του');
+      end if;
+    end if;
+    if wh is not null then
+      select count(*) into n from mm_warehouse where id = wh and active = 'Y';
+      if n = 0 then
+        fail(96, 'Δεν υπάρχει ενεργό κατάστημα ' || wh);
+      end if;
+    end if;
+    update mm_user set warehouse_id = wh, register_id = p_register_id where id = id_;
+    note(lower(p_username), 'PLACE');
+  end;
+
+  function may_use(p_user_id number, p_register_id number) return varchar2 is
+    u mm_user%rowtype;
+    rwh number;
+  begin
+    select * into u from mm_user where id = p_user_id;
+    select nvl(warehouse_id, (select min(id) from mm_warehouse where main = 'Y')) into rwh
+    from mm_register where id = p_register_id;
+    if u.role = 'ADMIN' or u.warehouse_id is null and u.register_id is null then
+      return 'Y';
+    elsif u.role = 'CASHIER' and u.register_id is not null then
+      return case when u.register_id = p_register_id then 'Y' else 'N' end;
+    else
+      return case when rwh = u.warehouse_id then 'Y' else 'N' end;
+    end if;
+  exception
+    when no_data_found then return 'N';
   end;
 
   procedure unlock(p_username varchar2) is

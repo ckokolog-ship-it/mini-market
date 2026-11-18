@@ -13,7 +13,7 @@ const RANK = { CASHIER: 1, MANAGER: 2, ADMIN: 3 };
 const MENU = [
   ['Πωλήσεις', [['#/pos', 'Ταμείο', 'CASHIER'], ['#/orders', 'Παραγγελίες', 'CASHIER']]],
   ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER'], ['#/expiry', 'Λήξεις', 'MANAGER'],
-    ['#/warehouses', 'Αποθήκες', 'MANAGER']]],
+    ['#/warehouses', 'Αποθήκες', 'MANAGER'], ['#/users', 'Χρήστες', 'ADMIN']]],
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
   ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/chart', 'Γράφημα πωλήσεων', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
@@ -296,7 +296,8 @@ function loginPage() {
       msg.textContent = '';
       try {
         const r = await api('auth/login', { username: user.value, password: pw.value });
-        session = { token: r.token, username: r.username, role: r.role };
+        session = { token: r.token, username: r.username, role: r.role, warehouse_id: r.warehouse_id, warehouse: r.warehouse,
+          warehouse_name: r.warehouse_name, register: r.register };
         sessionStorage.setItem('mm', JSON.stringify(session));
         pw.value = '';
         if (!location.hash || location.hash === '#/login') location.hash = '#/items';
@@ -1060,6 +1061,72 @@ async function warehousePage(id) {
   try { draw(await api('warehouses/' + id)); } catch (e) { fail(e); }
 }
 
+// -- the users (ADMIN): a new one; each: its name, role, active, a new password, unlocked, and where it
+// works: its store (the registers of it) and its register (the till opens on it; a cashier: only that)
+async function usersPage() {
+  let whs = [];
+  let regs = [];
+  try { whs = (await api('warehouses')).rows.filter((w) => w.active === 'Y'); } catch (e) { whs = []; }
+  try { regs = (await api('pos')).rows; } catch (e) { regs = []; }
+  const roles = [['CASHIER', 'Ταμίας'], ['MANAGER', 'Προϊστάμενος'], ['ADMIN', 'Διαχειριστής']];
+  const roleSel = (v, label) => el('select', { 'aria-label': label }, roles.map(([k, t]) => el('option', { value: k, selected: k === v }, t)));
+  const whSel = (v, label) => el('select', { 'aria-label': label }, el('option', { value: '' }, 'Όλα'),
+    whs.map((w) => el('option', { value: w.id, selected: w.id === v }, `${w.code} ${w.name}`)));
+  const regSel = (v, label) => el('select', { 'aria-label': label }, el('option', { value: '' }, 'Κανένα'),
+    regs.map((r) => el('option', { value: r.id, selected: r.id === v }, `${r.code} ${r.name}`)));
+  const num_ = (v) => (v ? Number(v) : null);
+  const out = el('div');
+  const draw = (r) => out.replaceChildren(table([['Χρήστης'], ['Όνομα', 'hide-phone'], ['Ρόλος'], ['Κατάστημα'], ['Ταμείο'], ['Ενεργός'],
+    ['Τελευταία σύνδεση', 'hide-phone'], ['']],
+  r.rows.map((x) => {
+    const full = el('input', { value: x.full_name || '', maxlength: 100, 'aria-label': 'Όνομα ' + x.username });
+    const role = roleSel(x.role, 'Ρόλος ' + x.username);
+    const w = whSel(x.warehouse_id, 'Κατάστημα ' + x.username);
+    const g = regSel(x.register_id, 'Ταμείο ' + x.username);
+    const act = el('input', { type: 'checkbox', checked: x.active === 'Y', 'aria-label': 'Ενεργός ' + x.username });
+    const pw = el('input', { type: 'password', autocomplete: 'new-password', placeholder: 'νέος κωδικός', 'aria-label': 'Κωδικός ' + x.username, class: 'w11' });
+    const save = async () => {
+      const body = { full_name: full.value.trim() || null, warehouse_id: num_(w.value), register_id: num_(g.value) };
+      if (role.value !== x.role) body.role = role.value;
+      if (act.checked !== (x.active === 'Y')) body.active = act.checked;
+      if (pw.value) body.password = pw.value;
+      if (x.locked === 'Y') body.unlock = true;
+      try { draw(await api('users/' + x.id, body)); toast('Αποθηκεύτηκε: ' + x.username); } catch (e) { pw.value = ''; fail(e); }
+    };
+    return el('tr', { class: x.active === 'Y' ? null : 'cancelled' },
+      el('td', {}, x.username + (x.locked === 'Y' ? ' (κλειδωμένος)' : '')), el('td', { class: 'hide-phone' }, full),
+      el('td', {}, role), el('td', {}, w), el('td', {}, g), el('td', {}, act),
+      el('td', { class: 'hide-phone' }, x.last_login ? day(x.last_login) : ''),
+      el('td', { class: 'num' }, pw, el('button', { type: 'button', onclick: save }, 'Αποθήκευση')));
+  })));
+  const uname = el('input', { name: 'new_username', maxlength: 30, placeholder: 'maria', autocomplete: 'off' });
+  const ufull = el('input', { name: 'new_full_name', maxlength: 100, placeholder: 'Μαρία Π.' });
+  const urole = roleSel('CASHIER', 'Ρόλος νέου χρήστη');
+  const uwh = whSel(null, 'Κατάστημα νέου χρήστη');
+  const ureg = regSel(null, 'Ταμείο νέου χρήστη');
+  const upw = el('input', { name: 'new_password', type: 'password', autocomplete: 'new-password' });
+  show(el('h1', {}, 'Χρήστες'),
+    el('p', { class: 'muted' }, 'Το κατάστημα και το ταμείο του χρήστη: το ταμείο ανοίγει στο δικό του· ο ταμίας με ταμείο δουλεύει μόνο σε αυτό, με κατάστημα στα ταμεία του καταστήματος· ο προϊστάμενος στα ταμεία του καταστήματός του· ο διαχειριστής παντού. «Όλα»: χωρίς περιορισμό. Ταμείο χωρίς κατάστημα: το κατάστημα του ταμείου.'),
+    el('form', {
+      class: 'panel row',
+      onsubmit: async (ev) => {
+        ev.preventDefault();
+        try {
+          draw(await api('users', {
+            username: uname.value.trim(), full_name: ufull.value.trim() || null, role: urole.value, password: upw.value,
+            warehouse_id: num_(uwh.value), register_id: num_(ureg.value),
+          }));
+          toast('Νέος χρήστης ' + uname.value.trim().toLowerCase());
+          uname.value = ''; ufull.value = ''; upw.value = '';
+        } catch (e) { upw.value = ''; fail(e); }
+      },
+    }, el('label', {}, 'Χρήστης', uname), el('label', { class: 'grow' }, 'Όνομα', ufull), el('label', {}, 'Ρόλος', urole),
+    el('label', {}, 'Κατάστημα', uwh), el('label', {}, 'Ταμείο', ureg), el('label', {}, 'Κωδικός', upw),
+    el('button', { class: 'primary', type: 'submit' }, 'Νέος χρήστης')),
+    out);
+  try { draw(await api('users')); } catch (e) { fail(e); }
+}
+
 // -- the scratch tickets (σκρατς): bought in packs, sold one by one by the barcode of each (its game 4
 // digits, its pack 7, its number 3). A pack loaded by a scan of one of its tickets; the games (έκδοση: the
 // item it is sold as, the tickets of a pack); the packs, sold and left; the prizes paid, by day
@@ -1138,7 +1205,9 @@ async function countsPage() {
   // more than one warehouse: the count is of one of them
   let whs = [];
   try { whs = (await api('warehouses')).rows.filter((w) => w.active === 'Y'); } catch (e) { whs = []; }
-  const wh = el('select', { name: 'warehouse_id' }, ...options(whs, 'id', (w) => `${w.code} ${w.name}`, whs.length ? whs[0].id : ''));
+  // (the store of the user first)
+  const myWh = whs.some((w) => w.id === session.warehouse_id) ? session.warehouse_id : whs.length ? whs[0].id : '';
+  const wh = el('select', { name: 'warehouse_id' }, ...options(whs, 'id', (w) => `${w.code} ${w.name}`, myWh));
   const out = el('div');
   const load = async () => {
     try {
@@ -1352,7 +1421,8 @@ async function posPage(params) {
   let regs;
   try { regs = (await api('pos')).rows; } catch (e) { fail(e); return; }
   if (!regs.length) { show(el('h1', {}, 'Ταμείο'), el('p', { class: 'muted' }, 'Κανένα ταμείο.')); return; }
-  if (!regs.some((r) => r.code === posReg)) posReg = regs[0].code;
+  // (the register chosen last on this device, if the user may use it; else its own, else the first)
+  if (!regs.some((r) => r.code === posReg)) posReg = (regs.find((r) => r.mine === 'Y') || regs[0]).code;
   const pick = el('select', {
     'aria-label': 'Ταμείο',
     onchange: () => {
@@ -2194,7 +2264,7 @@ async function paymentsPage() {
 const SECTION = { item: '#/items', partner: '#/partners/', ledger: '#/partners/', count: '#/counts', order: '#/orders', doc: '#/docs' };
 function navBar() {
   $('#top').hidden = false;
-  $('#who').textContent = `${session.username} (${session.role})`;
+  $('#who').textContent = `${session.username} (${session.role})` + (session.warehouse ? ` · ${session.warehouse_name || session.warehouse}` : '');
   const hash = location.hash || '#/items';
   const first = hash.slice(2).split(/[/?]/)[0];
   const here = (h) => hash.startsWith(h) || (SECTION[first] && h.startsWith(SECTION[first]));
@@ -2262,6 +2332,7 @@ function render() {
     case 'expiry': return need('MANAGER', () => expiryPage(params));
     case 'warehouses': return need('MANAGER', () => warehousesPage());
     case 'warehouse': return need('MANAGER', () => warehousePage(p[1]));
+    case 'users': return need('ADMIN', () => usersPage());
     case 'count': return countPage(p[1]);
     default: return itemsPage(params);
   }

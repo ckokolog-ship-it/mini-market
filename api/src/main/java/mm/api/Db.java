@@ -89,7 +89,11 @@ final class Db implements AutoCloseable {
     static void exec(Connection c, String plsql, Object... binds) throws SQLException {
         try (java.sql.CallableStatement st = c.prepareCall(plsql)) {
             for (int i = 0; i < binds.length; i++) {
-                st.setObject(i + 1, binds[i]);
+                if (binds[i] == null) {
+                    st.setNull(i + 1, java.sql.Types.VARCHAR);
+                } else {
+                    st.setObject(i + 1, binds[i]);
+                }
             }
             st.execute();
         }
