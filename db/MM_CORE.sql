@@ -169,6 +169,14 @@ create or replace package mm_core as
   -- those without a supplier yet. How many lines went in
   function order_missing(p_supplier_id number default null) return number;
 
+  -- the minimum stock of an item in a warehouse: the main one, MM_ITEM.MIN_STOCK; a branch,
+  -- MM_WAREHOUSE_MIN (0: none). Below it in a branch (MM_WAREHOUSE_MIN_STOCK): goods from the central
+  -- store, a draft DEN to the branch (that one, when there is a draft already) with what is missing
+  -- (whole pieces), not more than the central store has; checked, posted when they leave. Not the items
+  -- with serials, nor the sets. How many lines went in
+  procedure set_min(p_warehouse_id number, p_item_id number, p_min number);
+  function transfer_missing(p_warehouse_id number) return number;
+
   -- the points of the retail customers (MM_POINTS): a card for a customer (EAN-13 2990 + its id), the
   -- customer of a card; the customer of a draft receipt (null: none, its points not used); points used
   -- on it (0: none): at least POINTS_MIN, not more than it has, as the discount of the receipt
@@ -2247,6 +2255,72 @@ create or replace package body mm_core as
       select count(*) into had from mm_doc_line where doc_id = d and item_id = r.item_id;
       if had = 0 then
         v := add_line(d, r.item_id, case r.unit when 'PCS' then ceil(r.missing) else r.missing end);
+        n := n + 1;
+      end if;
+    end loop;
+    return n;
+  end;
+
+  procedure set_min(p_warehouse_id number, p_item_id number, p_min number) is
+    m varchar2(1);
+    v number;
+  begin
+    if p_min is null or p_min < 0 then
+      fail(95, 'Το ελάχιστο απόθεμα δεν μπορεί να είναι αρνητικό');
+    end if;
+    begin
+      select main into m from mm_warehouse where id = p_warehouse_id;
+    exception
+      when no_data_found then fail(93, 'Δεν υπάρχει αποθήκη ' || p_warehouse_id);
+    end;
+    select count(*) into v from mm_item where id = p_item_id;
+    if v = 0 then
+      fail(6, 'Δεν υπάρχει είδος ' || p_item_id);
+    end if;
+    if m = 'Y' then
+      update mm_item set min_stock = p_min where id = p_item_id;
+    elsif p_min = 0 then
+      delete from mm_warehouse_min where warehouse_id = p_warehouse_id and item_id = p_item_id;
+    else
+      merge into mm_warehouse_min w
+      using (select p_warehouse_id warehouse_id, p_item_id item_id from dual) x
+      on (w.warehouse_id = x.warehouse_id and w.item_id = x.item_id)
+      when matched then update set w.min_stock = p_min
+      when not matched then insert (warehouse_id, item_id, min_stock) values (x.warehouse_id, x.item_id, p_min);
+    end if;
+  end;
+
+  function transfer_missing(p_warehouse_id number) return number is
+    main number := main_warehouse;
+    d number;
+    had number;
+    q number;
+    n number := 0;
+    v number;
+  begin
+    select count(*) into v from mm_warehouse where id = p_warehouse_id and main = 'N' and active = 'Y';
+    if v = 0 then
+      fail(95, 'Το ελάχιστο από το κεντρικό: ένα ενεργό υποκατάστημα');
+    end if;
+    for r in (select m.item_id, m.unit, m.missing, m.central
+              from mm_warehouse_min_stock m join mm_item i on i.id = m.item_id
+              where m.warehouse_id = p_warehouse_id and i.serial_tracked = 'N' and i.kit = 'N' and i.is_model = 'N'
+              order by m.code) loop
+      q := least(case r.unit when 'PCS' then ceil(r.missing) else r.missing end, r.central);
+      if r.unit = 'PCS' then
+        q := floor(q);
+      end if;
+      continue when q <= 0;
+      if d is null then
+        select max(id) into d from mm_doc
+        where doc_type = 'DEN' and status = 'D' and warehouse_id = main and to_warehouse_id = p_warehouse_id;
+        if d is null then
+          d := new_doc('DEN', p_warehouse_id => main, p_to_warehouse_id => p_warehouse_id);
+        end if;
+      end if;
+      select count(*) into had from mm_doc_line where doc_id = d and item_id = r.item_id;
+      if had = 0 then
+        v := add_line(d, r.item_id, q);
         n := n + 1;
       end if;
     end loop;

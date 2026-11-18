@@ -359,8 +359,10 @@ async function itemPage(code) {
       el('div', { class: 'panel' }, el('dl', { class: 'kv' }, rows.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v ?? '')]))),
       // more than one warehouse (the central store, the branches): its stock in each
       x.warehouses && x.warehouses.length > 1 ? el('div', { class: 'panel' }, el('h2', {}, 'Απόθεμα ανά αποθήκη'),
-        table([['Αποθήκη'], ['Απόθεμα', 'num']], x.warehouses.map((w) => el('tr', {},
-          el('td', {}, `${w.code} ${w.name}` + (w.main === 'Y' ? ' (κεντρική)' : '')), num(w.stock, qty))))) : null,
+        table([['Αποθήκη'], ['Απόθεμα', 'num'], ['Ελάχιστο', 'num']], x.warehouses.map((w) => el('tr', {},
+          el('td', {}, `${w.code} ${w.name}` + (w.main === 'Y' ? ' (κεντρική)' : '')),
+          el('td', { class: 'num' + (w.stock < w.min_stock ? ' neg' : '') }, qty(w.stock)),
+          el('td', { class: 'num' }, can('MANAGER') && w.main !== 'Y' ? el('a', { href: '#/warehouse/' + w.id }, qty(w.min_stock)) : qty(w.min_stock)))))) : null,
       can('MANAGER') && x.fifo.length ? el('div', { class: 'panel' }, el('h2', {}, `Το απόθεμα ανά παραλαβή (FIFO): ${money(x.fifo_value)} €`),
         el('p', { class: 'muted' }, 'Πρώτα φεύγουν τα παλιότερα, με το κόστος τους.'),
         table([['Παραλαβή'], ['Από'], ['Ποσότητα', 'num'], ['Μένουν', 'num'], ['Κόστος', 'num'], ['Αξία', 'num']],
@@ -970,12 +972,19 @@ async function warehousesPage() {
   const out = el('div');
   const code = el('input', { name: 'wh_code', maxlength: 10, class: 'w6', placeholder: 'Y1' });
   const name = el('input', { name: 'wh_name', maxlength: 60, placeholder: 'Υποκατάστημα Ρίου' });
-  const draw = (r) => out.replaceChildren(table([['Κωδικός'], ['Όνομα'], ['Είδη με απόθεμα', 'num'], ['Αξία (FIFO)', 'num'], ['Ταμεία', 'num hide-phone'], ['Ενεργή'], ['']],
+  const draw = (r) => out.replaceChildren(table([['Κωδικός'], ['Όνομα'], ['Είδη με απόθεμα', 'num'], ['Αξία (FIFO)', 'num'], ['Ταμεία', 'num hide-phone'],
+    ['Κάτω από το ελάχιστο', 'num'], ['Ενεργή'], ['']],
     r.rows.map((w) => {
       const nm = el('input', { value: w.name, maxlength: 60, 'aria-label': 'Όνομα ' + w.code });
       return el('tr', { class: w.active === 'Y' ? null : 'cancelled' },
         el('td', {}, w.code + (w.main === 'Y' ? ' (κεντρική)' : '')), el('td', {}, nm),
         el('td', { class: 'num' }, w.items), num(w.value), el('td', { class: 'num hide-phone' }, w.registers),
+        // the items under their minimum there: the central store, the report (orders to the suppliers);
+        // a branch, its page (its minimum, goods sent from the central store)
+        el('td', { class: 'num' + (w.under_min > 0 ? ' neg' : '') }, el('a', {
+          href: w.main === 'Y' ? '#/reports/min-stock' : '#/warehouse/' + w.id,
+          'aria-label': 'Ελάχιστο ' + w.code,
+        }, String(w.under_min))),
         el('td', {}, w.main === 'Y' ? 'ναι' : el('input', {
           type: 'checkbox',
           checked: w.active === 'Y',
@@ -1003,6 +1012,52 @@ async function warehousesPage() {
     }, el('label', {}, 'Κωδικός', code), el('label', { class: 'grow' }, 'Όνομα', name), el('button', { class: 'primary', type: 'submit' }, 'Νέα αποθήκη')),
     out);
   try { draw(await api('warehouses')); } catch (e) { fail(e); }
+}
+
+// -- a branch and its minimum stock: the minimum of each item there (0: none); the items under it, what
+// is missing, what the central store has; what is missing, a draft transfer (DEN) from the central store,
+// checked and posted in «Τιμολόγια και δελτία» when the goods leave
+async function warehousePage(id) {
+  const out = el('div');
+  const code = el('input', { name: 'min_code', placeholder: 'Κωδικός ή barcode' });
+  const min = el('input', { name: 'min_qty', type: 'number', step: 'any', min: '0', class: 'w6' });
+  const draw = (r, lines) => {
+    const w = r.warehouse;
+    const under = r.rows.filter((x) => x.missing > 0);
+    out.replaceChildren(
+      el('h1', {}, `Ελάχιστο απόθεμα: ${w.code} ${w.name}`),
+      w.main === 'Y' ? el('p', {}, 'Της κεντρικής: στο είδος (Ελάχιστο) και στην ', el('a', { href: '#/reports/min-stock' }, 'αναφορά ›')) : null,
+      el('form', {
+        class: 'panel row no-print',
+        onsubmit: async (ev) => {
+          ev.preventDefault();
+          try {
+            draw(await api(`warehouses/${id}/min`, { code: code.value.trim(), min: Number(min.value || 0) }));
+            toast('Αποθηκεύτηκε'); code.value = ''; min.value = ''; code.focus();
+          } catch (e) { fail(e); }
+        },
+      }, el('label', { class: 'grow' }, 'Είδος', code), camera(code), el('label', {}, 'Ελάχιστο', min),
+      el('button', { class: 'primary', type: 'submit' }, 'Ορισμός')),
+      el('p', { class: 'muted' }, 'Ελάχιστο 0: χωρίς ελάχιστο εκεί.'),
+      r.rows.length ? table([['Κωδικός'], ['Περιγραφή'], ['Απόθεμα', 'num'], ['Ελάχιστο', 'num'], ['Λείπουν', 'num'], ['Κεντρικό', 'num hide-phone']],
+        r.rows.map((x) => el('tr', { class: x.missing > 0 ? 'expired' : null },
+          el('td', {}, el('a', { href: '#/item/' + encodeURIComponent(x.code) }, x.code)), el('td', { class: 'wrap' }, x.name),
+          num(x.stock, qty), el('td', { class: 'num' }, el('input', {
+            type: 'number', step: 'any', min: '0', value: x.min_stock, class: 'w6', 'aria-label': 'Ελάχιστο ' + x.code,
+            onchange: async (ev) => { try { draw(await api(`warehouses/${id}/min`, { code: x.code, min: Number(ev.target.value || 0) })); } catch (e) { fail(e); } },
+          })), num(x.missing, qty), num(x.central, qty, 'num hide-phone')))) : el('p', { class: 'muted' }, 'Κανένα είδος με ελάχιστο εδώ.'),
+      w.main === 'Y' ? null : el('div', { class: 'panel' }, el('h2', {}, 'Από το κεντρικό'),
+        lines !== undefined ? el('p', {}, `${lines} γραμμές μπήκαν στο πρόχειρο δελτίο ενδοδιακίνησης.`)
+          : el('p', { class: 'muted' }, `${under.length} είδη κάτω από το ελάχιστο. Ένα πρόχειρο δελτίο ενδοδιακίνησης (DEN) από το κεντρικό, με όσα λείπουν (όχι περισσότερα από όσα έχει το κεντρικό), στο κόστος. Έλεγξέ το και καταχώρισέ το όταν φύγουν τα είδη.`),
+        r.drafts.length ? el('ul', {}, r.drafts.map((d) => el('li', {}, el('a', { href: '#/doc/' + d.id }, `Πρόχειρο DEN ${day(d.doc_date)}: ${d.lines} γραμμές, ${money(d.total)} €`)))) : null,
+        el('button', {
+          type: 'button', class: 'primary', disabled: !under.length,
+          onclick: async () => { try { const x = await api(`warehouses/${id}/transfer`, {}); draw(x, x.lines); } catch (e) { fail(e); } },
+        }, 'Φτιάξε το δελτίο ενδοδιακίνησης')),
+      el('div', { class: 'row' }, el('button', { onclick: () => { location.hash = '#/warehouses'; } }, 'Αποθήκες')));
+  };
+  show(out);
+  try { draw(await api('warehouses/' + id)); } catch (e) { fail(e); }
 }
 
 // -- the scratch tickets (σκρατς): bought in packs, sold one by one by the barcode of each (its game 4
@@ -1322,9 +1377,14 @@ async function posPage(params) {
   const last = el('div');
   const cust = el('div', { class: 'panel row cust' });
   let st = null;
+  let seq = 0;              // (an answer after a newer call, or of a register left: not drawn)
   const run = async (path, body) => {
+    const reg = posReg;
+    const mine = ++seq;
     try {
-      st = await api(`pos/${encodeURIComponent(posReg)}${path}`, body);
+      const r = await api(`pos/${encodeURIComponent(reg)}${path}`, body);
+      if (mine !== seq || reg !== posReg) return r;
+      st = r;
       draw();
       return st;
     } catch (e) {
@@ -2201,6 +2261,7 @@ function render() {
     case 'chart': return need('MANAGER', () => chartPage(params));
     case 'expiry': return need('MANAGER', () => expiryPage(params));
     case 'warehouses': return need('MANAGER', () => warehousesPage());
+    case 'warehouse': return need('MANAGER', () => warehousePage(p[1]));
     case 'count': return countPage(p[1]);
     default: return itemsPage(params);
   }

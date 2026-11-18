@@ -1,6 +1,6 @@
 -- MM_DEMO_WAREHOUSES.sql -- two branches to see the warehouses: their own stock, registers and sales, the
 -- goods sent to them from the central store at cost (Δελτίο ενδοδιακίνησης, DEN), a count in one, goods
--- sent back. After INSTALL.sql demo, as the owner, from this folder (NLS_LANG=GREEK_GREECE.AL32UTF8, as
+-- sent back; the minimum stock of each branch (some items under it). After INSTALL.sql demo, as the owner, from this folder (NLS_LANG=GREEK_GREECE.AL32UTF8, as
 -- for INSTALL.sql):
 --
 --   sqlplus mm/<password>@FREEPDB1 @MM_DEMO_WAREHOUSES.sql
@@ -145,5 +145,41 @@ begin
   end loop;
   select count(*) into v from mm_check;
   dbms_output.put_line('== MM CHECK ' || case when v = 0 then 'OK' else v || ' rows: select * from mm_check' end);
+end;
+/
+
+-- the minimum stock of the branches (MM_WAREHOUSE_MIN; once: when a branch has none yet, so also on a
+-- database where the documents above were made before): some items under it, to send from the central
+-- store (the page of the branch: «Φτιάξε το δελτίο ενδοδιακίνησης», a draft DEN)
+declare
+  n number;
+  procedure mins(p_wh varchar2, p_lines varchar2) is
+    w number;
+    it number;
+    s varchar2(100);
+  begin
+    select max(id) into w from mm_warehouse where code = p_wh;
+    if w is null then
+      return;
+    end if;
+    select count(*) into n from mm_warehouse_min where warehouse_id = w;
+    if n > 0 then
+      return;
+    end if;
+    for k in 1 .. regexp_count(p_lines, '[^;]+') loop
+      s := regexp_substr(p_lines, '[^;]+', 1, k);
+      select id into it from mm_item where code = regexp_substr(s, '[^:]+', 1, 1);
+      mm_core.set_min(w, it, to_number(regexp_substr(s, '[^:]+', 1, 2)));
+    end loop;
+  end;
+begin
+  mins('Y1', 'GAL01:40;ART01:15;POT01:30;POT05:20;KAF01:20;SNK02:10;SNK01:6');
+  mins('Y2', 'GAL01:8;ART01:8;POT01:12;SNK01:8;SNK02:5');
+  commit;
+  dbms_output.put_line('== the minimum of the branches: items under it');
+  for r in (select warehouse, code, stock, min_stock, missing, central from mm_warehouse_min_stock order by warehouse, code) loop
+    dbms_output.put_line(rpad(r.warehouse, 4) || rpad(r.code, 8) || lpad(r.stock, 7) || lpad(r.min_stock, 7)
+                         || lpad(r.missing, 7) || '  central ' || r.central);
+  end loop;
 end;
 /

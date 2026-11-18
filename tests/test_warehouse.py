@@ -164,3 +164,48 @@ def test_the_warehouses_in_the_pages(two, api, users):
     assert (v['warehouse'], x['stock'], x['value_fifo']) == (wcode, 3, 3.6)
     assert not [r for r in get(api, '/api/reports/stock-value?warehouse=K')['rows'] if r['code'] == code]
     assert db.one("select count(*) from mm_check where what in ('FIFO', 'FIFO_WH', 'STOCK')")[0] == 0
+
+
+def test_the_minimum_of_a_branch(two, api, users):
+    """the minimum stock of an item in a branch (MM_WAREHOUSE_MIN; the main one: MM_ITEM.MIN_STOCK):
+    the items under it; what is missing, a draft DEN from the central store (whole pieces, not more than
+    it has; the same draft again); posted, none missing; 0: none; what is refused"""
+    db, ids, it, w2, code = two
+    main = db.fn('main_warehouse', int)
+    buy(db, ids, it, 10, 1.00)
+    r = post(api, '/api/warehouses/%d/min' % w2, {'code': code, 'min': 4.5})
+    x = [y for y in r['rows'] if y['code'] == code][0]
+    assert (x['stock'], x['min_stock'], x['missing'], x['central']) == (0, 4.5, 4.5, 10) and r['drafts'] == []
+    assert [w['under_min'] for w in get(api, '/api/warehouses')['rows'] if w['id'] == w2] == [1]
+    assert [w['min_stock'] for w in get(api, '/api/items/' + code)['warehouses'] if w['id'] == w2] == [4.5]
+    # what is missing: 5 (whole pieces), a draft DEN from the central store; again: nothing more
+    r = post(api, '/api/warehouses/%d/transfer' % w2, {})
+    assert r['lines'] == 1 and len(r['drafts']) == 1 and r['drafts'][0]['lines'] == 1
+    d = r['drafts'][0]['id']
+    assert db.one('select doc_type, status, warehouse_id, to_warehouse_id from mm_doc where id = :d', d=d) == ('DEN', 'D', main, w2)
+    assert float(db.one('select sum(qty) from mm_doc_line where doc_id = :d', d=d)[0]) == 5
+    r = post(api, '/api/warehouses/%d/transfer' % w2, {})
+    assert r['lines'] == 0 and [y['id'] for y in r['drafts']] == [d]
+    db.fn('post_doc', int, d)
+    db.commit()
+    assert stock(db, it) == {main: 5, w2: 5}
+    r = get(api, '/api/warehouses/%d' % w2)
+    assert [(y['stock'], y['missing']) for y in r['rows'] if y['code'] == code] == [(5, 0)] and r['drafts'] == []
+    # more missing than the central store has: what it has
+    post(api, '/api/warehouses/%d/min' % w2, {'code': code, 'min': 20})
+    r = post(api, '/api/warehouses/%d/transfer' % w2, {})
+    d = r['drafts'][0]['id']
+    assert float(db.one('select sum(qty) from mm_doc_line where doc_id = :d', d=d)[0]) == 5
+    db.proc('delete_doc', d)
+    db.commit()
+    # the main one: the minimum of the item; 0: none; refused: below 0, the main one as a branch, a cashier
+    post(api, '/api/warehouses/%d/min' % main, {'code': code, 'min': 3})
+    assert float(db.one('select min_stock from mm_item where id = :i', i=it)[0]) == 3
+    assert post(api, '/api/warehouses/%d/min' % w2, {'code': code, 'min': 0})['rows'] == []
+    assert post(api, '/api/warehouses/%d/min' % w2, {'code': code, 'min': -1}, status=400)['error'] == 'MM-195'
+    assert post(api, '/api/warehouses/%d/transfer' % main, {}, status=400)['error'] == 'MM-195'
+    assert post(api, '/api/warehouses/%d/min' % w2, {'code': 'NOSUCH', 'min': 1}, status=404)['error'] == 'not_found'
+    assert get(api, '/api/warehouses/%d' % w2, status=403, token='CASHIER')['error'] == 'forbidden'
+    db.cur.execute('update mm_item set min_stock = 0 where id = :i', i=it)
+    db.commit()
+    assert db.one('select count(*) from mm_check')[0] == 0
