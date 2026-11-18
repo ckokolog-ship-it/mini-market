@@ -372,6 +372,8 @@ FORMS['MM_INVOICES'] = dict(
                    C('VAT', 'ΦΠΑ', 70, num=True, mask='99G990D00'),
                    C('TOTAL', 'Σύνολο', 80, num=True, mask='99G990D00'),
                    C('INVOICE_ID', '', 0, num=True, hidden=True),
+                   C('WAREHOUSE_ID', '', 0, num=True, hidden=True),
+                   C('TO_WAREHOUSE_ID', '', 0, num=True, hidden=True),
                    C('INVOICE_TEXT', 'Στο τιμολόγιο', 110, len=30, db=False, display=True),
                    C('MYDATA_TEXT', 'myDATA', 140, len=200, db=False, display=True)]),
         dict(name='DL', table='MM_DOC_LINE', order='line_no', top=330, rows=8, read_only=True,
@@ -399,6 +401,12 @@ FORMS['MM_INVOICES'] = dict(
          ('D_PAY', 'text', 488, 260, 70, 'Πληρωμή', {'len': 6, 'upper': True, 'init': 'CREDIT', 'lov': 'LOV_PAY'}),
          ('D_DATE', 'date', 564, 260, 90, 'Ημερομηνία', {}),
          ('NEWDOC', 'button', 660, 258, 120, 'Νέο', {}),
+         # the warehouse of the document (none: the store of the user, else the main one); a transfer (DEN):
+         # the one it goes to
+         ('D_WH', 'text', 786, 260, 70, 'Αποθήκη', {'len': 10, 'upper': True, 'lov': 'LOV_WH'}),
+         ('D_WH_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('D_TO_WH', 'text', 862, 260, 70, 'Προς (DEN)', {'len': 10, 'upper': True, 'lov': 'LOV_TOWH'}),
+         ('D_TO_WH_ID', 'hidden', 0, 0, 0, '', {'num': True}),
          # (on the right of the columns of the documents: they end at 1074)
          ('POSTDOC', 'button', 1084, 80, 180, 'Καταχώριση', {}),
          ('CANCELDOC', 'button', 1084, 112, 180, 'Ακύρωση', {}),
@@ -445,6 +453,10 @@ FORMS['MM_INVOICES'] = dict(
               "select '%s' code, mm_text.t('%s') descr from dual" % (c, WORDS.key(d))
               for c, d in (('CREDIT', 'Πίστωση'), ('CASH', 'Μετρητά'), ('CARD', 'Κάρτα'))),
            [('CODE', 70, 'Πληρωμή', 'CTL.D_PAY'), ('DESCR', 120, 'Περιγραφή', None)]),
+          ('LOV_WH', 'Αποθήκες', "select id, code, name from mm_warehouse where active = 'Y' order by main desc, code",
+           [('ID', 0, 'Κωδ.', 'CTL.D_WH_ID'), ('CODE', 60, 'Αποθήκη', 'CTL.D_WH'), ('NAME', 200, 'Όνομα', None)]),
+          ('LOV_TOWH', 'Αποθήκες', "select id, code, name from mm_warehouse where active = 'Y' order by main desc, code",
+           [('ID', 0, 'Κωδ.', 'CTL.D_TO_WH_ID'), ('CODE', 60, 'Αποθήκη', 'CTL.D_TO_WH'), ('NAME', 200, 'Όνομα', None)]),
           ('LOV_ITEMI', 'Είδη', "select id, code || ' ' || name text from mm_item where active = 'Y' "
                                 "and is_model = 'N' order by code",
            [('ID', 0, 'Κωδ.', 'CTL.L_ITEM_ID'), ('TEXT', 320, 'Είδος', 'CTL.L_ITEM_TEXT')])])
@@ -556,6 +568,7 @@ FORMS['MM_POS'] = dict(
                    C('TOTAL', 'Ποσό', 90, num=True, mask='99G990D00')])],
     ctl=[('REG_CODE', 'text', 10, 24, 60, 'Ταμείο', {'len': 10, 'upper': True, 'init': 'T1'}),
          ('Z_TEXT', 'display', 76, 24, 300, 'Ζ', {'len': 100}),
+         ('WH_TEXT', 'display', 760, 24, 240, 'Αποθήκη του ταμείου', {'len': 100}),
          ('Z_CASH', 'text', 382, 24, 90, 'Αρχικό ταμείο', {'num': True}),
          ('OPENZ', 'button', 478, 22, 130, 'Άνοιγμα Ζ', {}),
          ('CLOSEZ', 'button', 614, 22, 130, 'Κλείσιμο Ζ', {}),
@@ -609,7 +622,8 @@ FORMS['MM_USERS'] = dict(
                    C('ACTIVE', 'Ενεργός', 54, len=1),
                    C('FAILED', 'Λάθη', 40, num=True),
                    C('LOCKED_UNTIL', 'Κλειδωμένος έως', 100, date=True),
-                   C('PIN_OK', 'PIN', 40, len=1, db=False, display=True)])],
+                   C('PIN_OK', 'PIN', 40, len=1, db=False, display=True),
+                   C('PLACE_TEXT', 'Κατάστημα / ταμείο', 130, len=30, db=False, display=True)])],
     ctl=[('U_NAME', 'text', 10, 340, 120, 'Νέος χρήστης', {'len': 30, 'lower': True}),
          ('U_FULL', 'text', 136, 340, 200, 'Ονοματεπώνυμο', {'len': 100}),
          ('U_ROLE', 'text', 342, 340, 90, 'Ρόλος (λίστα)', {'len': 10, 'upper': True, 'init': 'CASHIER', 'lov': 'LOV_ROLE'}),
@@ -620,11 +634,24 @@ FORMS['MM_USERS'] = dict(
          ('SETROLE', 'button', 402, 380, 190, 'Ρόλος (επιλεγμένου)', {}),
          ('TOGGLEACT', 'button', 10, 414, 190, 'Ενεργός / ανενεργός', {}),
          ('UNLOCK', 'button', 206, 414, 190, 'Ξεκλείδωμα', {}),
-         ('TOGGLEPIN', 'button', 402, 414, 190, 'Βλέπει PIN: ναι / όχι', {})],
+         ('TOGGLEPIN', 'button', 402, 414, 190, 'Βλέπει PIN: ναι / όχι', {}),
+         # where the selected user works: its store, its register (none, none: everywhere)
+         ('U_WH', 'text', 10, 452, 90, 'Κατάστημα (λίστα)', {'len': 10, 'upper': True, 'lov': 'LOV_UWH'}),
+         ('U_WH_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('U_REG', 'text', 106, 452, 90, 'Ταμείο (λίστα)', {'len': 10, 'upper': True, 'lov': 'LOV_UREG'}),
+         ('U_REG_ID', 'hidden', 0, 0, 0, '', {'num': True}),
+         ('SETPLACE', 'button', 202, 450, 190, 'Κατάστημα και ταμείο', {})],
     lovs=[('LOV_ROLE', 'Ρόλοι', ' union all '.join(
               "select '%s' code, mm_text.t('%s') descr, %d o from dual" % (c, WORDS.key(d), i)
               for i, (c, d) in enumerate((('CASHIER', 'Ταμίας'), ('MANAGER', 'Προϊστάμενος'), ('ADMIN', 'Διαχειριστής')))) + ' order by 3',
-           [('CODE', 80, 'Ρόλος', 'CTL.U_ROLE'), ('DESCR', 140, 'Περιγραφή', None), ('O', 0, '#', None)])])
+           [('CODE', 80, 'Ρόλος', 'CTL.U_ROLE'), ('DESCR', 140, 'Περιγραφή', None), ('O', 0, '#', None)]),
+          ('LOV_UWH', 'Καταστήματα', "select id, code, name from mm_warehouse where active = 'Y' order by main desc, code",
+           [('ID', 0, 'Κωδ.', 'CTL.U_WH_ID'), ('CODE', 60, 'Κατάστημα', 'CTL.U_WH'), ('NAME', 200, 'Όνομα', None)]),
+          ('LOV_UREG', 'Ταμεία', "select r.id, r.code, r.name, w.code wh from mm_register r "
+                                 "join mm_warehouse w on w.id = nvl(r.warehouse_id, (select min(id) from mm_warehouse where main = 'Y')) "
+                                 "where r.active = 'Y' order by w.code, r.code",
+           [('ID', 0, 'Κωδ.', 'CTL.U_REG_ID'), ('CODE', 60, 'Ταμείο', 'CTL.U_REG'), ('NAME', 180, 'Όνομα', None),
+            ('WH', 60, 'Κατάστημα', None)])])
 
 # the role each form needs (ui.session_ok): None the login itself
 FORM_ROLES = {'MM_LOGIN': None, 'MM_MAIN': 'CASHIER', 'MM_POS': 'CASHIER', 'MM_RESERVATIONS': 'CASHIER',
@@ -667,7 +694,7 @@ FORM_RIGHTS = {
                    ('RPT_MIN', 'REP_MIN_STOCK'), ('RPT_TRIAL_I', 'TRIAL_ITEMS'), ('RPT_TRIAL_C', 'TRIAL_CUSTOMERS'),
                    ('RPT_TRIAL_S', 'TRIAL_SUPPLIERS'))] + [('B', 'REP_MIN_STOCK', 'ORDER', 'W', 'CTL.ORDERMIN')],
     'MM_USERS': [('B', 'USERS', 'CREATE', 'W', 'CTL.NEWUSER'), ('B', 'USERS', 'PASSWORD', 'W', 'CTL.SETPW'),
-                 ('B', 'ROLES', None, 'W', 'CTL.SETROLE')],
+                 ('B', 'ROLES', None, 'W', 'CTL.SETROLE'), ('B', 'USERS', 'PLACE', 'W', 'CTL.SETPLACE')],
 }
 
 # the menu: a button for each form (CALL_FORM: closing it comes back here), and the exit

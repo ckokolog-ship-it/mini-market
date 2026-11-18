@@ -1069,3 +1069,62 @@ def test_users_form(cur):
     run(cur, "ui.press('CTL.UNLOCK');", USR__USERNAME=new)
     run(cur, "ui.press('CTL.SETPW');", USR__USERNAME=new, CTL__U_PW='short', CTL__U_PW2='short')
     assert 'MM-175' in msgs(cur)
+
+
+@needs_db
+def test_warehouses_in_the_forms(cur):
+    """the store and the register of a user in the forms: the till on its register, the warehouse of it, not
+    another register; a new document of its store; a transfer (DEN) from the main warehouse to a branch, shown
+    from where to where; the users: where each works, set"""
+    tag = LOGIN['cashier'][-6:].upper()
+    w, r = cur.var(int), cur.var(int)
+    cur.execute("insert into mm_warehouse (code, name) values (:c, 'Test κατάστημα φορμών') returning id into :v",
+                c='TSTF' + tag[:4], v=w)
+    cur.execute("insert into mm_register (code, name, warehouse_id) values (:c, 'Test ταμείο φορμών', :w) returning id into :v",
+                c='TF' + tag[:4], w=w.getvalue()[0], v=r)
+    w, r = w.getvalue()[0], r.getvalue()[0]
+    wcode, rcode = 'TSTF' + tag[:4], 'TF' + tag[:4]
+    main = cur.callfunc('mm_core.main_warehouse', int, [])
+    cur.connection.commit()
+    try:
+        # the users form: the cashier to the store and its register
+        compile_ui(cur, 'MM_USERS')
+        run(cur, "ui.press('CTL.SETPLACE');", USR__USERNAME=LOGIN['cashier'], CTL__U_WH_ID=str(w), CTL__U_WH=wcode,
+            CTL__U_REG_ID=str(r), CTL__U_REG=rcode)
+        assert 'Κατάστημα και ταμείο' in msgs(cur)
+        cur.execute('select warehouse_id, register_id from mm_user where username = :u', u=LOGIN['cashier'])
+        assert cur.fetchone() == (w, r)
+        run(cur, "ui.post_query('USR');", USR__USERNAME=LOGIN['cashier'])
+        assert item(cur, 'USR.PLACE_TEXT') == '%s / %s' % (wcode, rcode)
+        # the till of the cashier: on its register, the warehouse of it; not another register
+        compile_ui(cur, 'MM_POS')
+        cashier = login_as(cur, LOGIN['cashier'])
+        run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
+        assert item(cur, 'CTL.REG_CODE') == rcode and item(cur, 'CTL.WH_TEXT').startswith(wcode)
+        msg = fails(cur, "ui.press('CTL.OPENZ');", GLOBAL__MM_TOKEN=cashier, CTL__REG_CODE='T1')   # (after its init)
+        assert 'δεν είναι του καταστήματός σου' in msg
+        # the invoices of the administrator in the store: a new document of it by default; a transfer to it
+        cur.callproc('mm_auth.set_place', [LOGIN['admin'], w, None])
+        cur.connection.commit()
+        compile_ui(cur, 'MM_INVOICES')
+        run(cur, 'ui.init;')
+        assert (item(cur, 'CTL.D_WH'), item(cur, 'CTL.D_WH_ID')) == (wcode, str(w))
+        run(cur, "ui.press('CTL.NEWDOC');", CTL__D_TYPE='DEN', CTL__D_WH_ID=str(main), CTL__D_TO_WH_ID=str(w),
+            CTL__D_PAY='CREDIT', CTL__D_DATE=__import__('datetime').date.today().strftime('%d/%m/%Y'))
+        cur.execute("select id, warehouse_id, to_warehouse_id from mm_doc where doc_type = 'DEN' and status = 'D' "
+                    "and to_warehouse_id = :w", w=w)
+        d, fw, tw = cur.fetchone()
+        assert (fw, tw) == (main, w)
+        run(cur, "ui.post_query('DOC');", DOC__ID=str(d), DOC__WAREHOUSE_ID=str(main), DOC__TO_WAREHOUSE_ID=str(w))
+        assert item(cur, 'DOC.PARTNER_TEXT') == 'Ενδοδιακίνηση K → ' + wcode
+        cur.callproc('mm_core.delete_doc', [d])
+        cur.connection.commit()
+    finally:
+        cur.connection.rollback()
+        cur.execute("delete from mm_doc where doc_type = 'DEN' and status = 'D' and to_warehouse_id = :w", w=w)
+        cur.execute("update mm_user set warehouse_id = null, register_id = null where username like 'tstf%'")
+        cur.execute('delete from mm_cash_move where register_id = :r', r=r)
+        cur.execute('delete from mm_z where register_id = :r', r=r)
+        cur.execute('delete from mm_register where id = :r', r=r)
+        cur.execute('delete from mm_warehouse where id = :w', w=w)
+        cur.connection.commit()
