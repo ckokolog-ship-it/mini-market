@@ -15,7 +15,9 @@ import java.util.Map;
  * register, as the screen shows it. CASHIER and above.
  *
  * <pre>
- *   GET  /api/pos                              the registers, each with its open Z (or none)
+ *   GET  /api/pos                              the registers the user may work on (mm_auth.may_use: its
+ *                                              store, its register: mine Y), each with its open Z (or none);
+ *                                              another register: 403 not_your_register
  *   GET  /api/pos/{register}                   its Z (with what it holds so far), the draft, the last receipts
  *   POST /api/pos/{register}/open {cash}       a Z opened, with the cash in the drawer
  *   POST /api/pos/{register}/close             the Z closed: its totals in "closed"
@@ -49,16 +51,18 @@ final class Pos {
             return settings(c);
         }
         if (p.length == 4 && "receipt".equals(p[2])) {
-            return receipt(c, u, register(c, p[1]), Http.id(p[3]));
+            return receipt(c, u, register(c, u, p[1]), Http.id(p[3]));
         }
         if (p.length == 1) {
+            // the registers the user may work on (its store, its register); its own register: "mine"
             return Map.of("rows", Db.rows(c, """
-                    select r.id, r.code, r.name, z.id z_id, z.z_no, z.opened_at
+                    select r.id, r.code, r.name, z.id z_id, z.z_no, z.opened_at,
+                           case when r.id = (select register_id from mm_user where id = ?) then 'Y' else 'N' end mine
                     from mm_register r left join mm_z z on z.register_id = r.id and z.status = 'O'
-                    where r.active = 'Y' order by r.code"""));
+                    where r.active = 'Y' and mm_auth.may_use(?, r.id) = 'Y' order by r.code""", u.id(), u.id()));
         }
         if (p.length == 2) {
-            return state(c, register(c, p[1]));
+            return state(c, register(c, u, p[1]));
         }
         throw new Http.Fail(404, "not_found", "no such endpoint");
     }
@@ -87,7 +91,7 @@ final class Pos {
         if (p.length < 3) {
             throw new Http.Fail(404, "not_found", "no such endpoint");
         }
-        long reg = register(c, p[1]);
+        long reg = register(c, u, p[1]);
         Map<String, Object> extra = new LinkedHashMap<>();
         switch (p[2]) {
             case "open" -> {
@@ -328,11 +332,17 @@ final class Pos {
         return m;
     }
 
-    private static long register(Connection c, String code) throws SQLException {
-        List<Map<String, Object>> r = Db.rows(c, "select id from mm_register where code = upper(?) and active = 'Y'",
-                java.net.URLDecoder.decode(code, java.nio.charset.StandardCharsets.UTF_8));
+    /** a register by its code, if the user may work on it (mm_auth.may_use: its store, its register) */
+    private static long register(Connection c, Api.User u, String code) throws SQLException {
+        List<Map<String, Object>> r = Db.rows(c, """
+                select id, mm_auth.may_use(?, id) may from mm_register where code = upper(?) and active = 'Y'""",
+                u.id(), java.net.URLDecoder.decode(code, java.nio.charset.StandardCharsets.UTF_8));
         if (r.isEmpty()) {
             throw new Http.Fail(404, "not_found", "no such register: " + code);
+        }
+        if (!"Y".equals(r.get(0).get("may"))) {
+            throw new Http.Fail(403, "not_your_register", "Το ταμείο " + code.toUpperCase(java.util.Locale.ROOT)
+                    + " δεν είναι του καταστήματός σου");
         }
         return ((BigDecimal) r.get(0).get("id")).longValue();
     }

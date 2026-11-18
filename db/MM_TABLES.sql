@@ -738,6 +738,23 @@ create table if not exists mm_auth_log (
   client      varchar2(60)
 );
 
+-- the place of a user (mm_auth.set_place): its store (a warehouse: the registers of it; none: all) and
+-- its register (the till opens on it; a cashier: only that one)
+declare
+  procedure add_col(c varchar2, ddl varchar2) is
+    n number;
+  begin
+    select count(*) into n from user_tab_cols where table_name = 'MM_USER' and column_name = c;
+    if n = 0 then
+      execute immediate 'alter table mm_user add (' || ddl || ')';
+    end if;
+  end;
+begin
+  add_col('WAREHOUSE_ID', 'warehouse_id number constraint mm_user_wh_fk references mm_warehouse on delete set null');
+  add_col('REGISTER_ID', 'register_id number constraint mm_user_reg_fk references mm_register on delete set null');
+end;
+/
+
 -- the totals of each month (MM_MONTHS.sql: kept by triggers): the ledgers take what was before a
 -- period from them, not from every move since the first one.
 -- MM_ITEM_MONTH: the stock in and out of an item in a month (from MM_STOCK_MOVE). Reservable, as
