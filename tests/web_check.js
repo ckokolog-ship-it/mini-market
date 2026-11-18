@@ -166,6 +166,7 @@ async function waitText(page, sel, text) {
   ok(true, 'a game of an item without serials: refused, said why');
   // a count: started, two scans, posted
   await page.goto(BASE + '/web/#/counts');
+  await waitText(page, 'main h1', 'Απογραφή');                         // (the page, not the one before it)
   await page.fill('main form input', 'TST web');
   await page.click('main form button');
   await page.waitForSelector('input[name=code]');
@@ -186,7 +187,10 @@ async function waitText(page, sel, text) {
   // more of it, paid by cash with F9 (the change), the Z closed
   await page.goto(BASE + '/web/#/pos');
   await page.waitForSelector('select[aria-label="Ταμείο"]');
+  // (the register TST drawn, not the one before it: its own «Κλειστό», its own «Άνοιγμα Ζ»)
+  const tst = page.waitForResponse((r) => /\/api\/pos\/TST$/.test(r.url()) && r.request().method() === 'GET');
   await page.selectOption('select[aria-label="Ταμείο"]', 'TST');
+  await tst;
   await waitText(page, 'main', 'Κλειστό');
   await page.click('button:has-text("Άνοιγμα Ζ")');
   await page.waitForSelector('form.scan:not([hidden]) input[name=code]');
@@ -321,6 +325,16 @@ async function waitText(page, sel, text) {
   await waitText(page, '#toast', 'Καταχωρήθηκε');
   ok((await page.textContent('main')).includes('Αξία στο κόστος'), 'the transfer posted: its value at cost');
   if (SHOTS) await page.screenshot({ path: SHOTS + '/transfer.png', fullPage: true });
+  // the warehouses: the branch with what came to it; the till: its warehouse, a manager may change it
+  await page.goto(BASE + '/web/#/warehouses');
+  await waitText(page, 'main tbody', process.env.BRANCH);
+  const bcells = await page.$$eval(`main tbody tr:has-text("${process.env.BRANCH}") td`, (tds) => tds.map((td) => td.textContent.trim()));
+  ok(bcells[2] === '1', `the warehouses: the branch, one item there (the transfer): ${bcells[2]}`);
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/warehouses.png', fullPage: true });
+  await page.goto(BASE + '/web/#/pos');
+  await page.waitForSelector('select[name=register_warehouse]');
+  ok((await page.$eval('select[name=register_warehouse]', (s) => s.selectedOptions[0].text)).startsWith('K '),
+    'the till: its warehouse (the main one), to change by a manager');
   // the expiry: a line of a draft receipt, its date in the page; the expired one in the list, taken out
   await page.goto(BASE + '/web/#/doc/' + process.env.DOC_DRAFT);
   const expIn = `input[aria-label="Λήξη ${process.env.YOGURT}"]`;

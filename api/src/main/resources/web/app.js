@@ -12,7 +12,8 @@ const RANK = { CASHIER: 1, MANAGER: 2, ADMIN: 3 };
 // the menu: its groups and their pages (by role: CASHIER the till, the store; MANAGER the office too)
 const MENU = [
   ['Πωλήσεις', [['#/pos', 'Ταμείο', 'CASHIER'], ['#/orders', 'Παραγγελίες', 'CASHIER']]],
-  ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER'], ['#/expiry', 'Λήξεις', 'MANAGER']]],
+  ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER'], ['#/expiry', 'Λήξεις', 'MANAGER'],
+    ['#/warehouses', 'Αποθήκες', 'MANAGER']]],
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
   ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/chart', 'Γράφημα πωλήσεων', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
@@ -518,6 +519,11 @@ async function reportPage(name, params) {
   const out = el('div');
   // the costs (the gross profit, the value of the stock): FIFO or the last purchase; the one of the shop by default
   const costs = name === 'profit' || name === 'stock-value';
+  let rwhs = [];
+  if (name === 'stock-value') {
+    try { rwhs = (await api('warehouses')).rows; } catch (e) { rwhs = []; }
+  }
+  const rwh = el('select', { name: 'warehouse' }, ...options(rwhs, 'code', (w) => `${w.code} ${w.name}`, params.get('warehouse') || '', 'Όλες οι αποθήκες'));
   const method = el('select', { name: 'method' }, el('option', { value: 'FIFO' }, 'FIFO (πρώτα τα παλιότερα)'),
     el('option', { value: 'LAST' }, 'Τελευταία τιμή αγοράς'));
   const makeDefault = el('button', {
@@ -530,7 +536,8 @@ async function reportPage(name, params) {
   const go = async () => {
     try {
       const m = costs ? (first ? params.get('method') || '' : method.value) : '';
-      const r = await api(`reports/${name}?from=${from.value}&to=${to.value}` + (trial && all.checked ? '&all=1' : '') + (m ? '&method=' + m : ''));
+      const r = await api(`reports/${name}?from=${from.value}&to=${to.value}` + (trial && all.checked ? '&all=1' : '') + (m ? '&method=' + m : '')
+        + (rwhs.length > 1 && rwh.value ? '&warehouse=' + encodeURIComponent(rwh.value) : ''));
       first = false;
       if (costs) { method.value = r.method; makeDefault.hidden = r.method === r.default_method; }
       out.replaceChildren(trial ? trialTable(name, r, from.value, to.value) : name === 'sales' ? salesTable(r.rows) : name === 'vat' ? vatTable(r.rows)
@@ -542,6 +549,7 @@ async function reportPage(name, params) {
     : el('form', { class: 'panel row', onsubmit: (ev) => { ev.preventDefault(); go(); } },
       name === 'stock-value' ? null : el('label', {}, 'Από', from), name === 'stock-value' ? null : el('label', {}, 'Έως', to),
       costs ? el('label', {}, 'Μέθοδος κόστους', method) : null,
+      rwhs.length > 1 ? el('label', {}, 'Αποθήκη', rwh) : null,
       trial ? el('label', { class: 'check' }, all, 'Και όσα έχουν μηδέν παντού') : null,
       el('button', { class: 'primary', type: 'submit' }, 'Εμφάνιση'), costs ? makeDefault : null);
   show(el('h1', {}, titles[name]), form, out);
@@ -956,6 +964,47 @@ async function expiryPage(params) {
   await load();
 }
 
+// -- the warehouses: the central store and the branches; what each has (items, value by FIFO,
+// registers); a new one; renamed, (not) active (the main one stays)
+async function warehousesPage() {
+  const out = el('div');
+  const code = el('input', { name: 'wh_code', maxlength: 10, class: 'w6', placeholder: 'Y1' });
+  const name = el('input', { name: 'wh_name', maxlength: 60, placeholder: 'Υποκατάστημα Ρίου' });
+  const draw = (r) => out.replaceChildren(table([['Κωδικός'], ['Όνομα'], ['Είδη με απόθεμα', 'num'], ['Αξία (FIFO)', 'num'], ['Ταμεία', 'num hide-phone'], ['Ενεργή'], ['']],
+    r.rows.map((w) => {
+      const nm = el('input', { value: w.name, maxlength: 60, 'aria-label': 'Όνομα ' + w.code });
+      return el('tr', { class: w.active === 'Y' ? null : 'cancelled' },
+        el('td', {}, w.code + (w.main === 'Y' ? ' (κεντρική)' : '')), el('td', {}, nm),
+        el('td', { class: 'num' }, w.items), num(w.value), el('td', { class: 'num hide-phone' }, w.registers),
+        el('td', {}, w.main === 'Y' ? 'ναι' : el('input', {
+          type: 'checkbox',
+          checked: w.active === 'Y',
+          'aria-label': 'Ενεργή ' + w.code,
+          onchange: async (ev) => { try { draw(await api('warehouses/' + w.id, { active: ev.target.checked })); } catch (e) { fail(e); } },
+        })),
+        el('td', { class: 'num' }, el('button', {
+          type: 'button',
+          onclick: async () => { try { draw(await api('warehouses/' + w.id, { name: nm.value.trim() })); toast('Αποθηκεύτηκε'); } catch (e) { fail(e); } },
+        }, 'Αποθήκευση'),
+        el('a', { class: 'btn-link', href: '#/reports/stock-value?warehouse=' + encodeURIComponent(w.code) }, 'Αξία ›')));
+    })));
+  show(el('h1', {}, 'Αποθήκες'),
+    el('p', { class: 'muted' }, 'Η κεντρική και τα υποκαταστήματα. Κάθε ταμείο πουλά από την αποθήκη του (Ταμείο → Αποθήκη)· από αποθήκη σε αποθήκη: Δελτίο ενδοδιακίνησης (DEN) στα «Τιμολόγια και δελτία».'),
+    el('form', {
+      class: 'panel row',
+      onsubmit: async (ev) => {
+        ev.preventDefault();
+        try {
+          draw(await api('warehouses', { code: code.value.trim(), name: name.value.trim() }));
+          toast('Νέα αποθήκη ' + code.value.trim().toUpperCase());
+          code.value = ''; name.value = '';
+        } catch (e) { fail(e); }
+      },
+    }, el('label', {}, 'Κωδικός', code), el('label', { class: 'grow' }, 'Όνομα', name), el('button', { class: 'primary', type: 'submit' }, 'Νέα αποθήκη')),
+    out);
+  try { draw(await api('warehouses')); } catch (e) { fail(e); }
+}
+
 // -- the scratch tickets (σκρατς): bought in packs, sold one by one by the barcode of each (its game 4
 // digits, its pack 7, its number 3). A pack loaded by a scan of one of its tickets; the games (έκδοση: the
 // item it is sold as, the tickets of a pack); the packs, sold and left; the prizes paid, by day
@@ -1031,6 +1080,10 @@ async function scratchPage() {
 // -- the counts of the stock: a phone scans (a scanner types the barcode and Enter) ------------------
 async function countsPage() {
   const name = el('input', { placeholder: 'π.χ. Απογραφή ραφιών Νοεμβρίου' });
+  // more than one warehouse: the count is of one of them
+  let whs = [];
+  try { whs = (await api('warehouses')).rows.filter((w) => w.active === 'Y'); } catch (e) { whs = []; }
+  const wh = el('select', { name: 'warehouse_id' }, ...options(whs, 'id', (w) => `${w.code} ${w.name}`, whs.length ? whs[0].id : ''));
   const out = el('div');
   const load = async () => {
     try {
@@ -1049,11 +1102,12 @@ async function countsPage() {
       onsubmit: async (ev) => {
         ev.preventDefault();
         try {
-          const c = await api('counts', { name: name.value.trim() || null });
+          const c = await api('counts', { name: name.value.trim() || null, warehouse_id: whs.length > 1 ? Number(wh.value) : null });
           location.hash = '#/count/' + c.id;
         } catch (e) { fail(e); }
       },
-    }, el('label', {}, 'Νέα απογραφή', name), el('button', { class: 'primary', type: 'submit' }, 'Ξεκίνα')),
+    }, el('label', {}, 'Νέα απογραφή', name), whs.length > 1 ? el('label', {}, 'Αποθήκη', wh) : null,
+    el('button', { class: 'primary', type: 'submit' }, 'Ξεκίνα')),
     out);
   load();
 }
@@ -1253,6 +1307,9 @@ async function posPage(params) {
     },
   }, regs.map((r) => el('option', { value: r.code, selected: r.code === posReg }, `${r.code} ${r.name}`)));
   const zText = el('span', { class: 'muted' });
+  const whBox = el('span');
+  let posWhs = [];
+  try { posWhs = (await api('warehouses')).rows.filter((w) => w.active === 'Y'); } catch (e) { posWhs = []; }
   const zBox = el('div', { class: 'row' });
   const code = el('input', { name: 'code', autocomplete: 'off', placeholder: 'barcode, κωδικός ή serial' });
   const n = el('input', { name: 'qty', type: 'number', step: 'any', min: '0', value: '1', class: 'w6' });
@@ -1280,6 +1337,16 @@ async function posPage(params) {
     const z = st.z;
     zText.textContent = z ? `Ζ ${z.z_no}, ανοιχτό από ${day(z.opened_at)} · ${z.docs} αποδείξεις · μετρητά ${money(z.cash)}, κάρτα ${money(z.card)} · στο συρτάρι ${money(z.drawer)}`
       : 'Κλειστό: «Άνοιγμα Ζ» για να ξεκινήσεις';
+    // more than one warehouse: the one of the register (its sales from there); a manager changes it
+    whBox.replaceChildren();
+    if (posWhs.length > 1) {
+      const sel = el('select', { name: 'register_warehouse', disabled: !can('MANAGER') || !!st.receipt, 'aria-label': 'Αποθήκη του ταμείου' },
+        ...options(posWhs, 'id', (w) => `${w.code} ${w.name}`, st.warehouse_id));
+      sel.addEventListener('change', async () => {
+        if (await run('/warehouse', { warehouse_id: Number(sel.value) })) toast('Οι πωλήσεις του ταμείου από: ' + sel.selectedOptions[0].text);
+      });
+      whBox.append(el('label', {}, 'Αποθήκη', sel));
+    }
     if (z) {
       const amount = el('input', { type: 'number', step: '0.01', placeholder: '+ μπαίνουν, − βγαίνουν', class: 'w11' });
       const note = el('input', { placeholder: 'αιτιολογία' });
@@ -1463,7 +1530,7 @@ async function posPage(params) {
         },
       }, 'Αποθήκευση')));
   }
-  show(el('h1', {}, 'Ταμείο'), el('div', { class: 'panel' }, el('div', { class: 'row' }, el('label', {}, 'Ταμείο', pick), zText), zBox),
+  show(el('h1', {}, 'Ταμείο'), el('div', { class: 'panel' }, el('div', { class: 'row' }, el('label', {}, 'Ταμείο', pick), whBox, zText), zBox),
     scan, cust, orders, lines, pay, change, el('label', { class: 'check' }, autoPrint, 'Εκτύπωση απόδειξης αυτόματα'), last, setup);
   await load();
   if (params && params.get('order') && st && st.z) loadOrder(Number(params.get('order')));
@@ -2133,6 +2200,7 @@ function render() {
     case 'day': return need('MANAGER', () => dayPage(params));
     case 'chart': return need('MANAGER', () => chartPage(params));
     case 'expiry': return need('MANAGER', () => expiryPage(params));
+    case 'warehouses': return need('MANAGER', () => warehousesPage());
     case 'count': return countPage(p[1]);
     default: return itemsPage(params);
   }

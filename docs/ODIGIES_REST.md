@@ -131,7 +131,11 @@ commit;
 | `GET /api/reports/stock-value?method=` | η αξία της αποθήκης ανά είδος: `value` με τη μέθοδο, `value_fifo`, `value_last`, `unit_cost`, `next_cost`, `last_cost` |
 | `POST /api/reports/cost-method` `{"method"}` | η μέθοδος κόστους του συστήματος: `FIFO` ή `LAST` (MANAGER) |
 | `POST /api/docs` `{"doc_type": "DEN", "warehouse_id", "to_warehouse_id"}` | ενδοδιακίνηση από αποθήκη σε αποθήκη: οι γραμμές στο κόστος κάθε στρώσης (FIFO), χωρίς ΦΠΑ· το παραστατικό δίνει `warehouse`, `to_warehouse` (MM-194: χωρίς αποθήκη παραλαβής ή η ίδια) |
-| `GET /api/warehouses` | οι αποθήκες (κεντρική πρώτη): `code`, `name`, `main`, `active`· ένα είδος (`/api/items/{…}`) έχει και `warehouses`, το απόθεμά του σε καθεμιά |
+| `GET /api/warehouses` | οι αποθήκες (κεντρική πρώτη): `code`, `name`, `main`, `active`, και ό,τι έχει η καθεμιά: `items` (είδη με απόθεμα), `value` (FIFO), `registers`· ένα είδος (`/api/items/{…}`) έχει και `warehouses`, το απόθεμά του σε καθεμιά |
+| `POST /api/warehouses` `{"code", "name"}`, `POST /api/warehouses/{id}` `{"name", "active"}` | νέα αποθήκη· μετονομασία, ενεργή ή όχι (η κεντρική μένει ενεργή) (MANAGER) |
+| `POST /api/pos/{ταμείο}/warehouse` `{"warehouse_id"}` | η αποθήκη του ταμείου (οι πωλήσεις του από εκεί)· όχι όσο γράφεται απόδειξη (MANAGER). Το ταμείο δίνει `warehouse_id`, `warehouse` |
+| `POST /api/counts` `{"name", "warehouse_id"}` | νέα απογραφή μιας αποθήκης (χωρίς: η κεντρική)· συγκρίνει και διορθώνει μόνο εκεί |
+| `GET /api/reports/stock-value?warehouse=` | η αξία αποθήκης μιας αποθήκης (ο κωδικός της) |
 | `GET /api/expiry?days=` | οι λήξεις: όσα έληξαν και όσα λήγουν μέσα σε `days` ημέρες (προεπιλογή `EXPIRY_DAYS`, αλλιώς 7), με όσα μένουν από κάθε παραλαβή (`left_`, FIFO) (MANAGER) |
 | `POST /api/expiry/withdraw` `{"line_id", "qty"}` | απόσυρση από το απόθεμα (`qty`: προεπιλογή όσα μένουν) |
 | `GET /api/chart?days=&to=` | το γράφημα πωλήσεων (7 έως 364 ημέρες, έως μια ημέρα· προεπιλογή 30 έως σήμερα): `days` (ανά ημέρα: `total`, `receipts`, `last_year` την ίδια μέρα της εβδομάδας πέρσι), `hours` (0-23: αποδείξεις λιανικής και ποσό), `sums` (`total`, `last_year`, `receipts`, `avg_receipt`) (MANAGER) |

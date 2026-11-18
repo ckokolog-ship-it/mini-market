@@ -12,7 +12,7 @@ import pytest
 oracledb = pytest.importorskip('oracledb')
 import test_api  # noqa: E402
 import test_core  # noqa: E402
-from test_api import get  # noqa: E402
+from test_api import get, post  # noqa: E402
 from test_core import DSN  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not DSN, reason='MM_DSN not set (user/password@host:port/service)')
@@ -119,3 +119,45 @@ def test_the_stock_of_each_warehouse_in_the_pages(two, api, users):
     assert [(w['code'], w['stock']) for w in x['warehouses'] if w['code'] in ('K', wcode)] == [('K', 4), (wcode, 6)]
     r = get(api, '/api/warehouses')
     assert [w['code'] for w in r['rows']][0] == 'K' and r['rows'][0]['main'] == 'Y'
+
+
+def test_the_warehouses_in_the_pages(two, api, users):
+    """the pages of the warehouses: one made, renamed, not active (not the main one); the register in a
+    branch (its sales from there; a manager); a count of a branch (its stock there, its move there); the
+    value of the stock of one warehouse"""
+    db, ids, it, w2, code = two
+    tag = 'TST%sN' % ids['tag'][:4]
+    r = post(api, '/api/warehouses', {'code': tag.lower(), 'name': 'Test νέα'})
+    new = [w for w in r['rows'] if w['code'] == tag][0]
+    assert (new['main'], new['active'], new['items'], new['value']) == ('N', 'Y', 0, 0)
+    assert post(api, '/api/warehouses', {'code': tag, 'name': 'x'}, status=400)['error'] == 'bad_warehouse'
+    assert post(api, '/api/warehouses', {'code': 'a b', 'name': 'x'}, status=400)['error'] == 'bad_warehouse'
+    r = post(api, '/api/warehouses/%d' % new['id'], {'name': 'Test άλλο', 'active': False})
+    assert [(w['name'], w['active']) for w in r['rows'] if w['id'] == new['id']] == [('Test άλλο', 'N')]
+    main = db.fn('main_warehouse', int)
+    assert post(api, '/api/warehouses/%d' % main, {'active': False}, status=400)['error'] == 'bad_warehouse'
+    assert post(api, '/api/warehouses', {'code': 'Q', 'name': 'x'}, status=403, token='CASHIER')['error'] == 'forbidden'
+    # the register: in the branch; a receipt of it from there
+    buy(db, ids, it, 6, 1.20, w2)
+    s = post(api, '/api/pos/tst/warehouse', {'warehouse_id': w2})
+    wcode = db.one('select code from mm_warehouse where id = :w', w=w2)[0]
+    assert (s['warehouse_id'], s['warehouse']) == (w2, wcode)
+    assert post(api, '/api/pos/tst/warehouse', {'warehouse_id': new['id']}, status=400)['error'] == 'bad_warehouse'
+    assert post(api, '/api/pos/tst/warehouse', {'warehouse_id': w2}, status=403, token='CASHIER')['error'] == 'forbidden'
+    post(api, '/api/pos/tst/scan', {'code': code, 'qty': 2}, token='CASHIER')
+    p = post(api, '/api/pos/tst/pay', {'payment': 'CARD'}, token='CASHIER')['paid']
+    assert db.one('select warehouse_id from mm_doc where id = :d', d=p['id'])[0] == w2
+    assert stock(db, it) == {w2: 4}
+    # a count of the branch: what the system has there (4), counted 3: one less there
+    k = post(api, '/api/counts', {'name': 'TST count branch', 'warehouse_id': w2})
+    assert (k['warehouse_id'], k['warehouse']) == (w2, wcode)
+    line = post(api, '/api/counts/%d/scan' % k['id'], {'code': code, 'qty': 3})
+    assert (line['system_qty'], line['counted_qty']) == (4, 3)
+    post(api, '/api/counts/%d/post' % k['id'])
+    assert stock(db, it) == {w2: 3}
+    # the value of the stock of the branch: by FIFO, by the last cost
+    v = get(api, '/api/reports/stock-value?warehouse=' + wcode)
+    x = [r for r in v['rows'] if r['code'] == code][0]
+    assert (v['warehouse'], x['stock'], x['value_fifo']) == (wcode, 3, 3.6)
+    assert not [r for r in get(api, '/api/reports/stock-value?warehouse=K')['rows'] if r['code'] == code]
+    assert db.one("select count(*) from mm_check where what in ('FIFO', 'FIFO_WH', 'STOCK')")[0] == 0

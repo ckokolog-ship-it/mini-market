@@ -61,7 +61,7 @@ create or replace package mm_core as
   procedure add_note(p_invoice_id number, p_note_id number);            -- one more note into a draft
 
   -- the stock by hand
-  procedure adjust_stock(p_item_id number, p_qty number, p_note varchar2);
+  procedure adjust_stock(p_item_id number, p_qty number, p_note varchar2, p_warehouse_id number default null);
 
   -- the cash register: one open Z at a time
   function open_z(p_register_id number, p_cash number default 0) return number;
@@ -137,7 +137,7 @@ create or replace package mm_core as
                                p_refund varchar2 default 'Y');
 
   -- the count of the stock: start, scan (from the phones), post
-  function start_count(p_name varchar2) return number;
+  function start_count(p_name varchar2, p_warehouse_id number default null) return number;   -- (none: the main one)
   function scan(p_count_id number, p_code varchar2, p_qty number default 1,
                 p_mode varchar2 default 'ADD', p_device varchar2 default null) return number;
   procedure post_count(p_count_id number);
@@ -1214,7 +1214,7 @@ create or replace package body mm_core as
     return v;
   end;
 
-  procedure adjust_stock(p_item_id number, p_qty number, p_note varchar2) is
+  procedure adjust_stock(p_item_id number, p_qty number, p_note varchar2, p_warehouse_id number default null) is
   begin
     if p_note is null then
       fail(16, 'Η διόρθωση αποθέματος θέλει αιτιολογία');
@@ -1223,7 +1223,7 @@ create or replace package body mm_core as
     if tracked(p_item_id) then
       fail(33, 'Το απόθεμα ενός είδους με serials αλλάζει με τα serials (load_serial)');
     end if;
-    stock_move(p_item_id, 'ADJ', p_qty, p_note => p_note);
+    stock_move(p_item_id, 'ADJ', p_qty, p_note => p_note, p_warehouse_id => p_warehouse_id);
   end;
 
   -- ---------------------------------------------------------------------------------------------
@@ -2028,10 +2028,15 @@ create or replace package body mm_core as
     when no_data_found then fail(22, 'Δεν υπάρχει απογραφή ' || p_count_id);
   end;
 
-  function start_count(p_name varchar2) return number is
+  function start_count(p_name varchar2, p_warehouse_id number default null) return number is
     v number;
+    wh number := nvl(p_warehouse_id, main_warehouse);
   begin
-    insert into mm_count (name) values (nvl(p_name, 'Απογραφή ' || to_char(sysdate, 'dd/mm/yyyy')))
+    select count(*) into v from mm_warehouse where id = wh and active = 'Y';
+    if v = 0 then
+      fail(93, 'Δεν υπάρχει ενεργή αποθήκη ' || wh);
+    end if;
+    insert into mm_count (name, warehouse_id) values (nvl(p_name, 'Απογραφή ' || to_char(sysdate, 'dd/mm/yyyy')), wh)
     returning id into v;
     return v;
   end;
@@ -2052,7 +2057,9 @@ create or replace package body mm_core as
     if p_mode not in ('ADD', 'SET') or p_qty is null or p_qty < 0 then
       fail(24, 'Λάθος ποσότητα ή τρόπος (ADD/SET)');
     end if;
-    select stock into st from mm_item where id = it;
+    -- what the system has of it in the warehouse of the count (its moves there)
+    select nvl(sum(qty), 0) into st from mm_stock_move
+    where item_id = it and warehouse_id = nvl(c.warehouse_id, main_warehouse);
     -- a second phone on the same item waits only for this row, not for the item
     merge into mm_count_line l
     using (select p_count_id count_id, it item_id from dual) s
@@ -2071,7 +2078,8 @@ create or replace package body mm_core as
     select * into c from mm_count where id = p_count_id for update;
     c := open_count(p_count_id);
     for l in (select * from mm_count_line where count_id = p_count_id) loop
-      stock_move(l.item_id, 'ADJ', l.counted_qty - l.system_qty, p_note => c.name, p_count_id => p_count_id);
+      stock_move(l.item_id, 'ADJ', l.counted_qty - l.system_qty, p_note => c.name, p_count_id => p_count_id,
+                 p_warehouse_id => c.warehouse_id);
     end loop;
     update mm_count set status = 'P', posted_at = sysdate where id = p_count_id;
   exception
