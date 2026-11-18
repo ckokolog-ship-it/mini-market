@@ -82,6 +82,9 @@ begin fstub.props('LOV ' || upper(l) || '.' || c || '#' || p) := v; end;""",
 begin fstub.props('BLOCK ' || upper(b) || '#' || p) := v; end;""",
     "create or replace procedure go_block(b varchar2) is begin fstub.block := upper(b); end;",
     "create or replace procedure go_item(i varchar2) is begin fstub.props('GO_ITEM') := upper(i); end;",
+    "create or replace function no_validate return number is begin return 16; end;",
+    """create or replace procedure clear_block(v number) is
+begin fstub.queries := fstub.queries || fstub.block || ':clear;'; end;""",
     """create or replace procedure execute_query is
   w varchar2(4000);
 begin
@@ -111,7 +114,7 @@ end;""",
 DROP = ['package ui', 'package web', 'function enabled', 'function visible', 'function update_allowed',
         'function insert_allowed', 'function delete_allowed', 'function property_false', 'procedure default_value',
         'function get_window_property', 'function lov_name', 'function get_item_property', 'function status', 'function query_status', 'procedure set_record_property',
-        'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block', 'procedure go_item',
+        'procedure do_key', 'procedure new_form', 'procedure set_menu_item_property', 'procedure call_form', 'procedure exit_form', 'procedure forms_ddl', 'function show_lov', 'procedure execute_query', 'procedure go_block', 'procedure go_item', 'procedure clear_block', 'function no_validate',
         'procedure set_block_property', 'procedure set_lov_column_property', 'procedure set_lov_property',
         'procedure set_item_property', 'procedure set_window_property', 'function default_where', 'function format_mask',
         'function prompt_text', 'function label', 'function title', 'procedure message', 'procedure copy',
@@ -173,7 +176,8 @@ def test_plsql_of_the_forms(name):
 
 
 def test_items_form_stock_is_not_a_column():
-    items = {i.get('Name'): i for i in xml_of('MM_ITEMS').iter('{%s}Item' % NS['f'])}
+    item_block = [b for b in xml_of('MM_ITEMS').iter('{%s}Block' % NS['f']) if b.get('Name') == 'ITEM'][0]
+    items = {i.get('Name'): i for i in item_block.iter('{%s}Item' % NS['f'])}
     assert items['STOCK'].get('DatabaseItem') == 'false'           # reservable: never written
     assert items['CAT_NAME'].get('LovName') == 'LOV_CAT' and items['CAT_NAME'].get('ValidateFromList') == 'true'
     assert items['ACTIVE'].get('ItemType') == 'Check Box' and items['ACTIVE'].get('InitializeValue') == 'Y'
@@ -322,6 +326,68 @@ def test_items_form(cur):
     run(cur, "ui.press('CTL.ALL');")
     cur.execute('begin :v := fstub.queries; end;', v=(q := cur.var(str)))
     assert q.getvalue() == 'ITEM:;'
+
+
+def test_items_form_warehouses_shape():
+    blocks = {b.get('Name'): b for b in xml_of('MM_ITEMS').iter('{%s}Block' % NS['f'])}
+    ws = blocks['WS']
+    assert ws.get('QueryDataSourceName') == 'MM_ITEM_WAREHOUSE' and ws.get('WhereClause') == 'item_id = :ITEM.ID'
+    assert ws.get('InsertAllowed') == ws.get('UpdateAllowed') == ws.get('DeleteAllowed') == 'false'
+    assert blocks['ITEM'].get('InsertAllowed') is None             # the items: still written here
+    trig = [t.get('Name') for t in blocks['ITEM'].findall('f:Trigger', NS)]
+    assert 'WHEN-NEW-RECORD-INSTANCE' in trig                      # the warehouses of the item on the screen
+
+
+@needs_db
+def test_items_form_warehouses(cur):
+    """the item in each warehouse: the main one first, its stock, its minimum (the main: of the item; a
+    branch: its own), what is missing, the value by FIFO, the first expiry; a new item: nothing below;
+    the cursor back where it was; the fields by the rights of the user"""
+    tag = LOGIN['cashier'][-6:].upper()
+    w = cur.var(int)
+    cur.execute("insert into mm_warehouse (code, name) values (:c, 'Test αποθήκη ειδών') returning id into :v",
+                c='TSTW' + tag[:4], v=w)
+    w = w.getvalue()[0]
+    cur.execute("select id, stock, min_stock from mm_item where code = 'ART01'")
+    iid, stock, mn = cur.fetchone()
+    cur.execute('insert into mm_warehouse_min (warehouse_id, item_id, min_stock) values (:w, :i, 5)', w=w, i=iid)
+    cur.connection.commit()
+    try:
+        cur.execute('select code, main, stock, min_stock, missing, value_, expires from mm_item_warehouse '
+                    'where item_id = :i order by main desc, code', i=iid)
+        rows = cur.fetchall()
+        assert rows[0][1] == 'Y'                                       # the main one first
+        assert sum(r[2] for r in rows) == float(stock)                 # all of it, in its warehouses
+        assert rows[0][3] == (mn or None)
+        mine = [r for r in rows if r[0] == 'TSTW' + tag[:4]][0]
+        assert mine[2:5] == (0, 5, 5) and mine[5] is None              # nothing there, 5 missing
+        cur.execute("select sum(left_ * unit_cost) from mm_fifo where item_id = :i and left_ > 0", i=iid)
+        assert abs(sum(r[5] or 0 for r in rows) - float(cur.fetchone()[0] or 0)) < 0.05
+        # the form: the warehouses of the item the cursor came to, then back to its field
+        compile_ui(cur, 'MM_ITEMS')
+        run(cur, "ui.master('ITEM');", ITEM__ID=str(iid), SYSTEM__CURSOR_ITEM='ITEM.PRICE')
+        cur.execute('begin :v := fstub.queries; :b := fstub.block; end;', v=(q := cur.var(str)), b=(b := cur.var(str)))
+        assert q.getvalue() == 'WS:;' and prop(cur, 'GO_ITEM') == 'ITEM.PRICE'
+        # (the package keeps the item: the same one again, no query)
+        cur.execute("begin fstub.clear; fstub.items('ITEM.ID') := :i; ui.master('ITEM'); :v := fstub.queries; end;",
+                    i=str(iid), v=(q := cur.var(str)))
+        assert q.getvalue() is None
+        # a new item (no ID yet): its warehouses empty
+        cur.execute("begin fstub.clear; fstub.items('SYSTEM.CURSOR_ITEM') := 'ITEM.CODE'; ui.master('ITEM'); "
+                    ":v := fstub.queries; end;", v=(q := cur.var(str)))
+        assert q.getvalue() == 'WS:clear;' and prop(cur, 'GO_ITEM') == 'ITEM.CODE'
+        # the cashier: no cost, so no value either (MM_RIGHTS)
+        cashier = login_as(cur, LOGIN['cashier'])
+        run(cur, 'ui.init;', GLOBAL__MM_TOKEN=cashier)
+        assert prop(cur, 'WS.VALUE_#12') == prop(cur, 'ITEM.COST#12') == 'FALSE'
+        assert prop(cur, 'WS.STOCK#12') is None
+        run(cur, 'ui.init;')                                            # the administrator: all of them
+        assert prop(cur, 'WS.VALUE_#12') is None
+    finally:
+        cur.connection.rollback()
+        cur.execute('delete from mm_warehouse_min where warehouse_id = :w', w=w)
+        cur.execute('delete from mm_warehouse where id = :w', w=w)
+        cur.connection.commit()
 
 
 @needs_db

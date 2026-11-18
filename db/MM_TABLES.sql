@@ -1044,6 +1044,22 @@ join mm_item i on i.id = m.item_id and i.active = 'Y'
 left join mm_warehouse_stock s on s.item_id = m.item_id and s.warehouse_id = m.warehouse_id
 where nvl(s.stock, 0) < m.min_stock;
 
+-- an item in each warehouse (the form of the items, MM_ITEMS): every active warehouse (and one not active
+-- that still has it), the main one first; its stock there, its minimum there (the main one: MM_ITEM.MIN_STOCK,
+-- a branch: MM_WAREHOUSE_MIN), what is missing, the value of what is left by FIFO, the nearest expiry
+create or replace view mm_item_warehouse as
+select w.id, i.id item_id, w.code, w.name, w.main, nvl(s.stock, 0) stock,
+       case when w.main = 'Y' then nullif(i.min_stock, 0) else m.min_stock end min_stock,
+       greatest(nvl(case when w.main = 'Y' then nullif(i.min_stock, 0) else m.min_stock end, 0) - nvl(s.stock, 0), 0) missing,
+       (select round(sum(f.left_ * f.unit_cost), 2) from mm_fifo f
+        where f.item_id = i.id and f.warehouse_id = w.id and f.left_ > 0) value_,
+       (select min(f.expires) from mm_fifo f
+        where f.item_id = i.id and f.warehouse_id = w.id and f.left_ > 0) expires
+from mm_item i cross join mm_warehouse w
+left join mm_warehouse_stock s on s.item_id = i.id and s.warehouse_id = w.id
+left join mm_warehouse_min m on m.item_id = i.id and m.warehouse_id = w.id
+where w.active = 'Y' or nvl(s.stock, 0) <> 0;
+
 -- the check of the whole database (MM_CHECK.sql, and the tests): a row here is something that does
 -- not add up. Empty: the stock is the sum of its moves, every document the sum of its lines, every
 -- closed Z the sum of its documents and of its money, every receipt paid once in the register,

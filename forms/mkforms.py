@@ -2,7 +2,8 @@
 """mkforms.py -- the forms of the mini market in the XML of Oracle Forms 14 (XML2Forms makes the
 .fmb, frmcmp the .fmx: build_forms.ps1 on Windows, build_forms.sh on Linux):
 
-  MM_ITEMS      the items: a block ITEM on MM_ITEM, LOVs for the category, the VAT and the unit
+  MM_ITEMS      the items: a block ITEM on MM_ITEM, LOVs for the category, the VAT and the unit; below, the
+                item in each warehouse (WS on MM_ITEM_WAREHOUSE: stock, minimum, missing, value, first expiry)
   MM_CUSTOMERS  the customers: a block PARTNER on MM_CUSTOMER, a LOV for the tax office (DOY)
   MM_SUPPLIERS  the suppliers: the same on MM_SUPPLIER
 
@@ -71,11 +72,11 @@ def C(name, prompt, width, **o):
 
 FORMS = {
     'MM_ITEMS': dict(
-        title='Είδη', block='ITEM', table='MM_ITEM', order='code',
+        title='Είδη',
         find_title='Είδη', find=('select id, code, name, barcode from mm_item order by code',
                                  [('ID', 0, 'Κωδ.', 'FIND_ID'), ('CODE', 90, 'Κωδικός', None),
                                   ('NAME', 260, 'Περιγραφή', 'FIND_TEXT'), ('BARCODE', 120, 'Barcode', None)]),
-        cols=[
+        blocks=[dict(name='ITEM', table='MM_ITEM', order='code', top=TOP, rows=10, cols=[
             C('ID', '', 0, num=True, hidden=True, query_only=True),
             C('CODE', 'Κωδικός', 90, len=20, req=True, upper=True),
             C('BARCODE', 'Barcode', 110, len=14),
@@ -90,8 +91,18 @@ FORMS = {
             C('COST', 'Κόστος', 70, num=True, req=True, init='0', mask='99G990D00'),
             C('MIN_STOCK', 'Ελάχιστο', 64, num=True, req=True, init='0'),
             C('STOCK', 'Απόθεμα', 70, num=True, db=False, display=True),
-            C('ACTIVE', 'Ενεργό', 50, check=True, init='Y'),
-        ],
+            C('ACTIVE', 'Ενεργό', 50, check=True, init='Y')]),
+            # the item in each warehouse (MM_ITEM_WAREHOUSE): read only, of the item on the screen
+            dict(name='WS', table='MM_ITEM_WAREHOUSE', order="main desc, code", top=TOP + 10 * ROW_H + 40, rows=5,
+                 read_only=True, where='item_id = :ITEM.ID',
+                 cols=[C('ID', '', 0, num=True, hidden=True),
+                       C('CODE', 'Αποθήκη', 70, len=10),
+                       C('NAME', 'Όνομα', 200, len=60),
+                       C('STOCK', 'Απόθεμα', 80, num=True),
+                       C('MIN_STOCK', 'Ελάχιστο', 70, num=True),
+                       C('MISSING', 'Λείπουν', 70, num=True),
+                       C('VALUE_', 'Αξία FIFO', 90, num=True, mask='999G990D00'),
+                       C('EXPIRES', 'Πρώτη λήξη', 90, date=True)])],
         lovs=[
             ('LOV_CAT', 'Κατηγορίες', 'select id, name from mm_category order by name',
              [('ID', 0, 'Κωδ.', 'ITEM.CATEGORY_ID'), ('NAME', 220, 'Κατηγορία', 'ITEM.CAT_NAME')]),
@@ -669,7 +680,9 @@ FORM_SCREENS = {'MM_POS': 'POS', 'MM_RESERVATIONS': 'RESERVATIONS', 'MM_ITEMS': 
 # the fields (F: not readable, not shown; read only, not changed) and the buttons (B: off without the
 # right, an action W, a field to show R) of the screens on each form: (kind, screen, item, level, form item)
 FORM_RIGHTS = {
-    'MM_ITEMS': [('F', 'ITEMS', f, None, 'ITEM.' + f) for f in ('PRICE', 'WHOLESALE_PRICE', 'COST', 'MIN_STOCK', 'STOCK')],
+    'MM_ITEMS': [('F', 'ITEMS', f, None, 'ITEM.' + f) for f in ('PRICE', 'WHOLESALE_PRICE', 'COST', 'MIN_STOCK', 'STOCK')]
+    + [('F', 'ITEMS', 'STOCK', None, 'WS.' + f) for f in ('STOCK', 'MISSING')]
+    + [('F', 'ITEMS', 'MIN_STOCK', None, 'WS.MIN_STOCK'), ('F', 'ITEMS', 'COST', None, 'WS.VALUE_')],
     'MM_CUSTOMERS': [('F', 'CUSTOMERS', 'AFM', None, 'PARTNER.AFM'), ('F', 'CUSTOMERS', 'AFM', None, 'PARTNER.DOY')] +
                     [('F', 'CUSTOMERS', 'CONTACT', None, 'PARTNER.' + f) for f in ('ADDRESS', 'PHONE', 'EMAIL')],
     'MM_SUPPLIERS': [('F', 'SUPPLIERS', 'AFM', None, 'PARTNER.AFM'), ('F', 'SUPPLIERS', 'AFM', None, 'PARTNER.DOY')] +

@@ -174,10 +174,29 @@ PACKAGE BODY ui IS
   -- the detail of the master record on the screen (once for each master record: going back to the
   -- master brings this trigger again)
   -- (three levels: the detail is the master of c_detail2, e.g. an invoice, its lines, their serials)
+  -- (a master the user writes in, e.g. the items and their warehouses: back to the item the cursor was in;
+  -- a new record of it: its detail empty, not that of the record before)
+  PROCEDURE back_to(p_item VARCHAR2) IS
+  BEGIN
+    IF p_item LIKE c_block || '.%' THEN
+      go_item(p_item);
+    ELSE
+      go_block(c_block);
+    END IF;
+  END;
+
   PROCEDURE master(p_block VARCHAR2) IS
     id_ NUMBER := num(p_block || '.ID');
+    at_ VARCHAR2(80) := name_in('SYSTEM.CURSOR_ITEM');
   BEGIN
     IF id_ IS NULL THEN
+      IF p_block = c_block AND c_detail IS NOT NULL AND g_master IS NOT NULL THEN
+        g_master := NULL;
+        g_detail := NULL;
+        go_block(c_detail);
+        clear_block(NO_VALIDATE);
+        back_to(at_);
+      END IF;
       RETURN;
     END IF;
     IF p_block = c_block AND c_detail IS NOT NULL THEN
@@ -188,7 +207,7 @@ PACKAGE BODY ui IS
       g_detail := NULL;
       go_block(c_detail);
       execute_query;
-      go_block(c_block);
+      back_to(at_);
     ELSIF p_block = c_detail AND c_detail2 IS NOT NULL THEN
       IF id_ = g_detail THEN
         RETURN;

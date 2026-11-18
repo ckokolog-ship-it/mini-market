@@ -5,7 +5,7 @@
 ## Περιεχόμενα
 
 - [Πίνακες](#πίνακες) (46)
-- [Όψεις](#όψεις) (24)
+- [Όψεις](#όψεις) (25)
 - [Πακέτα](#πακέτα) (9)
 - [Triggers](#triggers) (20)
 - [Είδη παραστατικών](#είδη-παραστατικών)
@@ -1063,6 +1063,7 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 | `MM_EXPIRY` | Οι λήξεις: οι στρώσεις FIFO με ημερομηνία λήξης που έχουν ακόμα απόθεμα, ανά αποθήκη. | `item_id`, `code`, `name`, `unit`, `category`, `fifo_id`, `line_id`, `warehouse_id`, `warehouse`, `warehouse_name`, `expires`, `days_left`, `qty`, `left_`, `doc_id`, `doc_type`, `doc_no`, `doc_date`, `supplier` |
 | `MM_FIFO_VALUE` | Η αξία του αποθέματος κάθε είδους με FIFO, και το κόστος της επόμενης εξόδου. | `item_id`, `code`, `name`, `unit`, `category`, `stock`, `last_cost`, `value`, `unit_cost`, `next_cost`, `value_last` |
 | `MM_ITEM_AVAIL` | Το διαθέσιμο κάθε είδους: απόθεμα μείον όσα είναι δεσμευμένα σε κρατήσεις. | `item_id`, `code`, `name`, `stock`, `reserved`, `available` |
+| `MM_ITEM_WAREHOUSE` | Ένα είδος σε κάθε αποθήκη (η φόρμα των ειδών): απόθεμα, ελάχιστο, όσα λείπουν, αξία FIFO, πρώτη λήξη. | `id`, `item_id`, `code`, `name`, `main`, `stock`, `min_stock`, `missing`, `value_`, `expires` |
 | `MM_KIT_AVAIL` | Πόσα καλάθια ή σετ μπορούν να φτιαχτούν από το απόθεμα των ειδών τους. | `kit_id`, `code`, `name`, `ready`, `can_make` |
 | `MM_MIN_STOCK` | Τα είδη κάτω από το ελάχιστο απόθεμα, με τον τελευταίο προμηθευτή. | `category`, `code`, `name`, `unit`, `stock`, `min_stock`, `missing`, `supplier`, `item_id`, `serial_tracked`, `supplier_id` |
 | `MM_MOVE_COST` | Το κόστος κάθε κίνησης αποθήκης: FIFO και τελευταίας αγοράς. | `move_id`, `item_id`, `kind`, `doc_id`, `doc_line_id`, `move_at`, `qty`, `note`, `cost`, `cost_last` |

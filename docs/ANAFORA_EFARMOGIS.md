@@ -328,7 +328,7 @@ The pages of the shop (step 8): index.html, app.js, codes.js (the barcodes and Q
 
 | Φόρμα | Τίτλος | Οθόνη | Blocks (πίνακας) | Κουμπιά |
 |---|---|---|---|---|
-| `MM_ITEMS` | Είδη | `ITEMS` | `ITEM` (MM_ITEM) |  |
+| `MM_ITEMS` | Είδη | `ITEMS` | `ITEM` (MM_ITEM), `WS` (MM_ITEM_WAREHOUSE) |  |
 | `MM_CUSTOMERS` | Πελάτες | `CUSTOMERS` | `PARTNER` (MM_CUSTOMER) |  |
 | `MM_SUPPLIERS` | Προμηθευτές | `SUPPLIERS` | `PARTNER` (MM_SUPPLIER) |  |
 | `MM_CARDS` | Κάρτες κινητής | `CARDS` | `CARD` (MM_ITEM), `SER` (MM_SERIAL) | Φόρτωσε, Δείξε PIN |
@@ -354,6 +354,10 @@ The pages of the shop (step 8): index.html, app.js, codes.js (the barcodes and Q
 | `MM_ITEMS` | πεδίο | `ITEMS.COST` | `ITEM.COST` |
 | `MM_ITEMS` | πεδίο | `ITEMS.MIN_STOCK` | `ITEM.MIN_STOCK` |
 | `MM_ITEMS` | πεδίο | `ITEMS.STOCK` | `ITEM.STOCK` |
+| `MM_ITEMS` | πεδίο | `ITEMS.STOCK` | `WS.STOCK` |
+| `MM_ITEMS` | πεδίο | `ITEMS.STOCK` | `WS.MISSING` |
+| `MM_ITEMS` | πεδίο | `ITEMS.MIN_STOCK` | `WS.MIN_STOCK` |
+| `MM_ITEMS` | πεδίο | `ITEMS.COST` | `WS.VALUE_` |
 | `MM_CUSTOMERS` | πεδίο | `CUSTOMERS.AFM` | `PARTNER.AFM` |
 | `MM_CUSTOMERS` | πεδίο | `CUSTOMERS.AFM` | `PARTNER.DOY` |
 | `MM_CUSTOMERS` | πεδίο | `CUSTOMERS.CONTACT` | `PARTNER.ADDRESS` |
@@ -437,7 +441,7 @@ The pages of the shop (step 8): index.html, app.js, codes.js (the barcodes and Q
 | `test_db.py` (16) | the tables of the mini market (db/INSTALL.sql demo) in a live database. |
 | `test_expiry.py` (2) | the expiry of the goods (MM_DOC_LINE.EXPIRES, mm_core.set_expiry, the view MM_EXPIRY; the REST of Expiry.java and the lines of Docs.java): an item received three times with dates, what is left of each by FIFO as it is sold, taken out, received again without a date; expired and expiring in N days; one taken out of the stock; what is refused. |
 | `test_fifo.py` (2) | FIFO (MM_FIFO, MM_FIFO_OUT, mm_core.stock_move and fifo_rebuild, the views MM_FIFO_VALUE and MM_MOVE_COST): an item of its own bought twice at two costs, sold (the oldest first), the sale cancelled (its layers back), sold beyond its stock (a shortage at the cost of the item), bought again (the shortage filled first), the receipt cancelled; a return of a customer; built again from the moves, the same; MM_CHECK FIFO. |
-| `test_forms.py` (33) | the forms of forms/mkforms.py, without the Forms: |
+| `test_forms.py` (35) | the forms of forms/mkforms.py, without the Forms: |
 | `test_kits.py` (5) | baskets and sets (kits) in MM_CORE: what one has, made before (assemble_kit) or sold before they are made (post_doc: the ready ones first, the rest from the components), the cancel back exactly. |
 | `test_ledger.py` (5) | the ledgers (MM_LEDGER): an item, a customer, a supplier for a period: the carry-over, the moves with the running balance, the totals, the balance at the end. |
 | `test_months.py` (5) | the totals of the months (MM_MONTHS): kept by the triggers through every change (a document posted, cancelled, its date moved; a payment cancelled; a move moved or deleted), the same as MM_MONTHS.REBUILD from all the moves, and what the ledgers take from them (their carry-over) the same as from every move one by one. Two tills on the same item do not wait for each other (reservable). |
