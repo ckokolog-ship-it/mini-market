@@ -111,6 +111,7 @@ final class Rights {
                 case "expiry" -> need(u, "EXPIRY", null, "R");
                 case "users" -> need(u, "USERS", null, "R");
                 case "roles", "menu" -> need(u, "ROLES", null, "R");
+                case "audit" -> need(u, "AUDIT", null, "R");
                 case "chart" -> need(u, "CHART", null, "R");
                 case "day", "backup" -> need(u, "DAY", null, "R");
                 case "reports" -> {

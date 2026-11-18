@@ -416,6 +416,7 @@ begin
 
   scr('USERS', 'ADMIN', 'Χρήστες', '#/users', 'MM_USERS', 10, 'A:CREATE:Νέος;A:PASSWORD:Κωδικός;A:PLACE:Κατάστημα και ταμείο');
   scr('ROLES', 'ADMIN', 'Ρόλοι και δικαιώματα', '#/roles', null, 20);
+  scr('AUDIT', 'ADMIN', 'Ιστορικό ενεργειών', '#/audit', null, 30);
 
   grants('CASHIER', 'POS:W;POS.WAREHOUSE:N;POS.SETTINGS:N;ORDERS:W;ORDERS.NOTE:N;RESERVATIONS:W;ITEMS:R;ITEMS.COST:N;ITEMS.FIFO:N;'
                     || 'LABELS:W;COUNTS:W;COUNTS.CREATE:N;COUNTS.POST:N;COUNTS.CANCEL:N');

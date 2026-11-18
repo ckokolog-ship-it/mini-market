@@ -15,7 +15,7 @@ const MENU = [
   ['Πωλήσεις', [['#/pos', 'Ταμείο', 'CASHIER'], ['#/orders', 'Παραγγελίες', 'CASHIER']]],
   ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER'], ['#/expiry', 'Λήξεις', 'MANAGER'],
     ['#/warehouses', 'Αποθήκες', 'MANAGER']]],
-  ['Διαχείριση', [['#/users', 'Χρήστες', 'ADMIN'], ['#/roles', 'Ρόλοι και δικαιώματα', 'ADMIN']]],
+  ['Διαχείριση', [['#/users', 'Χρήστες', 'ADMIN'], ['#/roles', 'Ρόλοι και δικαιώματα', 'ADMIN'], ['#/audit', 'Ιστορικό ενεργειών', 'ADMIN']]],
   ['Γραφείο', [['#/docs', 'Τιμολόγια', 'MANAGER'], ['#/payments', 'Εισπράξεις', 'MANAGER'],
     ['#/partners/customers', 'Πελάτες', 'MANAGER'], ['#/partners/suppliers', 'Προμηθευτές', 'MANAGER']]],
   ['Αναφορές', [['#/day', 'Σύνοψη ημέρας', 'MANAGER'], ['#/chart', 'Γράφημα πωλήσεων', 'MANAGER'], ['#/reports/sales', 'Πωλήσεις', 'MANAGER'], ['#/reports/vat', 'ΦΠΑ', 'MANAGER'],
@@ -1285,6 +1285,59 @@ async function menuPage() {
   try { draw(await api('menu')); } catch (e) { fail(e); }
 }
 
+// -- the history of what was done (MM_AUDIT: by triggers, whatever did it) and the logins: who, when, from
+// where, what, of what; by days, user, kind, text; the newest first, in pages
+const AUDIT = {
+  DOC_POST: 'Καταχώριση παραστατικού', DOC_CANCEL: 'Ακύρωση παραστατικού', DOC_DELETE: 'Σβήσιμο πρόχειρου',
+  Z_OPEN: 'Άνοιγμα Ζ', Z_CLOSE: 'Κλείσιμο Ζ', CASH_IN: 'Μετρητά μέσα', CASH_OUT: 'Μετρητά έξω',
+  STOCK_ADJ: 'Διόρθωση αποθέματος', COUNT_POST: 'Καταχώριση απογραφής', COUNT_CANCEL: 'Ακύρωση απογραφής',
+  PAYMENT_IN: 'Είσπραξη', PAYMENT_OUT: 'Πληρωμή', PAYMENT_CANCEL: 'Ακύρωση είσπραξης/πληρωμής',
+  ITEM_NEW: 'Νέο είδος', ITEM_CHANGE: 'Αλλαγή είδους', CUSTOMER_NEW: 'Νέος πελάτης', CUSTOMER_CHANGE: 'Αλλαγή πελάτη',
+  SUPPLIER_NEW: 'Νέος προμηθευτής', SUPPLIER_CHANGE: 'Αλλαγή προμηθευτή', USER_NEW: 'Νέος χρήστης', USER_CHANGE: 'Αλλαγή χρήστη',
+  USER_ROLE_ADD: 'Ρόλος σε χρήστη', USER_ROLE_DROP: 'Ρόλος από χρήστη', ROLE_NEW: 'Νέος ρόλος', ROLE_CHANGE: 'Αλλαγή ρόλου',
+  ROLE_DROP: 'Διαγραφή ρόλου', GRANT: 'Δικαίωμα', MENU_CHANGE: 'Αλλαγή μενού', SETTING: 'Ρύθμιση',
+  WAREHOUSE_NEW: 'Νέα αποθήκη', WAREHOUSE_CHANGE: 'Αλλαγή αποθήκης', AUTH_LOGIN: 'Σύνδεση', AUTH_LOGOUT: 'Αποσύνδεση',
+  AUTH_FAIL: 'Λάθος κωδικός', AUTH_LOCKED: 'Κλείδωμα', AUTH_CREATE: 'Νέος χρήστης (login)', AUTH_PASSWORD: 'Νέος κωδικός',
+  AUTH_ROLE: 'Αλλαγή επιπέδου', AUTH_ACTIVE: 'Ενεργός ή όχι', AUTH_UNLOCK: 'Ξεκλείδωμα', AUTH_PLACE: 'Κατάστημα και ταμείο',
+};
+const AUDIT_KINDS = [['', 'Όλα'], ['DOC_', 'Παραστατικά'], ['Z_', 'Ζ'], ['CASH_', 'Μετρητά ταμείου'], ['STOCK_', 'Διορθώσεις αποθέματος'],
+  ['COUNT_', 'Απογραφές'], ['PAYMENT_', 'Εισπράξεις και πληρωμές'], ['ITEM_', 'Είδη'], ['CUSTOMER_', 'Πελάτες'], ['SUPPLIER_', 'Προμηθευτές'],
+  ['USER', 'Χρήστες'], ['ROLE_', 'Ρόλοι'], ['GRANT', 'Δικαιώματα'], ['MENU_', 'Μενού'], ['SETTING', 'Ρυθμίσεις'], ['WAREHOUSE_', 'Αποθήκες'],
+  ['AUTH_', 'Συνδέσεις']];
+async function auditPage(params) {
+  const from = el('input', { name: 'from', type: 'date', value: params.get('from') || '' });
+  const to = el('input', { name: 'to', type: 'date', value: params.get('to') || isoToday() });
+  const user = el('select', { name: 'user' }, el('option', { value: '' }, 'Όλοι'));
+  const kind = el('select', { name: 'action' }, AUDIT_KINDS.map(([k, t]) => el('option', { value: k, selected: (params.get('action') || '') === k }, t)));
+  const text = el('input', { name: 'q', value: params.get('q') || '', placeholder: 'π.χ. ΑΛΠ 12, GAL01' });
+  const out = el('div');
+  const ref = (x) => (x.ref_type === 'DOC' && x.ref_id ? el('a', { href: '#/doc/' + x.ref_id }, x.ref_text)
+    : x.ref_type === 'ITEM' && x.ref_text ? el('a', { href: '#/item/' + encodeURIComponent(x.ref_text) }, x.ref_text)
+      : x.ref_type === 'ROLE' && x.ref_text && !x.ref_text.startsWith('#') ? el('a', { href: '#/roles/' + x.ref_text }, x.ref_text)
+        : x.ref_text || '');
+  const go = async (offset = 0) => {
+    const q = new URLSearchParams({ from: from.value, to: to.value, user: user.value, action: kind.value, q: text.value.trim(), offset, limit: pageSize });
+    try {
+      const r = await api('audit?' + q);
+      if (!from.value) from.value = r.from;
+      if (user.options.length === 1) r.users.forEach((u) => user.append(el('option', { value: u.username, selected: params.get('user') === u.username }, u.username)));
+      out.replaceChildren(r.rows.length ? table([['Πότε'], ['Ποιος'], ['Από', 'hide-phone'], ['Τι'], ['Σε'], ['Λεπτομέρειες', 'hide-phone']],
+        r.rows.map((x) => el('tr', { class: /FAIL|LOCKED|CANCEL|DROP|DELETE/.test(x.action) ? 'expired' : null },
+          el('td', {}, day(x.at) + ' ' + String(x.at).slice(11, 19)), el('td', {}, x.username || ''),
+          el('td', { class: 'hide-phone muted' }, x.source || ''), el('td', {}, AUDIT[x.action] || x.action), el('td', {}, ref(x)),
+          el('td', { class: 'hide-phone wrap' }, x.detail || '')))) : el('p', { class: 'muted' }, 'Τίποτα σε αυτές τις ημέρες.'),
+      r.total > r.limit ? pager(r.total, r.offset, r.limit, go) : null);
+    } catch (e) { fail(e); }
+  };
+  show(el('h1', {}, 'Ιστορικό ενεργειών'),
+    el('p', { class: 'muted' }, 'Ό,τι έγινε, από τις σελίδες, τις φόρμες ή με SQL: ποιος, πότε, από πού. Και οι συνδέσεις.'),
+    el('form', { class: 'panel row', onsubmit: (ev) => { ev.preventDefault(); go(0); } },
+      el('label', {}, 'Από', from), el('label', {}, 'Έως', to), el('label', {}, 'Χρήστης', user), el('label', {}, 'Τι', kind),
+      el('label', { class: 'grow' }, 'Κείμενο', text), el('button', { class: 'primary', type: 'submit' }, 'Αναζήτηση')),
+    out);
+  await go(0);
+}
+
 // -- the scratch tickets (σκρατς): bought in packs, sold one by one by the barcode of each (its game 4
 // digits, its pack 7, its number 3). A pack loaded by a scan of one of its tickets; the games (έκδοση: the
 // item it is sold as, the tickets of a pack); the packs, sold and left; the prizes paid, by day
@@ -2502,6 +2555,7 @@ function render() {
     case 'users': return need('USERS', () => usersPage());
     case 'roles': return need('ROLES', () => rolesPage(p[1]));
     case 'menu': return need('ROLES', () => menuPage());
+    case 'audit': return need('AUDIT', () => auditPage(params));
     case 'count': return need('COUNTS', () => countPage(p[1]));
     default: {
       // the items, else the first page of the menu
