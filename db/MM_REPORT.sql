@@ -36,21 +36,22 @@ group by d.doc_date, l.vat_code, l.vat_rate;
 -- receipt, by FIFO: the stock of an item is of its newest receipts first (the oldest went first), so a
 -- receipt has what the stock has after the receipts newer than it, up to its own quantity. Only the
 -- lines with something left; DAYS_LEFT: negative, expired
+-- (the layers of FIFO with an expiry and something left: in their warehouse, a transfer with its goods; the
+-- document that brought each: the receipt, or the transfer; the supplier of the receipt the goods came with)
 create or replace view mm_expiry as
-select x.item_id, x.code, x.name, x.unit, x.category, x.line_id, x.expires, x.expires - trunc(sysdate) days_left,
-       x.qty, x.left_, x.doc_id, x.doc_type, x.doc_no, x.doc_date, x.supplier
-from (select l.item_id, i.code, i.name, i.unit, c.name category, l.id line_id, l.expires, l.qty,
-             least(l.qty, greatest(0, (i.stock + 0) - nvl(sum(l.qty) over (partition by l.item_id
-                   order by d.doc_date desc, l.id desc rows between unbounded preceding and 1 preceding), 0))) left_,
-             d.id doc_id, d.doc_type, d.doc_no, d.doc_date, s.name supplier
-      from mm_doc_line l
-      join mm_doc d on d.id = l.doc_id
-      join mm_doc_type t on t.code = d.doc_type
-      join mm_item i on i.id = l.item_id
-      join mm_category c on c.id = i.category_id
-      left join mm_supplier s on s.id = d.supplier_id
-      where d.status = 'P' and t.side = 'P' and t.stock_sign = 1 and l.qty > 0) x
-where x.expires is not null and x.left_ > 0;
+select f.item_id, i.code, i.name, i.unit, c.name category, f.id fifo_id, f.doc_line_id line_id,
+       f.warehouse_id, w.code warehouse, w.name warehouse_name, f.expires, f.expires - trunc(sysdate) days_left,
+       f.qty, f.left_, d.id doc_id, d.doc_type, d.doc_no, d.doc_date,
+       (select max(s.name) keep (dense_rank last order by o.id) from mm_doc_line ol join mm_doc od on od.id = ol.doc_id
+          join mm_supplier s on s.id = od.supplier_id join mm_fifo o on o.doc_line_id = ol.id
+        where o.item_id = f.item_id and o.expires = f.expires and od.supplier_id is not null) supplier
+from mm_fifo f
+join mm_item i on i.id = f.item_id
+join mm_category c on c.id = i.category_id
+join mm_warehouse w on w.id = f.warehouse_id
+left join mm_stock_move m on m.id = f.move_id
+left join mm_doc d on d.id = m.doc_id
+where f.expires is not null and f.left_ > 0;
 
 -- FIFO: the value of the stock of each item (its layers left, each at its cost; a shortage below 0, at
 -- the cost it was taken), the cost by piece of what is left, and the cost of the next piece out; and

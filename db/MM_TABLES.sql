@@ -987,6 +987,8 @@ declare
 begin
   add_col('MM_STOCK_MOVE', 'WAREHOUSE_ID', 'warehouse_id number constraint mm_stock_move_wh_fk references mm_warehouse');
   add_col('MM_FIFO', 'WAREHOUSE_ID', 'warehouse_id number constraint mm_fifo_wh_fk references mm_warehouse');
+  -- the expiry of a layer: of the line of the receipt that brought it; a transfer: of the layer it came from
+  add_col('MM_FIFO', 'EXPIRES', 'expires date');
   add_col('MM_DOC', 'WAREHOUSE_ID', 'warehouse_id number constraint mm_doc_wh_fk references mm_warehouse');
   add_col('MM_REGISTER', 'WAREHOUSE_ID', 'warehouse_id number constraint mm_register_wh_fk references mm_warehouse');
   -- a transfer between two warehouses (Δελτίο ενδοδιακίνησης, DEN: side T): the warehouse it goes to

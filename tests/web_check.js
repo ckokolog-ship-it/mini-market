@@ -356,7 +356,8 @@ async function waitText(page, sel, text) {
   await page.waitForFunction((sel) => document.querySelector(sel) && document.querySelector(sel).value === '2030-01-31', expIn);
   ok(await page.isVisible('input[name=expires]'), 'a receipt of goods: the date of expiry of each line');
   await page.goto(BASE + '/web/#/expiry');
-  await waitText(page, 'main', process.env.YOGURT);
+  await waitText(page, 'main h1', 'Λήξεις');                     // (not the receipt before it, with the same item)
+  await waitText(page, 'main tbody', process.env.YOGURT);
   const yrow = `main tbody tr:has-text("${process.env.YOGURT}")`;
   ok((await page.textContent(yrow)).includes('έληξε πριν 1 ημέρα') && (await page.$$(yrow + '.expired')).length === 1,
     'the expiry: the expired one, all 3 of it left');

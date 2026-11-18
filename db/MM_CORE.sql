@@ -802,6 +802,7 @@ create or replace package body mm_core as
     neg number;
     cancel boolean := m.kind = 'DOC' and nvl(m.note, '-') = 'Ακύρωση';   -- (nvl: a null note, false, not null)
     side_ varchar2(1);                        -- of its document: T a transfer
+    exp_ date;
   begin
     -- the cost of the last purchase now (the other way of counting the costs: COST_METHOD LAST)
     unit := fifo_unit(m.item_id);
@@ -830,11 +831,11 @@ create or replace package body mm_core as
       end if;
       if side_ = 'T' then
         for o in (select /*+ leading(s o f) use_nl(o f) index(s mm_stock_move_doc_ix) index(o mm_fifo_out_move_ix) */
-                         f.unit_cost, sum(o.qty) q
+                         f.unit_cost, f.expires, sum(o.qty) q       -- (the expiry of the goods goes with them)
                   from mm_fifo_out o join mm_fifo f on f.id = o.fifo_id join mm_stock_move s on s.id = o.move_id
                   where s.doc_id = m.doc_id and s.doc_line_id = m.doc_line_id
                     and s.item_id = m.item_id and s.warehouse_id <> m.warehouse_id and s.qty < 0
-                  group by f.unit_cost order by min(o.id)) loop
+                  group by f.unit_cost, f.expires order by min(o.id)) loop
           exit when r <= 0;
           q := least(r, o.q);
           r := r - q;
@@ -846,8 +847,8 @@ create or replace package body mm_core as
             q := q - unit;
           end loop;
           if q > 0 then
-            insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_, warehouse_id)
-            values (m.item_id, m.id, m.doc_line_id, m.move_at, q, o.unit_cost, q, m.warehouse_id);
+            insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_, warehouse_id, expires)
+            values (m.item_id, m.id, m.doc_line_id, m.move_at, q, o.unit_cost, q, m.warehouse_id, o.expires);
           end if;
         end loop;
       end if;
@@ -861,14 +862,16 @@ create or replace package body mm_core as
       end loop;
       if r > 0 then
         -- its cost: a receipt from a supplier, the net of its line by piece; else that of the newest layer
-        select max(case when t.side = 'P' and l.qty <> 0 then round(l.net / l.qty, 4) end) into unit
+        -- (and its expiry: of the line, a receipt of goods)
+        select max(case when t.side = 'P' and l.qty <> 0 then round(l.net / l.qty, 4) end), max(l.expires)
+        into unit, exp_
         from mm_doc_line l join mm_doc d on d.id = l.doc_id join mm_doc_type t on t.code = d.doc_type
         where l.id = m.doc_line_id and l.item_id = m.item_id;
         if unit is null then
           unit := fifo_unit(m.item_id);
         end if;
-        insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_, warehouse_id)
-        values (m.item_id, m.id, m.doc_line_id, m.move_at, r, unit, r, m.warehouse_id);
+        insert into mm_fifo (item_id, move_id, doc_line_id, in_at, qty, unit_cost, left_, warehouse_id, expires)
+        values (m.item_id, m.id, m.doc_line_id, m.move_at, r, unit, r, m.warehouse_id, exp_);
       end if;
     else
       if cancel then
