@@ -9,14 +9,14 @@
 
 ```mermaid
 flowchart LR
-  subgraph Πελάτες
+  subgraph CLIENTS ["Πελάτες"]
     W["Σελίδες web<br/>(ταμείο, γραφείο, αναφορές)"]
     A["Android<br/>(απογραφή, σάρωση)"]
     S["Σελίδα παραγγελιών<br/>πελατών (shop)"]
     F["Oracle Forms<br/>(γραφείο)"]
     R["Oracle Reports<br/>(PDF)"]
   end
-  subgraph mm-api ["mm-api (Java 17)"]
+  subgraph MMAPI ["mm-api (Java 17)"]
     API["REST /api/...<br/>login, δικαιώματα"]
     MY["myDATA<br/>(ΑΑΔΕ)"]
   end
