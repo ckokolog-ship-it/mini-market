@@ -101,6 +101,17 @@ create or replace package body mm_auth as
     when no_data_found then fail(80, 'Δεν υπάρχει χρήστης ' || p_username);
   end;
 
+  -- the level of a user (MM_USER.ROLE) is also its role of the system (MM_RIGHTS: MM_USER_ROLE): the one of
+  -- its old level out, the new one in; its other roles stay
+  procedure in_role(p_user_id number, p_role varchar2) is
+  begin
+    delete from mm_user_role where user_id = p_user_id
+      and role_id in (select id from mm_role where system = 'Y' and code <> p_role);
+    insert into mm_user_role (user_id, role_id)
+    select p_user_id, r.id from mm_role r
+    where r.code = p_role and not exists (select 1 from mm_user_role x where x.user_id = p_user_id and x.role_id = r.id);
+  end;
+
   -- the shop never stays without an active administrator
   procedure keep_an_admin(p_except number) is
     n number;
@@ -128,6 +139,7 @@ create or replace package body mm_auth as
     exception
       when dup_val_on_index then fail(82, 'Υπάρχει ήδη χρήστης ' || lower(p_username));
     end;
+    in_role(v, upper(p_role));
     note(lower(p_username), 'CREATE');
     return v;
   end;
@@ -153,6 +165,7 @@ create or replace package body mm_auth as
       keep_an_admin(id_);
     end if;
     update mm_user set role = upper(p_role) where id = id_;
+    in_role(id_, upper(p_role));
     update mm_session set revoked = 'Y' where user_id = id_;
     note(lower(p_username), 'ROLE');
   end;
