@@ -888,6 +888,8 @@ begin
   add_col('MM_REGISTER', 'WAREHOUSE_ID', 'warehouse_id number constraint mm_register_wh_fk references mm_warehouse');
   -- a transfer between two warehouses (Δελτίο ενδοδιακίνησης, DEN: side T): the warehouse it goes to
   add_col('MM_DOC', 'TO_WAREHOUSE_ID', 'to_warehouse_id number constraint mm_doc_to_wh_fk references mm_warehouse');
+  -- a count of the stock is of one warehouse (what it finds, a move there)
+  add_col('MM_COUNT', 'WAREHOUSE_ID', 'warehouse_id number constraint mm_count_wh_fk references mm_warehouse');
   for c in (select search_condition_vc s from user_constraints where constraint_name = 'MM_DOC_TYPE_SIDE_CK') loop
     if instr(c.s, '''T''') = 0 then
       execute immediate 'alter table mm_doc_type drop constraint mm_doc_type_side_ck';
@@ -899,6 +901,7 @@ begin
     execute immediate 'update mm_fifo set warehouse_id = :w where warehouse_id is null' using w.id;
     execute immediate 'update mm_doc set warehouse_id = :w where warehouse_id is null' using w.id;
     execute immediate 'update mm_register set warehouse_id = :w where warehouse_id is null' using w.id;
+    execute immediate 'update mm_count set warehouse_id = :w where warehouse_id is null' using w.id;
   end loop;
   commit;
 end;

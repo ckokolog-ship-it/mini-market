@@ -32,7 +32,9 @@ import java.util.Optional;
  *                                              with ?limit=&offset= a page of its moves, its carry_in, carry_out
  *   /api/reports/sales   /api/reports/vat   /api/reports/min-stock
  *   /api/scratch/...                           the scratch tickets in packs: see Scratch (MANAGER)
- *   /api/warehouses                            the warehouses (the main one first); an item: its stock in each
+ *   /api/warehouses                            the warehouses (the main one first), what each has; an item: its
+ *                                              stock in each. POST /api/warehouses {code, name}, /api/warehouses/{id}
+ *                                              {name, active} (MANAGER)
  *   /api/expiry?days=   POST /api/expiry/withdraw   the goods expiring, expired; one taken out (Expiry.java)
  *   /api/chart?to=&days=                       the charts of the sales: by day (and a year before), by hour
  *                                              (MANAGER, Chart.java)
@@ -233,6 +235,40 @@ final class Api {
             need(u, "MANAGER");
             return Scratch.post(c, p, in);
         }
+        if ("warehouses".equals(p[0])) {          // a new warehouse; one renamed, (not) active
+            need(u, "MANAGER");
+            if (n == 1) {
+                String code = String.valueOf(Http.text(in, "code", true)).trim().toUpperCase(java.util.Locale.ROOT);
+                String name = String.valueOf(Http.text(in, "name", true)).trim();
+                if (!code.matches("[A-Z0-9]{1,10}") || name.isEmpty() || name.length() > 60) {
+                    throw new Http.Fail(400, "bad_warehouse", "code: 1 to 10 letters or digits (A-Z, 0-9); name: up to 60");
+                }
+                if (!Db.rows(c, "select id from mm_warehouse where code = ?", code).isEmpty()) {
+                    throw new Http.Fail(400, "bad_warehouse", "Υπάρχει ήδη αποθήκη " + code);
+                }
+                Db.exec(c, "begin insert into mm_warehouse (code, name) values (?, ?); end;", code, name);
+                return warehouses(c);
+            }
+            if (n == 2) {
+                long id = Http.id(p[1]);
+                List<Map<String, Object>> w = Db.rows(c, "select main from mm_warehouse where id = ?", id);
+                if (w.isEmpty()) {
+                    throw new Http.Fail(404, "not_found", "no such warehouse: " + id);
+                }
+                String name = Http.text(in, "name", false);
+                if (name != null && !name.isBlank()) {
+                    Db.exec(c, "begin update mm_warehouse set name = ? where id = ?; end;", name.trim(), id);
+                }
+                if (in.containsKey("active")) {
+                    boolean on = Boolean.TRUE.equals(in.get("active"));
+                    if (!on && "Y".equals(w.get(0).get("main"))) {
+                        throw new Http.Fail(400, "bad_warehouse", "Η κεντρική αποθήκη μένει ενεργή");
+                    }
+                    Db.exec(c, "begin update mm_warehouse set active = ? where id = ?; end;", on ? "Y" : "N", id);
+                }
+                return warehouses(c);
+            }
+        }
         if ("reports".equals(p[0]) && n == 2 && "cost-method".equals(p[1])) {   // the way the costs are counted
             need(u, "MANAGER");
             String m = String.valueOf(Http.text(in, "method", true)).trim().toUpperCase(java.util.Locale.ROOT);
@@ -258,9 +294,15 @@ final class Api {
         if ("counts".equals(p[0])) {
             if (n == 1) {
                 need(u, "MANAGER");
-                try (CallableStatement cs = c.prepareCall("begin ? := mm_core.start_count(?); end;")) {
+                try (CallableStatement cs = c.prepareCall("begin ? := mm_core.start_count(?, ?); end;")) {
                     cs.registerOutParameter(1, Types.NUMERIC);
                     cs.setString(2, Http.text(in, "name", false));
+                    Object wh = in.get("warehouse_id");
+                    if (wh instanceof Number w) {
+                        cs.setLong(3, w.longValue());
+                    } else {
+                        cs.setNull(3, Types.NUMERIC);
+                    }
                     cs.execute();
                     return count(c, cs.getLong(1));
                 }
@@ -302,9 +344,21 @@ final class Api {
         throw new Http.Fail(404, "not_found", "no such endpoint");
     }
 
+    /** the warehouses (the main one first), with what each has: items with stock, its value by FIFO */
+    static Map<String, Object> warehouses(Connection c) throws SQLException {
+        return Map.of("rows", Db.rows(c, """
+                select w.id, w.code, w.name, w.main, w.active,
+                       (select count(*) from mm_warehouse_stock s where s.warehouse_id = w.id and s.stock <> 0) items,
+                       (select nvl(sum(f.left_ * f.unit_cost), 0) from mm_fifo f where f.warehouse_id = w.id) value,
+                       (select count(*) from mm_register r where nvl(r.warehouse_id, -1) = w.id and r.active = 'Y') registers
+                from mm_warehouse w
+                order by case w.main when 'Y' then 0 else 1 end, w.code"""));
+    }
+
     private Object count(Connection c, long id) throws SQLException {
         List<Map<String, Object>> h = Db.rows(c, """
-                select id, name, status, created_at, posted_at from mm_count where id = ?""", id);
+                select c.id, c.name, c.status, c.created_at, c.posted_at, c.warehouse_id, w.code warehouse, w.name warehouse_name
+                from mm_count c left join mm_warehouse w on w.id = c.warehouse_id where c.id = ?""", id);
         if (h.isEmpty()) {
             throw new Http.Fail(404, "not_found", "no such count: " + id);
         }
@@ -394,9 +448,7 @@ final class Api {
             }
             case "warehouses" -> {          // the warehouses: the main one first
                 if (n == 1) {
-                    return Map.of("rows", Db.rows(c, """
-                            select id, code, name, main, active from mm_warehouse
-                            order by case main when 'Y' then 0 else 1 end, code"""));
+                    return warehouses(c);
                 }
             }
             case "expiry" -> {
@@ -692,10 +744,30 @@ final class Api {
                 String m = costMethod(c, q);
                 out.put("method", m);
                 out.put("default_method", costMethod(c, null));
-                out.put("rows", Db.rows(c, """
+                String wh = q.get("warehouse");
+                out.put("warehouse", wh == null || wh.isBlank() ? null : wh);
+                out.put("rows", wh == null || wh.isBlank() ? Db.rows(c, """
                         select item_id, code, name, unit, category, stock, value value_fifo, value_last,
                                case ? when 'LAST' then value_last else value end value, unit_cost, next_cost, last_cost
-                        from mm_fifo_value where stock <> 0 or value <> 0 order by category, code""", m));
+                        from mm_fifo_value where stock <> 0 or value <> 0 order by category, code""", m)
+                        : Db.rows(c, """
+                        select i.id item_id, i.code, i.name, i.unit, k.name category, nvl(s.stock, 0) stock,
+                               nvl(f.value, 0) value_fifo, round(nvl(s.stock, 0) * nvl(i.cost, 0), 2) value_last,
+                               case ? when 'LAST' then round(nvl(s.stock, 0) * nvl(i.cost, 0), 2) else nvl(f.value, 0) end value,
+                               f.unit_cost, f.next_cost, i.cost last_cost
+                        from mm_item i
+                        join mm_category k on k.id = i.category_id
+                        join mm_warehouse w on w.code = upper(?)
+                        left join mm_warehouse_stock s on s.item_id = i.id and s.warehouse_id = w.id
+                        left join (select item_id, warehouse_id, sum(left_ * unit_cost) value,
+                                          round(sum(case when left_ > 0 then left_ * unit_cost end)
+                                                / nullif(sum(case when left_ > 0 then left_ end), 0), 4) unit_cost,
+                                          min(case when left_ > 0 then unit_cost end)
+                                            keep (dense_rank first order by case when left_ > 0 then id end) next_cost
+                                   from mm_fifo group by item_id, warehouse_id) f
+                          on f.item_id = i.id and f.warehouse_id = w.id
+                        where nvl(s.stock, 0) <> 0 or nvl(f.value, 0) <> 0
+                        order by k.name, i.code""", m, wh.trim()));
             }
             default -> throw new Http.Fail(404, "not_found", "reports: sales, vat, min-stock, trial-items, trial-customers, trial-suppliers, profit or stock-value");
         }

@@ -27,6 +27,7 @@ import java.util.Map;
  *                                              at /scan works as well) or its phone; none: out of the receipt
  *   POST /api/pos/{register}/customer/new {name, phone}   a new customer with a card, into the receipt
  *   POST /api/pos/{register}/points {points}   points of its customer used on the receipt (0: none)
+ *   POST /api/pos/{register}/warehouse {warehouse_id}   the warehouse its sales are from (MANAGER)
  *   POST /api/pos/{register}/lines/{id} {qty}  the quantity of a line (0: the line out)
  *   POST /api/pos/{register}/void              the draft out (an order in it: open again)
  *   POST /api/pos/{register}/order {id}        an order (Orders), all of its lines, into the receipt
@@ -149,6 +150,24 @@ final class Pos {
                     break;
                 }
                 scan(c, reg, Http.text(in, "code", true), Http.decimal(in, "qty", BigDecimal.ONE));
+                return state(c, reg);
+            }
+            case "warehouse" -> {               // the warehouse of the register: its sales from there (MANAGER)
+                if (p.length != 3) {
+                    break;
+                }
+                if (!u.atLeast("MANAGER")) {
+                    throw new Http.Fail(403, "forbidden", "only MANAGER or above");
+                }
+                if (draft(c, reg) != null) {
+                    throw new Http.Fail(409, "receipt_open", "Η απόδειξη που γράφεται: πρώτα πληρωμή ή ακύρωση");
+                }
+                Object w = in.get("warehouse_id");
+                if (!(w instanceof Number) || Db.rows(c, "select id from mm_warehouse where id = ? and active = 'Y'",
+                        ((Number) w).longValue()).isEmpty()) {
+                    throw new Http.Fail(400, "bad_warehouse", "warehouse_id: an active warehouse");
+                }
+                Db.exec(c, "begin update mm_register set warehouse_id = ? where id = ?; end;", ((Number) w).longValue(), reg);
                 return state(c, reg);
             }
             case "customer" -> {
@@ -461,7 +480,10 @@ final class Pos {
 
     /** the register, its open Z (what it holds so far), the draft with its lines, the last receipts */
     private static Object state(Connection c, long reg) throws SQLException {
-        Map<String, Object> out = Db.rows(c, "select id, code, name from mm_register where id = ?", reg).get(0);
+        Map<String, Object> out = Db.rows(c, """
+                select r.id, r.code, r.name, w.id warehouse_id, w.code warehouse, w.name warehouse_name
+                from mm_register r join mm_warehouse w on w.id = nvl(r.warehouse_id, mm_core.main_warehouse)
+                where r.id = ?""", reg).get(0);
         Long z = openZ(c, reg);
         if (z == null) {
             out.put("z", null);

@@ -301,3 +301,5 @@ svg.chart { display: block; max-width: 100%; }
 tr.expired td { background: color-mix(in srgb, var(--bad) 8%, transparent); }
 /* a column beside, for comparing (the cost by the other method) */
 td.muted-col, th.muted-col { color: var(--muted); }
+/* a link beside a button (the warehouses: their value) */
+.btn-link { margin-left: 8px; white-space: nowrap; }
