@@ -23,7 +23,8 @@ import java.util.Map;
  *   POST /api/pos/{register}/close             the Z closed: its totals in "closed"
  *   POST /api/pos/{register}/cash {amount, note}   money in (+) or out (-) of the drawer
  *   GET  /api/pos/tiles                        the buttons of the till (Tiles: groups, tiles, the frequent)
- *   POST /api/pos/{register}/item {item_id, qty}   a button of the till: the item, as a scan of its code
+ *   POST /api/pos/{register}/item {item_id, qty, options}   a button of the till: the item, as a scan of its
+ *                                              code, with the options chosen (their ids; none: the defaults)
  *   POST /api/pos/{register}/scan {code, qty}  an item by barcode, code or short number (PLU) (a card of mobile: one, the
  *                                              oldest), or a card by its serial (a scratch ticket: its barcode)
  *   POST /api/pos/{register}/prize {amount, ticket}   a prize of a scratch ticket, paid from the drawer
@@ -169,7 +170,24 @@ final class Pos {
                 if (it.isEmpty()) {
                     throw new Http.Fail(404, "not_found", "Δεν βρέθηκε ενεργό είδος " + id);
                 }
-                scan(c, reg, (String) it.get(0).get("code"), Http.decimal(in, "qty", BigDecimal.ONE));
+                Object opts = in.get("options");
+                String csv = null;
+                if (opts instanceof List<?> l) {
+                    StringBuilder sb = new StringBuilder();
+                    for (Object o : l) {
+                        BigDecimal x;
+                        try {
+                            x = new BigDecimal(String.valueOf(o));
+                        } catch (NumberFormatException e) {
+                            throw new Http.Fail(400, "bad_options", "options: the ids of the options");
+                        }
+                        sb.append(sb.length() > 0 ? "," : "").append(x.toBigInteger());
+                    }
+                    csv = sb.length() > 0 ? sb.toString() : null;
+                } else if (opts != null) {
+                    throw new Http.Fail(400, "bad_options", "options: a list of the ids of the options");
+                }
+                scan(c, reg, (String) it.get(0).get("code"), Http.decimal(in, "qty", BigDecimal.ONE), csv);
                 return state(c, reg);
             }
             case "warehouse" -> {               // the warehouse of the register: its sales from there (MANAGER)
@@ -400,6 +418,11 @@ final class Pos {
 
     /** as the form: an item (its qty; a card of mobile: one, the oldest), or a card by its serial */
     private static void scan(Connection c, long reg, String code, BigDecimal qty) throws SQLException {
+        scan(c, reg, code, qty, null);
+    }
+
+    /** an item with options (the ids, comma separated; null: none chosen, the defaults of its groups) */
+    private static void scan(Connection c, long reg, String code, BigDecimal qty, String options) throws SQLException {
         if (openZ(c, reg) == null) {
             throw new Http.Fail(409, "z_closed", "Το ταμείο δεν έχει ανοιχτό Ζ: «Άνοιγμα Ζ»");
         }
@@ -447,11 +470,19 @@ final class Pos {
             if (qty.signum() <= 0) {
                 throw new Http.Fail(400, "bad_number", "qty: more than 0");
             }
-            try (CallableStatement cs = c.prepareCall("begin ? := mm_core.add_line(?, ?, ?); end;")) {
+            // an item with options (a coffee: sugar, milk): its line through add_line_options (the defaults)
+            boolean withOptions = options != null || ((BigDecimal) Db.rows(c, """
+                    select count(*) n from mm_item_option io join mm_option_group g on g.id = io.group_id
+                    where io.item_id = ? and g.active = 'Y'""", v).get(0).get("n")).signum() > 0;
+            try (CallableStatement cs = c.prepareCall(withOptions
+                    ? "begin ? := mm_core.add_line_options(?, ?, ?, ?); end;" : "begin ? := mm_core.add_line(?, ?, ?); end;")) {
                 cs.registerOutParameter(1, Types.NUMERIC);
                 cs.setLong(2, d);
                 cs.setObject(3, v);
                 cs.setBigDecimal(4, qty);
+                if (withOptions) {
+                    cs.setString(5, options);
+                }
                 cs.execute();
             }
         }
@@ -499,6 +530,13 @@ final class Pos {
         out.put("due", due);
         out.put("given", given);
         out.put("change", change);
+        // the number at the counter (an item of the buttons of the till: a cafe), of the day
+        try (CallableStatement cs = c.prepareCall("begin ? := mm_core.counter_ticket(?); end;")) {
+            cs.registerOutParameter(1, Types.NUMERIC);
+            cs.setLong(2, d);
+            cs.execute();
+            out.put("ticket_no", cs.getObject(1));
+        }
         return out;
     }
 
@@ -536,7 +574,7 @@ final class Pos {
                     from mm_customer where id = ?""", r.get("total"), points(c).get("per_euro"), cust).get(0));
             r.put("lines", Db.rows(c, """
                     select l.id, l.line_no, i.code, i.name, i.unit, i.serial_tracked, l.qty, l.price, l.discount,
-                           l.total,
+                           l.total, l.options,
                            (select listagg(s.serial, ', ') within group (order by s.serial) from mm_serial s
                             where s.out_line_id = l.id) serials
                     from mm_doc_line l join mm_item i on i.id = l.item_id
@@ -545,7 +583,7 @@ final class Pos {
         }
         out.put("points", points(c));
         out.put("last", z == null ? List.of() : Db.rows(c, """
-                select id, doc_no, created_at, payment, total, status from mm_doc
+                select id, doc_no, created_at, payment, total, status, ticket_no from mm_doc
                 where z_id = ? and doc_type = 'ALP' and status in ('P', 'C')
                 order by id desc fetch first 5 rows only""", z));
         return out;
@@ -580,7 +618,8 @@ final class Pos {
                        d.disc_amount, d.disc_reason, d.points_used, cu.name customer, cu.card, cu.points,
                        (select nvl(sum(m.points), 0) from mm_points m where m.doc_id = d.id
                           and m.note = 'Αγορά') points_earned,
-                       (select nvl(max(us.full_name), d.posted_by) from mm_user us where us.username = d.posted_by) cashier
+                       (select nvl(max(us.full_name), d.posted_by) from mm_user us where us.username = d.posted_by) cashier,
+                       d.ticket_no
                 from mm_doc d join mm_register r on r.id = d.register_id left join mm_z z on z.id = d.z_id
                 left join mm_customer cu on cu.id = d.customer_id
                 where d.id = ? and d.register_id = ? and d.doc_type = 'ALP' and d.status in ('P', 'C')""", id, reg);
@@ -590,7 +629,8 @@ final class Pos {
         Map<String, Object> out = new LinkedHashMap<>(h.get(0));
         out.putAll(settings(c));
         out.put("lines", Db.rows(c, """
-                select l.id, i.code, i.name, i.unit, l.qty, l.price, l.discount, l.vat_code, l.vat_rate, l.total
+                select l.id, i.code, i.name, i.unit, l.qty, l.price, l.discount, l.vat_code, l.vat_rate, l.total,
+                       l.options, case when exists (select 1 from mm_tile t where t.item_id = l.item_id) then 'Y' else 'N' end counter
                 from mm_doc_line l join mm_item i on i.id = l.item_id
                 where l.doc_id = ? order by l.line_no""", id));
         out.put("vat_rows", Db.rows(c, """

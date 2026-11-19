@@ -1728,12 +1728,20 @@ async function posPage(params) {
   let tileTab = store('mm.tileGroup', null);
   const tilesOn = el('input', { type: 'checkbox', name: 'tiles_on', checked: store('mm.tiles', true) !== false });
   const tilesBox = el('div', { class: 'panel tiles' });
-  const press = async (t) => {
-    const r = await run('/item', { item_id: t.item_id, qty: Number(n.value || 1) });
+  const optGroups = new Map((tiles.options || []).map((g) => [g.id, g]));
+  const put = async (t, q, options) => {
+    const r = await run('/item', { item_id: t.item_id, qty: q, options });
     if (r) {
       n.value = '1';
       change.textContent = '';
     }
+    return r;
+  };
+  // an item with options (a coffee: sugar, milk, extras): a dialog, big buttons, the defaults chosen
+  const press = (t) => {
+    const groups = (t.option_groups || []).map((id) => optGroups.get(id)).filter((g) => g && g.options.length);
+    if (!groups.length) return put(t, Number(n.value || 1));
+    return chooseOptions(t, groups, Number(n.value || 1), put);
   };
   const drawTiles = () => {
     if (!tileTabs.length) return;
@@ -1829,7 +1837,8 @@ async function posPage(params) {
       r.lines.map((x) => {
         const setQ = (q) => run(`/lines/${x.id}`, { qty: q });
         return el('tr', {}, el('td', {}, x.line_no),
-          el('td', { class: 'wrap' }, `${x.code} ${x.name}`, x.serials ? el('div', { class: 'muted' }, x.serials) : null),
+          el('td', { class: 'wrap' }, `${x.code} ${x.name}`, x.options ? el('div', { class: 'line-options' }, x.options) : null,
+            x.serials ? el('div', { class: 'muted' }, x.serials) : null),
           num(x.qty, qty), num(x.price), num(x.total),
           el('td', { class: 'num' },
             x.serial_tracked === 'Y' ? null : el('button', { type: 'button', 'aria-label': 'Μία λιγότερη', disabled: x.qty <= 1, onclick: () => setQ(x.qty - 1) }, '−'),
@@ -1837,10 +1846,11 @@ async function posPage(params) {
             el('button', { type: 'button', class: 'danger', 'aria-label': 'Σβήσε τη γραμμή', onclick: () => setQ(0) }, '×')));
       })) : el('p', { class: 'muted' }, z ? 'Σάρωσε το πρώτο είδος.' : ''));
     last.replaceChildren(st.last.length ? el('div', {}, el('h2', {}, 'Τελευταίες αποδείξεις'),
-      table([['Αριθμός'], ['Ώρα'], ['Πληρωμή'], ['Ποσό', 'num'], ['']], st.last.map((x) => el('tr', {},
-        el('td', {}, 'ΑΛΠ ' + x.doc_no + (x.status === 'C' ? ' (ακυρώθηκε)' : '')), el('td', {}, day(x.created_at)),
-        el('td', {}, x.payment === 'CARD' ? 'κάρτα' : 'μετρητά'), num(x.total),
-        el('td', { class: 'num' }, el('button', { type: 'button', 'aria-label': 'Εκτύπωση ΑΛΠ ' + x.doc_no, onclick: () => printReceipt(posReg, x.id) }, '🖨')))))) : '');
+      table([['Αριθμός'], ['Πάγκος'], ['Ώρα'], ['Πληρωμή'], ['Ποσό', 'num'], ['']], st.last.map((x) => el('tr', {},
+        el('td', {}, 'ΑΛΠ ' + x.doc_no + (x.status === 'C' ? ' (ακυρώθηκε)' : '')), el('td', {}, x.ticket_no ? '#' + x.ticket_no : ''),
+        el('td', {}, day(x.created_at)), el('td', {}, x.payment === 'CARD' ? 'κάρτα' : 'μετρητά'), num(x.total),
+        el('td', { class: 'num' }, el('button', { type: 'button', 'aria-label': 'Εκτύπωση ΑΛΠ ' + x.doc_no, onclick: () => printReceipt(posReg, x.id) }, '🖨'),
+          x.ticket_no ? el('button', { type: 'button', 'aria-label': 'Χαρτάκι πάγκου #' + x.ticket_no, title: 'Χαρτάκι πάγκου', onclick: () => printReceipt(posReg, x.id, { only: 'ticket' }) }, '🎫') : null))))) : '');
   };
   const scan = el('form', {
     class: 'panel row scan',
@@ -1848,6 +1858,13 @@ async function posPage(params) {
       ev.preventDefault();
       const v = code.value.trim();
       if (!v) return;
+      // the PLU of a button with options: its dialog
+      const byPlu = /^\d{1,5}$/.test(v) && tileTabs.flatMap((g) => g.tiles).find((t) => String(t.plu) === String(Number(v)));
+      if (byPlu && (byPlu.option_groups || []).length) {
+        code.value = '';
+        press(byPlu);
+        return;
+      }
       const r = await run('/scan', { code: v, qty: Number(n.value || 1) });
       if (r) {
         code.value = '';
@@ -1926,8 +1943,9 @@ async function posPage(params) {
       const p = r.paid;
       const print = () => printReceipt(posReg, p.id, { given: p.given, change: p.change });
       change.replaceChildren(p.change !== null ? 'Ρέστα: ' + money(p.change) + ' ' : '',
+        p.ticket_no ? el('span', { class: 'counter-no', title: 'Ο αριθμός του πελάτη στον πάγκο' }, '#' + p.ticket_no) : null,
         el('button', { type: 'button', class: 'print-btn', onclick: print }, 'Εκτύπωση απόδειξης'));
-      toast(`Απόδειξη ${p.doc_no} καταχωρήθηκε: ${money(p.total)}`);
+      toast(`Απόδειξη ${p.doc_no} καταχωρήθηκε: ${money(p.total)}` + (p.ticket_no ? ` · πάγκος #${p.ticket_no}` : ''));
       if (autoPrint.checked) print();
     }
   };
@@ -1975,6 +1993,68 @@ async function posPage(params) {
   if (params && params.get('order') && st && st.z) loadOrder(Number(params.get('order')));
 }
 
+// -- the options of an item at the till (a coffee: Ζάχαρη one of them, Γάλα, Έξτρα any): a modal dialog, a
+// group a row of big buttons (aria-pressed), the defaults chosen; a group of one: a press chooses it (again:
+// none, unless required); the quantity; the price with the extras; Enter or «Βάλε», Esc out
+function chooseOptions(t, groups, q0, put) {
+  const chosen = new Set();
+  groups.forEach((g) => g.options.forEach((o) => { if (o.is_default === 'Y') chosen.add(o.id); }));
+  const dlg = el('dialog', { class: 'options-dialog', 'aria-label': 'Επιλογές: ' + t.name });
+  let q = q0 > 0 ? q0 : 1;
+  const qText = el('span', { class: 'opt-qty', 'aria-live': 'polite' });
+  const price = el('strong', { class: 'opt-price' });
+  const msg = el('p', { class: 'opt-msg', role: 'alert' });
+  const rows = groups.map((g) => {
+    const btns = g.options.map((o) => el('button', {
+      type: 'button', class: 'opt', 'data-id': o.id,
+      onclick: () => {
+        if (chosen.has(o.id)) {
+          if (!(g.pick === 'O' && g.required === 'Y')) chosen.delete(o.id);
+        } else {
+          if (g.pick === 'O') g.options.forEach((x) => chosen.delete(x.id));
+          chosen.add(o.id);
+        }
+        draw();
+      },
+    }, o.name, o.price > 0 ? el('span', { class: 'opt-extra' }, '+' + money(o.price)) : null));
+    return { g, btns, row: el('fieldset', { class: 'opt-group' }, el('legend', {}, g.name, g.required === 'Y' ? ' *' : '',
+      el('span', { class: 'muted' }, g.pick === 'M' ? ' (όσα θέλεις)' : ' (ένα)')), el('div', { class: 'opt-row' }, btns)) };
+  });
+  const draw = () => {
+    let extra = 0;
+    rows.forEach(({ g, btns }) => btns.forEach((b, k) => {
+      const on = chosen.has(g.options[k].id);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      if (on) extra += g.options[k].price;
+    }));
+    qText.textContent = `× ${q}`;
+    price.textContent = money((t.price + extra) * q) + ' €';
+  };
+  const close = () => { dlg.close(); dlg.remove(); };
+  const ok = async () => {
+    const missing = rows.find(({ g }) => g.required === 'Y' && !g.options.some((o) => chosen.has(o.id)));
+    if (missing) { msg.textContent = 'Διάλεξε: ' + missing.g.name; return; }
+    const ids = rows.flatMap(({ g }) => g.options.filter((o) => chosen.has(o.id)).map((o) => o.id));
+    if (await put(t, q, ids)) close();
+  };
+  dlg.append(el('form', {
+    method: 'dialog',
+    onsubmit: (ev) => { ev.preventDefault(); ok(); },
+  }, el('h2', {}, t.name, ' ', el('span', { class: 'muted' }, money(t.price) + ' €')),
+  rows.map((r) => r.row), msg,
+  el('div', { class: 'row opt-foot' },
+    el('button', { type: 'button', 'aria-label': 'Μία λιγότερη', onclick: () => { if (q > 1) { q -= 1; draw(); } } }, '−'), qText,
+    el('button', { type: 'button', 'aria-label': 'Μία ακόμα', onclick: () => { q += 1; draw(); } }, '+'),
+    el('span', { class: 'grow' }), price,
+    el('button', { type: 'button', onclick: close }, 'Άκυρο'),
+    el('button', { type: 'submit', class: 'primary' }, 'Βάλε στην απόδειξη'))));
+  dlg.addEventListener('cancel', (ev) => { ev.preventDefault(); close(); });
+  document.body.append(dlg);
+  draw();
+  dlg.showModal();
+  dlg.querySelector('button[type=submit]').focus();
+}
+
 // a color of a group of buttons on an element (CSSOM: the CSP allows no style attribute)
 function paint(e, color) {
   e.style.setProperty('--tile', color);
@@ -1998,7 +2078,51 @@ async function tilesPage() {
       return true;
     } catch (e) { fail(e); return false; }
   };
-  draw = (r) => out.replaceChildren(...(r.groups.length ? r.groups.map((g, gi) => {
+  draw = (r) => { drawTiles(r); drawOptions(r); };
+  // the options: groups (one of them / any, required, active, the order), their options (a price with VAT,
+  // the default of a group of one, active, the order); which items have which: in each tile above
+  const opts = el('div');
+  const oName = el('input', { name: 'optgroup_name', maxlength: 40, placeholder: 'π.χ. Ζάχαρη' });
+  const oPick = el('select', { name: 'optgroup_pick', 'aria-label': 'Πόσες' }, el('option', { value: 'O' }, 'μία από αυτές'), el('option', { value: 'M' }, 'όσες θέλεις'));
+  const oReq = el('input', { type: 'checkbox', name: 'optgroup_required' });
+  const drawOptions = (r) => opts.replaceChildren(...(r.options || []).map((g, gi) => {
+    const nm = el('input', { value: g.name, maxlength: 40, 'aria-label': 'Όνομα επιλογών ' + g.name, disabled: !w });
+    const pk = el('select', { 'aria-label': 'Πόσες: ' + g.name, disabled: !w },
+      el('option', { value: 'O', selected: g.pick === 'O' }, 'μία από αυτές'), el('option', { value: 'M', selected: g.pick === 'M' }, 'όσες θέλεις'));
+    const rq = el('input', { type: 'checkbox', checked: g.required === 'Y', 'aria-label': 'Υποχρεωτική: ' + g.name, disabled: !w });
+    const on = el('input', { type: 'checkbox', checked: g.active === 'Y', 'aria-label': 'Ενεργή: ' + g.name, disabled: !w });
+    const newName = el('input', { name: 'option_name', maxlength: 40, placeholder: 'π.χ. Μέτριος', 'aria-label': 'Νέα επιλογή στο ' + g.name });
+    const newPrice = el('input', { name: 'option_price', type: 'number', step: '0.01', min: '0', value: '0', class: 'w6', 'aria-label': 'Τιμή νέας επιλογής' });
+    const newDef = el('input', { type: 'checkbox', name: 'option_default', 'aria-label': 'Προεπιλογή νέας επιλογής' });
+    return el('section', { class: 'panel opt-admin' + (g.active === 'Y' ? '' : ' cancelled') },
+      el('div', { class: 'row' }, el('label', { class: 'grow' }, 'Επιλογές', nm), el('label', {}, 'Πόσες', pk),
+        el('label', { class: 'check' }, rq, 'Υποχρεωτική'), el('label', { class: 'check' }, on, 'Ενεργή'),
+        w ? el('button', { type: 'button', onclick: () => call('tiles/options/' + g.id, { name: nm.value.trim(), pick: pk.value, required: rq.checked, active: on.checked }, 'Αποθηκεύτηκε') }, 'Αποθήκευση') : null,
+        w ? el('button', { type: 'button', 'aria-label': 'Πιο πάνω: ' + g.name, disabled: gi === 0, onclick: () => call(`tiles/options/${g.id}/move`, { dir: -1 }) }, '↑') : null,
+        w ? el('button', { type: 'button', 'aria-label': 'Πιο κάτω: ' + g.name, disabled: gi === r.options.length - 1, onclick: () => call(`tiles/options/${g.id}/move`, { dir: 1 }) }, '↓') : null,
+        w ? el('button', { type: 'button', class: 'danger', onclick: () => { if (confirm(`Να φύγουν οι επιλογές «${g.name}»;`)) call(`tiles/options/${g.id}/delete`, {}, 'Έφυγαν'); } }, 'Διαγραφή') : null),
+      g.options.length ? table([['Επιλογή'], ['Έξτρα €', 'num'], ['Προεπιλογή'], ['Ενεργή'], ['']], g.options.map((o, oi) => {
+        const on2 = el('input', { value: o.name, maxlength: 40, 'aria-label': 'Όνομα: ' + o.name, disabled: !w });
+        const pr = el('input', { type: 'number', step: '0.01', min: '0', value: o.price, class: 'w6', 'aria-label': 'Έξτρα: ' + o.name, disabled: !w });
+        const df = el('input', { type: 'checkbox', checked: o.is_default === 'Y', 'aria-label': 'Προεπιλογή: ' + o.name, disabled: !w });
+        const ac = el('input', { type: 'checkbox', checked: o.active === 'Y', 'aria-label': 'Ενεργή: ' + o.name, disabled: !w });
+        return el('tr', { class: o.active === 'Y' ? null : 'cancelled' }, el('td', {}, on2), el('td', { class: 'num' }, pr), el('td', {}, df), el('td', {}, ac),
+          el('td', { class: 'num' }, w ? [
+            el('button', { type: 'button', onclick: () => call('tiles/option/' + o.id, { name: on2.value.trim(), price: Number(pr.value || 0), default: df.checked, active: ac.checked }, 'Αποθηκεύτηκε: ' + on2.value.trim()) }, 'Αποθήκευση'),
+            el('button', { type: 'button', 'aria-label': 'Πιο πάνω: ' + o.name, disabled: oi === 0, onclick: () => call(`tiles/option/${o.id}/move`, { dir: -1 }) }, '↑'),
+            el('button', { type: 'button', 'aria-label': 'Πιο κάτω: ' + o.name, disabled: oi === g.options.length - 1, onclick: () => call(`tiles/option/${o.id}/move`, { dir: 1 }) }, '↓'),
+            el('button', { type: 'button', class: 'danger', 'aria-label': 'Έξω: ' + o.name, onclick: () => call(`tiles/option/${o.id}/delete`, {}, 'Έξω: ' + o.name) }, '×')] : null));
+      })) : el('p', { class: 'muted' }, 'Καμία επιλογή ακόμα.'),
+      w ? el('form', {
+        class: 'row',
+        onsubmit: (ev) => {
+          ev.preventDefault();
+          if (newName.value.trim()) call(`tiles/options/${g.id}/add`, { name: newName.value.trim(), price: Number(newPrice.value || 0), default: newDef.checked }, 'Νέα επιλογή: ' + newName.value.trim());
+        },
+      }, el('label', { class: 'grow' }, 'Νέα επιλογή', newName), el('label', {}, 'Έξτρα €', newPrice), el('label', { class: 'check' }, newDef, 'Προεπιλογή'),
+      el('button', { type: 'submit' }, 'Βάλε')) : null);
+  }));
+  const drawTiles = (r) => out.replaceChildren(...(r.groups.length ? r.groups.map((g, gi) => {
     const nm = el('input', { value: g.name, maxlength: 40, 'aria-label': 'Όνομα ομάδας ' + g.name, disabled: !w });
     const col = el('input', { type: 'color', value: g.color, class: 'color', 'aria-label': 'Χρώμα ' + g.name, disabled: !w });
     const on = el('input', { type: 'checkbox', checked: g.active === 'Y', 'aria-label': 'Ενεργή ' + g.name, disabled: !w });
@@ -2017,9 +2141,15 @@ async function tilesPage() {
         const p = el('input', { type: 'number', min: 1, max: 99999, step: 1, class: 'w6', value: t.plu ?? '', 'aria-label': 'PLU ' + t.name, disabled: !canPlu });
         p.addEventListener('change', () => call('tiles/plu', { code: t.code, plu: p.value === '' ? null : Number(p.value) },
           p.value === '' ? 'Χωρίς PLU: ' + t.name : `PLU ${p.value}: ${t.name}`));
+        const og = (r.options || []).length ? el('div', { class: 'tile-opts' }, r.options.map((o) => el('label', { class: 'check' },
+          el('input', {
+            type: 'checkbox', checked: (t.option_groups || []).includes(o.id), disabled: !w, 'aria-label': `${o.name}: ${t.name}`,
+            onchange: (ev) => call('tiles/item-options', { code: t.code, group_id: o.id, on: ev.target.checked },
+              (ev.target.checked ? 'Με ' : 'Χωρίς ') + o.name + ': ' + t.name),
+          }), o.name))) : null;
         return paint(el('div', { class: 'tile' + (t.active === 'Y' ? '' : ' cancelled') },
           el('span', { class: 'tile-name' }, t.name), el('span', { class: 'tile-price' }, `${t.code} · ${money(t.price)} €`),
-          el('label', { class: 'tile-plu-edit' }, 'PLU', p),
+          el('label', { class: 'tile-plu-edit' }, 'PLU', p), og,
           w ? el('div', { class: 'row tile-tools' },
             el('button', { type: 'button', 'aria-label': 'Πιο πριν: ' + t.name, disabled: ti === 0, onclick: () => call(`tiles/${t.id}/move`, { dir: -1 }) }, '←'),
             el('button', { type: 'button', 'aria-label': 'Πιο μετά: ' + t.name, disabled: ti === g.tiles.length - 1, onclick: () => call(`tiles/${t.id}/move`, { dir: 1 }) }, '→'),
@@ -2041,7 +2171,20 @@ async function tilesPage() {
         if (nmv && await call('tiles/groups', { name: nmv, color: color.value }, 'Νέα ομάδα ' + nmv)) name.value = '';
       },
     }, el('label', { class: 'grow' }, 'Νέα ομάδα', name), el('label', {}, 'Χρώμα', color), el('button', { class: 'primary', type: 'submit' }, 'Νέα ομάδα')) : null,
-    out);
+    out,
+    el('h2', {}, 'Επιλογές (ζάχαρη, γάλα, έξτρα)'),
+    el('p', { class: 'muted' }, 'Στο Ταμείο, ένα κουμπί με επιλογές ανοίγει ένα παράθυρο: «μία από αυτές» (π.χ. σκέτος / μέτριος / γλυκός) ή «όσες θέλεις» (π.χ. έξτρα σφηνάκι, σιρόπι). '
+      + 'Μια υποχρεωτική μπαίνει πάντα (η προεπιλογή, αν δεν διαλέξεις). Το έξτρα (με ΦΠΑ) μπαίνει στην τιμή της γραμμής. Ποιο είδος έχει ποιες: στα κουμπιά παραπάνω.'),
+    w ? el('form', {
+      class: 'panel row',
+      onsubmit: (ev) => {
+        ev.preventDefault();
+        const v = oName.value.trim();
+        if (v) call('tiles/options', { name: v, pick: oPick.value, required: oReq.checked }, 'Νέες επιλογές: ' + v).then((done) => { if (done) oName.value = ''; });
+      },
+    }, el('label', { class: 'grow' }, 'Νέα ομάδα επιλογών', oName), el('label', {}, 'Πόσες', oPick), el('label', { class: 'check' }, oReq, 'Υποχρεωτική'),
+    el('button', { class: 'primary', type: 'submit' }, 'Νέες επιλογές')) : null,
+    opts);
   try { draw(await api('tiles')); } catch (e) { fail(e); }
 }
 
@@ -2081,7 +2224,8 @@ async function printReceipt(reg, id, extra = {}) {
     r.cashier ? pair('Ταμίας', r.cashier) : null,
     r.status === 'C' ? el('div', { class: 'rc-title' }, '*** ΑΚΥΡΩΘΗΚΕ ***') : null,
     el('hr'),
-    r.lines.map((x) => el('div', { class: 'rc-line' }, el('div', {}, x.name),
+    r.ticket_no ? el('div', { class: 'rc-title' }, 'Αριθμός στον πάγκο: #' + r.ticket_no) : null,
+    r.lines.map((x) => el('div', { class: 'rc-line' }, el('div', {}, x.name), x.options ? el('div', { class: 'rc-opt' }, x.options) : null,
       pair(`${nfQty.format(x.qty)} x ${money(x.price)}` + (x.discount > 0 ? ` -${nfQty.format(x.discount)}%` : ''), money(x.total) + ' ' + x.vat_code))),
     el('hr'),
     r.disc_amount > 0 ? pair('Έκπτωση' + (r.disc_reason ? ' (' + r.disc_reason + ')' : ''), '-' + money(r.disc_amount)) : null,
@@ -2097,6 +2241,16 @@ async function printReceipt(reg, id, extra = {}) {
       r.points_used > 0 ? pair('Πόντοι που εξαργυρώθηκαν', '-' + r.points_used) : null,
       pair('Πόντοι από αυτή την αγορά', '+' + r.points_earned), pair('Πόντοι τώρα', String(r.points))] : null,
     el('div', { class: 'rc-foot' }, lines(r.footer)));
+  // the ticket of the counter (a cafe): its number big, the time, what to make, with the options; under the
+  // receipt after a cut, or alone (🎫)
+  const bar = r.lines.filter((x) => x.counter === 'Y');
+  if (r.ticket_no && bar.length && r.status === 'P') {
+    const ticket = [el('div', { class: 'rc-no' }, '#' + r.ticket_no), el('div', { class: 'rc-head' }, day(r.created_at) + ' · ΑΛΠ ' + r.doc_no),
+      el('hr'), bar.map((x) => el('div', { class: 'rc-make' }, el('div', {}, el('strong', {}, nfQty.format(x.qty) + ' × '), x.name),
+        x.options ? el('div', { class: 'rc-opt' }, x.options) : null))];
+    if (extra.only === 'ticket') box.replaceChildren(...ticket);
+    else box.append(el('div', { class: 'rc-cut' }, '✂ - - - - - - - - - - - - - - - -'), ...ticket);
+  }
   const old = $('#receipt');
   if (old) old.remove();
   document.body.append(box);

@@ -330,3 +330,26 @@ button.tile:active { transform: scale(.97); }
 .tile-tools button { padding: 2px 9px; }
 .swatch { width: 18px; height: 18px; border-radius: 4px; background: var(--tile); align-self: center; flex: none; }
 input.color { width: 44px; height: 32px; padding: 2px; }
+/* the options of an item at the till: a dialog of big buttons; the options of a line; the page */
+.line-options { color: var(--muted); font-size: 13px; }
+.counter-no { display: inline-block; margin: 0 10px; padding: 2px 12px; border-radius: 8px; background: var(--ink); color: var(--bg); font-weight: 700; }
+dialog.options-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 32px); border: 1px solid var(--line); border-radius: 12px;
+                        background: var(--panel); color: var(--ink); padding: 16px; }
+dialog.options-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+dialog.options-dialog h2 { margin: 0 0 8px; }
+.opt-group { border: 0; padding: 0; margin: 0 0 12px; }
+.opt-group legend { font-weight: 600; margin-bottom: 6px; padding: 0; }
+.opt-row { display: flex; flex-wrap: wrap; gap: 8px; }
+button.opt { min-height: 48px; min-width: 96px; padding: 8px 14px; border-radius: 10px; font-weight: 600; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; }
+button.opt[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.opt-extra { font-size: 12px; font-weight: 500; opacity: .85; }
+.opt-qty { min-width: 3em; text-align: center; font-weight: 700; }
+.opt-price { font-size: 18px; margin-right: 8px; }
+.opt-msg { color: var(--bad); min-height: 1.2em; margin: 0; }
+.opt-foot { align-items: center; }
+.tile-opts { display: flex; flex-wrap: wrap; gap: 2px 10px; font-weight: 500; font-size: 13px; }
+/* the ticket of the counter, under the receipt or alone */
+.rc-opt { font-size: 11px; padding-left: 8px; }
+.rc-cut { text-align: center; margin: 10px 0 6px; letter-spacing: 1px; }
+.rc-no { text-align: center; font-size: 34px; font-weight: 800; line-height: 1.1; }
+.rc-make { font-size: 14px; margin: 3px 0; }

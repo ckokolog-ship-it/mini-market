@@ -72,6 +72,11 @@ async function lines(page) {      // [item, quantity] of each line of the receip
   const swatch = await page.$eval(`${grp} .swatch`, (s) => getComputedStyle(s).backgroundColor);
   ok(swatch === 'rgb(139, 90, 43)', 'the color of the group: ' + swatch);
   if (SHOTS) await page.screenshot({ path: SHOTS + '/tiles.png', fullPage: true });
+  // the options: their groups on the page, and on each tile which of them it has
+  const optNames = await page.$$eval('section.opt-admin input[aria-label^="Όνομα επιλογών"]', (x) => x.map((y) => y.value));
+  ok(optNames.join(',') === 'Ζάχαρη,Γάλα,Έξτρα', 'the options of the demo: ' + optNames.join(','));
+  ok(await page.isChecked('input[aria-label="Ζάχαρη: Freddo espresso"]') && !(await page.isChecked('input[aria-label="Γάλα: Freddo espresso"]')),
+    'a tile: which options it has');
 
   // the cashier: no page of the buttons; the till with them
   await login(page, CASHIER);
@@ -101,6 +106,32 @@ async function lines(page) {      // [item, quantity] of each line of the receip
   ok(ls.length === 2 && ls[0][0].includes(ITEM_B) && ls[0][1] === '2' && ls[1][0].includes(ITEM) && ls[1][1] === '1',
     'the receipt: B ×2 by its button, A by its PLU: ' + JSON.stringify(ls));
   if (SHOTS) await page.screenshot({ path: SHOTS + '/pos_tiles.png', fullPage: true });
+  // a coffee with options: the dialog, the default chosen, a choice of one, an extra, ×2; its line
+  await page.click('.tile-tab:has-text("Καφέδες")');
+  await page.click('.tile-grid button.tile:has-text("Freddo espresso")');
+  await page.waitForSelector('dialog.options-dialog[open]');
+  ok((await page.getAttribute('dialog button.opt:has-text("Μέτριος")', 'aria-pressed')) === 'true', 'the dialog: the default chosen');
+  await page.click('dialog button.opt:has-text("Σκέτος")');
+  ok((await page.getAttribute('dialog button.opt:has-text("Μέτριος")', 'aria-pressed')) === 'false'
+    && (await page.getAttribute('dialog button.opt:has-text("Σκέτος")', 'aria-pressed')) === 'true', 'one of a group of one');
+  await page.click('dialog button.opt:has-text("Έξτρα σφηνάκι")');
+  await page.click('dialog button.opt:has-text("Κανέλα")');
+  await page.click('dialog button[aria-label="Μία ακόμα"]');
+  ok((await page.textContent('dialog .opt-price')).startsWith('6,00'), 'the price with the extras ×2: ' + await page.textContent('dialog .opt-price'));
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/options_dialog.png' });
+  await page.click('dialog button:has-text("Βάλε στην απόδειξη")');
+  await page.waitForSelector('dialog.options-dialog', { state: 'detached' });
+  await page.waitForFunction(() => [...document.querySelectorAll('main .line-options')].some((x) => x.textContent.includes('Σφηνάκι') || x.textContent.includes('σφηνάκι')));
+  const opt = await page.$$eval('main .line-options', (x) => x.map((y) => y.textContent));
+  ok(opt.includes('Σκέτος, Έξτρα σφηνάκι +0,50, Κανέλα'), 'the line with its options: ' + opt.join(' | '));
+  // its PLU typed: the dialog too; Esc: nothing
+  await page.fill('input[name=code]', '101');
+  await page.press('input[name=code]', 'Enter');
+  await page.waitForSelector('dialog.options-dialog[open]');
+  ok(true, 'a PLU of a coffee: its dialog');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog.options-dialog', { state: 'detached' });
+  ok((await lines(page)).length === 3, 'Esc: nothing into the receipt');
   // the phone: the tiles in two columns at least, no page wider than the screen
   await page.setViewportSize({ width: 390, height: 844 });
   const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
@@ -111,8 +142,13 @@ async function lines(page) {      // [item, quantity] of each line of the receip
   await page.uncheck('input[name=tiles_on]');
   ok(await page.isHidden('.tiles'), 'the buttons off on this device');
   await page.check('input[name=tiles_on]');
-  await page.click('main button:has-text("Ακύρωση απόδειξης")');
-  await page.waitForFunction(() => !document.querySelector('main table tbody tr'));
+  // paid: its number at the counter, big, and in the last receipts
+  await page.click('main button:has-text("Κάρτα (F8)")');
+  await page.waitForSelector('.counter-no');
+  const no = await page.textContent('.counter-no');
+  ok(/^#\d+$/.test(no), 'paid: its number at the counter ' + no);
+  ok((await page.textContent('main')).includes('Πάγκος'), 'the last receipts: their number');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/pos_paid.png', fullPage: true });
 
   ok(errors.length === 0, 'no errors in the browser: ' + errors.join(' | '));
   await browser.close();
