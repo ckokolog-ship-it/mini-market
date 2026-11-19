@@ -117,9 +117,13 @@ def test_the_short_numbers(tst_groups):
     db.proc('set_plu', ids['a'], free)                                            # (its own again: fine)
     for bad in (0, 100000, 1.5):
         assert '1 ως 99999' in fails(db, 'set_plu', ids['b'], bad)
-    # a number that is the barcode or the code of another item: refused (the scan finds that one first)
-    db.cur.execute("update mm_item set barcode = :c where id = :i", c=str(free + 1), i=ids['b'])
-    assert 'είναι ήδη άλλου είδους' in fails(db, 'set_plu', ids['a'], free + 1)
+    # a number that is the code of another item: refused (the scan finds that one first; a barcode is an
+    # EAN of 8 or 13 digits, never a PLU of up to 5)
+    cat = db.one('select min(id) from mm_category')[0]
+    db.cur.execute("insert into mm_item (code, name, category_id, vat_code, price, cost) "
+                   "values (:c, 'Test με αριθμό για κωδικό', :cat, 'B', 1, 0)", c=str(free + 1), cat=cat)
+    assert 'είναι ήδη άλλου είδους' in fails(db, 'set_plu', ids['a'], free + 1)    # (rolled back: the item too)
+    assert db.one('select count(*) from mm_item where code = :c', c=str(free + 1))[0] == 0
     assert 'MM-106' in fails(db, 'set_plu', -1, free + 2)
     db.proc('set_plu', ids['a'], None)
     db.commit()

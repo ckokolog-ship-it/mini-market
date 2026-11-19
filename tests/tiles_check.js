@@ -22,8 +22,8 @@ async function login(page, user) {
   await page.waitForSelector('#nav a', { state: 'attached' });
 }
 
-async function lines(page) {
-  return page.$$eval('main table tbody tr', (rs) => rs.map((r) => r.textContent));
+async function lines(page) {      // [item, quantity] of each line of the receipt
+  return page.$$eval('main table tbody tr', (rs) => rs.map((r) => [r.cells[1].textContent, r.cells[2].textContent]));
 }
 
 (async () => {
@@ -42,7 +42,8 @@ async function lines(page) {
   await page.goto(BASE + '/web/#/tiles');
   await page.waitForSelector('main h1:has-text("Κουμπιά ταμείου")');
   await page.waitForSelector('section.tile-group');
-  ok((await page.textContent('main')).includes('Καφέδες'), 'the groups of the demo');
+  const groupNames = await page.$$eval('section.tile-group input[aria-label^="Όνομα ομάδας"]', (x) => x.map((y) => y.value));
+  ok(groupNames.includes('Καφέδες'), 'the groups of the demo: ' + groupNames.join(', '));
   await page.fill('input[name=group_name]', 'TST Γλυκά <b>x</b>');
   await page.click('form button:has-text("Νέα ομάδα")');
   const grp = 'section.tile-group:has(input[value="TST Γλυκά <b>x</b>"])';
@@ -97,7 +98,8 @@ async function lines(page) {
   await page.press('input[name=code]', 'Enter');
   await page.waitForFunction((c) => [...document.querySelectorAll('main table tbody tr')].some((r) => r.textContent.includes(c)), ITEM);
   const ls = await lines(page);
-  ok(ls.length === 2 && ls[0].includes(ITEM_B) && /\b2\b/.test(ls[0]) && ls[1].includes(ITEM), 'the receipt: B ×2 by its button, A by its PLU');
+  ok(ls.length === 2 && ls[0][0].includes(ITEM_B) && ls[0][1] === '2' && ls[1][0].includes(ITEM) && ls[1][1] === '1',
+    'the receipt: B ×2 by its button, A by its PLU: ' + JSON.stringify(ls));
   if (SHOTS) await page.screenshot({ path: SHOTS + '/pos_tiles.png', fullPage: true });
   // the phone: the tiles in two columns at least, no page wider than the screen
   await page.setViewportSize({ width: 390, height: 844 });

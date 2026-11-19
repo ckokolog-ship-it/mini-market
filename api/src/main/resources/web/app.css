@@ -325,6 +325,8 @@ button.tile:active { transform: scale(.97); }
 .tile-qty { margin-top: 10px; }
 .tile-grid.edit .tile { min-height: 0; }
 .tile-plu-edit { font-weight: 500; }
+.tile-grid.edit { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.tile-tools { flex-wrap: nowrap; gap: 4px; }
 .tile-tools button { padding: 2px 9px; }
 .swatch { width: 18px; height: 18px; border-radius: 4px; background: var(--tile); align-self: center; flex: none; }
 input.color { width: 44px; height: 32px; padding: 2px; }
