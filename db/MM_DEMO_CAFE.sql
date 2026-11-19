@@ -11,8 +11,9 @@
 --
 --   sqlplus mm/<password>@FREEPDB1 @MM_DEMO_CAFE.sql
 --
--- Only what is missing is added: the items by code, the buttons and the options only if there are none yet,
--- the recipes and the delivery note only once.
+-- Only what is missing is added: the items by code (a PLU taken by another item: none), the groups of buttons
+-- and of options by name, the tiles and the options missing in them; the recipes and the delivery note once.
+-- What the shop has made already (its own buttons and options) stays as it is.
 set define off
 whenever sqlerror exit failure rollback
 
@@ -22,7 +23,8 @@ whenever sqlerror exit failure rollback
 insert into mm_category (name)
 select 'Καφέ πάγκου' from dual where not exists (select 1 from mm_category where name = 'Καφέ πάγκου');
 insert into mm_item (code, barcode, name, category_id, vat_code, unit, price, cost, min_stock, plu)
-select v.code, null, v.name, c.id, v.vat_code, 'PCS', v.price, v.cost, 0, v.plu
+select v.code, null, v.name, c.id, v.vat_code, 'PCS', v.price, v.cost, 0,
+       case when not exists (select 1 from mm_item p where p.plu = v.plu) then v.plu end   -- (a PLU taken: none)
 from (values
   ('CAF01', 'Freddo espresso',          'B', 2.50, 0.45, 101),
   ('CAF02', 'Freddo cappuccino',        'B', 3.00, 0.60, 102),
@@ -44,66 +46,80 @@ from (values
 join mm_category c on c.name = 'Καφέ πάγκου'
 where not exists (select 1 from mm_item i where i.code = v.code);
 
+-- the groups of buttons, by name: one missing made; in each, the items of the cafe it does not have yet
 declare
   g number;
-  n number;
   t number;
 begin
-  select count(*) into n from mm_tile_group;
-  if n = 0 then
-    for x in (select 'Καφέδες' name, '#8b5a2b' color, 'CAF0' pfx from dual union all
-              select 'Χυμοί', '#e08a00', 'CAF2' from dual union all
-              select 'Σνακ και γλυκά', '#b4436c', 'CAF4' from dual) loop
+  for x in (select 'Καφέδες' name, '#8b5a2b' color, 'CAF0' pfx from dual union all
+            select 'Χυμοί', '#e08a00', 'CAF2' from dual union all
+            select 'Σνακ και γλυκά', '#b4436c', 'CAF4' from dual) loop
+    select min(id) into g from mm_tile_group where name = x.name;
+    if g is null then
       g := mm_core.tile_group_save(null, x.name, x.color, 'Y');
-      for i in (select id from mm_item where code like x.pfx || '%' order by code) loop
-        t := mm_core.tile_add(g, i.id);
-      end loop;
+    end if;
+    for i in (select id from mm_item where code like x.pfx || '%' and active = 'Y'
+              and not exists (select 1 from mm_tile k where k.group_id = g and k.item_id = mm_item.id) order by code) loop
+      t := mm_core.tile_add(g, i.id);
     end loop;
-  end if;
+  end loop;
 end;
 /
 
--- the options of the cafe (sugar, milk, extras), on its coffees
+-- the options of the cafe (sugar, milk, extras), on its coffees: by name, a group or an option missing made
+-- (those of the shop stay as they are)
 declare
   sugar number;
   milk number;
   extra number;
-  n number;
   o number;
-  function id_of(p_code varchar2) return number is
+  function grp(p_name varchar2, p_pick varchar2, p_required varchar2) return number is
     v number;
   begin
-    select id into v from mm_item where code = p_code;
+    select min(id) into v from mm_option_group where name = p_name;
+    if v is null then                   -- (not nvl: it makes both of its arguments)
+      v := mm_core.option_group_save(null, p_name, p_pick, p_required, 'Y');
+    end if;
     return v;
   end;
+  function opt(p_group number, p_name varchar2, p_price number, p_default varchar2) return number is
+    v number;
+  begin
+    select min(id) into v from mm_option where group_id = p_group and name = p_name;
+    if v is null then
+      v := mm_core.option_save(null, p_group, p_name, p_price, p_default, 'Y');
+    end if;
+    return v;
+  end;
+  procedure on_items(p_group number, p_codes sys.odcivarchar2list) is
+    v number;
+  begin
+    for i in 1 .. p_codes.count loop
+      select min(id) into v from mm_item where code = p_codes(i);
+      if v is not null then
+        mm_core.item_option(v, p_group, 'Y');
+      end if;
+    end loop;
+  end;
 begin
-  select count(*) into n from mm_option_group;
-  if n = 0 then
-    sugar := mm_core.option_group_save(null, 'Ζάχαρη', 'O', 'Y', 'Y');
-    o := mm_core.option_save(null, sugar, 'Σκέτος', 0, 'N', 'Y');
-    o := mm_core.option_save(null, sugar, 'Μέτριος', 0, 'Y', 'Y');
-    o := mm_core.option_save(null, sugar, 'Γλυκός', 0, 'N', 'Y');
-    o := mm_core.option_save(null, sugar, 'Με στέβια', 0, 'N', 'Y');
-    milk := mm_core.option_group_save(null, 'Γάλα', 'O', 'N', 'Y');
-    o := mm_core.option_save(null, milk, 'Φρέσκο', 0, 'N', 'Y');
-    o := mm_core.option_save(null, milk, 'Βρώμης', 0.30, 'N', 'Y');
-    o := mm_core.option_save(null, milk, 'Αμυγδάλου', 0.30, 'N', 'Y');
-    o := mm_core.option_save(null, milk, 'Χωρίς λακτόζη', 0.20, 'N', 'Y');
-    extra := mm_core.option_group_save(null, 'Έξτρα', 'M', 'N', 'Y');
-    o := mm_core.option_save(null, extra, 'Έξτρα σφηνάκι', 0.50, 'N', 'Y');
-    o := mm_core.option_save(null, extra, 'Σιρόπι καραμέλα', 0.30, 'N', 'Y');
-    o := mm_core.option_save(null, extra, 'Σαντιγί', 0.40, 'N', 'Y');
-    o := mm_core.option_save(null, extra, 'Κανέλα', 0, 'N', 'Y');
-    for c in (select column_value code from table(sys.odcivarchar2list('CAF01', 'CAF02', 'CAF03', 'CAF04', 'CAF05', 'CAF06'))) loop
-      mm_core.item_option(id_of(c.code), sugar, 'Y');
-    end loop;
-    for c in (select column_value code from table(sys.odcivarchar2list('CAF02', 'CAF04', 'CAF06', 'CAF07'))) loop
-      mm_core.item_option(id_of(c.code), milk, 'Y');
-    end loop;
-    for c in (select column_value code from table(sys.odcivarchar2list('CAF01', 'CAF02', 'CAF03', 'CAF04', 'CAF06', 'CAF07'))) loop
-      mm_core.item_option(id_of(c.code), extra, 'Y');
-    end loop;
-  end if;
+  sugar := grp('Ζάχαρη', 'O', 'Y');
+  o := opt(sugar, 'Σκέτος', 0, 'N');
+  o := opt(sugar, 'Μέτριος', 0, 'Y');
+  o := opt(sugar, 'Γλυκός', 0, 'N');
+  o := opt(sugar, 'Με στέβια', 0, 'N');
+  milk := grp('Γάλα', 'O', 'N');
+  o := opt(milk, 'Φρέσκο', 0, 'N');
+  o := opt(milk, 'Βρώμης', 0.30, 'N');
+  o := opt(milk, 'Αμυγδάλου', 0.30, 'N');
+  o := opt(milk, 'Χωρίς λακτόζη', 0.20, 'N');
+  extra := grp('Έξτρα', 'M', 'N');
+  o := opt(extra, 'Έξτρα σφηνάκι', 0.50, 'N');
+  o := opt(extra, 'Σιρόπι καραμέλα', 0.30, 'N');
+  o := opt(extra, 'Σαντιγί', 0.40, 'N');
+  o := opt(extra, 'Κανέλα', 0, 'N');
+  on_items(sugar, sys.odcivarchar2list('CAF01', 'CAF02', 'CAF03', 'CAF04', 'CAF05', 'CAF06'));
+  on_items(milk, sys.odcivarchar2list('CAF02', 'CAF04', 'CAF06', 'CAF07'));
+  on_items(extra, sys.odcivarchar2list('CAF01', 'CAF02', 'CAF03', 'CAF04', 'CAF06', 'CAF07'));
 end;
 /
 
@@ -140,12 +156,18 @@ declare
     select id into v from mm_item where code = p_code;
     return v;
   end;
-  function opt(p_group varchar2, p_name varchar2) return number is
+  function opt(p_group varchar2, p_name varchar2) return number is      -- (none: null)
     v number;
   begin
-    select o.id into v from mm_option o join mm_option_group g on g.id = o.group_id
+    select min(o.id) into v from mm_option o join mm_option_group g on g.id = o.group_id
     where g.name = p_group and o.name = p_name;
     return v;
+  end;
+  procedure material(p_option number, p_code varchar2, p_qty number) is
+  begin
+    if p_option is not null then
+      mm_core.option_component(p_option, id_of(p_code), p_qty);
+    end if;
   end;
 begin
   d := id_of('CAF01');                -- (a function of this block: not in SQL, PLS-00231)
@@ -178,12 +200,12 @@ begin
       mm_core.set_component(id_of(r.k), id_of(r.c), r.q);
     end loop;
     -- the materials of the options: oat or almond instead of the fresh milk, a shot more, the syrup
-    mm_core.option_component(opt('Γάλα', 'Βρώμης'), id_of('RAW05'), 0.15);
-    mm_core.option_component(opt('Γάλα', 'Βρώμης'), id_of('RAW04'), -0.15);
-    mm_core.option_component(opt('Γάλα', 'Αμυγδάλου'), id_of('RAW06'), 0.15);
-    mm_core.option_component(opt('Γάλα', 'Αμυγδάλου'), id_of('RAW04'), -0.15);
-    mm_core.option_component(opt('Έξτρα', 'Έξτρα σφηνάκι'), id_of('RAW01'), 0.009);
-    mm_core.option_component(opt('Έξτρα', 'Σιρόπι καραμέλα'), id_of('RAW10'), 0.02);
+    material(opt('Γάλα', 'Βρώμης'), 'RAW05', 0.15);
+    material(opt('Γάλα', 'Βρώμης'), 'RAW04', -0.15);
+    material(opt('Γάλα', 'Αμυγδάλου'), 'RAW06', 0.15);
+    material(opt('Γάλα', 'Αμυγδάλου'), 'RAW04', -0.15);
+    material(opt('Έξτρα', 'Έξτρα σφηνάκι'), 'RAW01', 0.009);
+    material(opt('Έξτρα', 'Σιρόπι καραμέλα'), 'RAW10', 0.02);
   end if;
 end;
 /
