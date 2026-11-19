@@ -12,7 +12,7 @@ const RANK = { CASHIER: 1, MANAGER: 2, ADMIN: 3 };
 // the pages the web has (the menu itself, its groups, their order, names: from the database, MM_RIGHTS: only
 // the screens with a page here and a right to read them)
 const MENU = [
-  ['Πωλήσεις', [['#/pos', 'Ταμείο', 'CASHIER'], ['#/orders', 'Παραγγελίες', 'CASHIER']]],
+  ['Πωλήσεις', [['#/pos', 'Ταμείο', 'CASHIER'], ['#/tiles', 'Κουμπιά ταμείου', 'MANAGER'], ['#/orders', 'Παραγγελίες', 'CASHIER']]],
   ['Αποθήκη', [['#/items', 'Είδη', 'CASHIER'], ['#/labels', 'Ετικέτες', 'CASHIER'], ['#/counts', 'Απογραφή', 'CASHIER'], ['#/scratch', 'Σκρατς', 'MANAGER'], ['#/expiry', 'Λήξεις', 'MANAGER'],
     ['#/warehouses', 'Αποθήκες', 'MANAGER']]],
   ['Διαχείριση', [['#/users', 'Χρήστες', 'ADMIN'], ['#/roles', 'Ρόλοι και δικαιώματα', 'ADMIN'], ['#/audit', 'Ιστορικό ενεργειών', 'ADMIN']]],
@@ -1708,7 +1708,7 @@ async function posPage(params) {
   let posWhs = [];
   try { posWhs = (await api('warehouses')).rows.filter((w) => w.active === 'Y'); } catch (e) { posWhs = []; }
   const zBox = el('div', { class: 'row' });
-  const code = el('input', { name: 'code', autocomplete: 'off', placeholder: 'barcode, κωδικός ή serial' });
+  const code = el('input', { name: 'code', autocomplete: 'off', placeholder: 'barcode, κωδικός, PLU ή serial' });
   const n = el('input', { name: 'qty', type: 'number', step: 'any', min: '0', value: '1', class: 'w6' });
   const total = el('p', { class: 'big total-due' });
   const orderText = el('span', { class: 'muted order-text' });
@@ -1718,6 +1718,41 @@ async function posPage(params) {
   const change = el('p', { class: 'big' });
   const last = el('div');
   const cust = el('div', { class: 'panel row cust' });
+  // the buttons of the till (a cafe: coffees, juices, sweets without a barcode, #/tiles): the tabs of the
+  // groups (and «Συχνά»: the most sold of the week), the tiles of one; a press, the item into the receipt
+  // (the quantity of the scan, then 1 again: ×2 ×3 ×5 before it); off on this device if not wanted (kept)
+  let tiles = { groups: [], frequent: [] };
+  try { tiles = await api('pos/tiles'); } catch (e) { tiles = { groups: [], frequent: [] }; }
+  const tileTabs = [...(tiles.frequent.length ? [{ id: 'F', name: '⭐ Συχνά', color: '#b8860b', tiles: tiles.frequent }] : []),
+    ...tiles.groups.filter((g) => g.tiles.length)];
+  let tileTab = store('mm.tileGroup', null);
+  const tilesOn = el('input', { type: 'checkbox', name: 'tiles_on', checked: store('mm.tiles', true) !== false });
+  const tilesBox = el('div', { class: 'panel tiles' });
+  const press = async (t) => {
+    const r = await run('/item', { item_id: t.item_id, qty: Number(n.value || 1) });
+    if (r) {
+      n.value = '1';
+      change.textContent = '';
+    }
+  };
+  const drawTiles = () => {
+    if (!tileTabs.length) return;
+    if (!tileTabs.some((g) => String(g.id) === String(tileTab))) tileTab = tileTabs[0].id;
+    const g = tileTabs.find((x) => String(x.id) === String(tileTab));
+    tilesBox.replaceChildren(
+      el('div', { class: 'tile-tabs', role: 'tablist', 'aria-label': 'Ομάδες κουμπιών' }, tileTabs.map((x) => paint(el('button', {
+        type: 'button', role: 'tab', class: 'tile-tab', 'aria-selected': String(x.id) === String(tileTab) ? 'true' : 'false',
+        onclick: () => { tileTab = x.id; keep('mm.tileGroup', x.id); drawTiles(); },
+      }, x.name), x.color))),
+      el('div', { class: 'tile-grid', role: 'tabpanel' }, g.tiles.map((t) => paint(el('button', {
+        type: 'button', class: 'tile', 'aria-label': `${t.name} ${money(t.price)} €`, onclick: () => press(t),
+      }, el('span', { class: 'tile-name' }, t.name), el('span', { class: 'tile-price' }, money(t.price)),
+      t.plu ? el('span', { class: 'tile-plu', title: 'Σύντομος κωδικός (PLU)' }, String(t.plu)) : null), g.color))),
+      el('div', { class: 'row tile-qty' }, el('span', { class: 'muted' }, 'Ποσότητα πριν από το κουμπί:'),
+        [2, 3, 5].map((k) => el('button', { type: 'button', onclick: () => { n.value = String(k); toast(`×${k} στο επόμενο κουμπί`); } }, '×' + k))));
+  };
+  drawTiles();
+  tilesOn.addEventListener('change', () => { keep('mm.tiles', tilesOn.checked); if (st) draw(); });
   let st = null;
   let seq = 0;              // (an answer after a newer call, or of a register left: not drawn)
   const run = async (path, body) => {
@@ -1782,6 +1817,7 @@ async function posPage(params) {
         act('POS', 'OPEN_Z') ? el('button', { type: 'button', class: 'primary', onclick: () => run('/open', { cash: Number(cash.value || 0) }) }, 'Άνοιγμα Ζ') : null);
     }
     scan.hidden = !z;
+    tilesBox.hidden = !z || !tileTabs.length || !tilesOn.checked;
     pay.hidden = !st.receipt;
     const r = st.receipt;
     drawCustomer(r);
@@ -1933,9 +1969,80 @@ async function posPage(params) {
       }, 'Αποθήκευση')));
   }
   show(el('h1', {}, 'Ταμείο'), el('div', { class: 'panel' }, el('div', { class: 'row' }, el('label', {}, 'Ταμείο', pick), whBox, zText), zBox),
-    scan, cust, orders, lines, pay, change, el('label', { class: 'check' }, autoPrint, 'Εκτύπωση απόδειξης αυτόματα'), last, setup);
+    scan, tilesBox, cust, orders, lines, pay, change, el('label', { class: 'check' }, autoPrint, 'Εκτύπωση απόδειξης αυτόματα'),
+    tileTabs.length ? el('label', { class: 'check' }, tilesOn, 'Κουμπιά (καφέ, χυμοί, γλυκά) σε αυτή τη συσκευή') : null, last, setup);
   await load();
   if (params && params.get('order') && st && st.z) loadOrder(Number(params.get('order')));
+}
+
+// a color of a group of buttons on an element (CSSOM: the CSP allows no style attribute)
+function paint(e, color) {
+  e.style.setProperty('--tile', color);
+  return e;
+}
+
+// -- the buttons of the till: groups of buttons (a name, a color, an order, active), in each the items as
+// tiles (an order, at the till as here); the short number of an item (PLU), typed at the till instead of
+// a scan. An item without a barcode is made in «Είδη» and comes here by its code
+async function tilesPage() {
+  const out = el('div');
+  const w = act('TILES');
+  const canPlu = act('TILES', 'PLU');
+  const name = el('input', { name: 'group_name', maxlength: 40, placeholder: 'π.χ. Καφέδες' });
+  const color = el('input', { name: 'group_color', type: 'color', value: '#8b5a2b', class: 'color' });
+  let draw = null;
+  const call = async (path, body, said) => {
+    try {
+      draw(await api(path, body));
+      if (said) toast(said);
+      return true;
+    } catch (e) { fail(e); return false; }
+  };
+  draw = (r) => out.replaceChildren(...(r.groups.length ? r.groups.map((g, gi) => {
+    const nm = el('input', { value: g.name, maxlength: 40, 'aria-label': 'Όνομα ομάδας ' + g.name, disabled: !w });
+    const col = el('input', { type: 'color', value: g.color, class: 'color', 'aria-label': 'Χρώμα ' + g.name, disabled: !w });
+    const on = el('input', { type: 'checkbox', checked: g.active === 'Y', 'aria-label': 'Ενεργή ' + g.name, disabled: !w });
+    const code = el('input', { name: 'tile_code', placeholder: 'κωδικός, barcode ή PLU', class: 'w11', 'aria-label': 'Νέο κουμπί στην ομάδα ' + g.name });
+    return el('section', { class: 'panel tile-group' + (g.active === 'Y' ? '' : ' cancelled') },
+      el('div', { class: 'row' }, paint(el('span', { class: 'swatch' }), g.color),
+        el('label', { class: 'grow' }, 'Ομάδα', nm), el('label', {}, 'Χρώμα', col), el('label', { class: 'check' }, on, 'Ενεργή'),
+        w ? el('button', { type: 'button', onclick: () => call('tiles/groups/' + g.id, { name: nm.value.trim(), color: col.value, active: on.checked ? 'Y' : 'N' }, 'Αποθηκεύτηκε') }, 'Αποθήκευση') : null,
+        w ? el('button', { type: 'button', 'aria-label': 'Πιο πάνω: ' + g.name, disabled: gi === 0, onclick: () => call(`tiles/groups/${g.id}/move`, { dir: -1 }) }, '↑') : null,
+        w ? el('button', { type: 'button', 'aria-label': 'Πιο κάτω: ' + g.name, disabled: gi === r.groups.length - 1, onclick: () => call(`tiles/groups/${g.id}/move`, { dir: 1 }) }, '↓') : null,
+        w ? el('button', {
+          type: 'button', class: 'danger',
+          onclick: () => { if (confirm(`Να φύγει η ομάδα «${g.name}» με τα κουμπιά της; (τα είδη μένουν)`)) call(`tiles/groups/${g.id}/delete`, {}, 'Η ομάδα έφυγε'); },
+        }, 'Διαγραφή') : null),
+      g.tiles.length ? el('div', { class: 'tile-grid edit' }, g.tiles.map((t, ti) => {
+        const p = el('input', { type: 'number', min: 1, max: 99999, step: 1, class: 'w6', value: t.plu ?? '', 'aria-label': 'PLU ' + t.name, disabled: !canPlu });
+        p.addEventListener('change', () => call('tiles/plu', { code: t.code, plu: p.value === '' ? null : Number(p.value) },
+          p.value === '' ? 'Χωρίς PLU: ' + t.name : `PLU ${p.value}: ${t.name}`));
+        return paint(el('div', { class: 'tile' + (t.active === 'Y' ? '' : ' cancelled') },
+          el('span', { class: 'tile-name' }, t.name), el('span', { class: 'tile-price' }, `${t.code} · ${money(t.price)} €`),
+          el('label', { class: 'tile-plu-edit' }, 'PLU', p),
+          w ? el('div', { class: 'row tile-tools' },
+            el('button', { type: 'button', 'aria-label': 'Πιο πριν: ' + t.name, disabled: ti === 0, onclick: () => call(`tiles/${t.id}/move`, { dir: -1 }) }, '←'),
+            el('button', { type: 'button', 'aria-label': 'Πιο μετά: ' + t.name, disabled: ti === g.tiles.length - 1, onclick: () => call(`tiles/${t.id}/move`, { dir: 1 }) }, '→'),
+            el('button', { type: 'button', class: 'danger', 'aria-label': 'Έξω: ' + t.name, onclick: () => call(`tiles/${t.id}/delete`, {}, 'Έξω: ' + t.name) }, '×')) : null), g.color);
+      })) : el('p', { class: 'muted' }, 'Κανένα κουμπί ακόμα.'),
+      w ? el('form', {
+        class: 'row',
+        onsubmit: (ev) => { ev.preventDefault(); if (code.value.trim()) call(`tiles/groups/${g.id}/tiles`, { code: code.value.trim() }, 'Μπήκε στην ομάδα ' + g.name); },
+      }, el('label', {}, 'Νέο κουμπί', code), camera(code), el('button', { type: 'submit' }, 'Βάλε')) : null);
+  }) : [el('p', { class: 'muted' }, 'Καμία ομάδα κουμπιών ακόμα: φτιάξε την πρώτη, π.χ. «Καφέδες».')]));
+  show(el('h1', {}, 'Κουμπιά ταμείου'),
+    el('p', { class: 'muted' }, 'Τα είδη χωρίς barcode (καφέδες, χυμοί, γλυκά) ως κουμπιά στο Ταμείο, σε ομάδες με χρώμα. Ένα είδος φτιάχνεται στα «Είδη» (χωρίς barcode) και μπαίνει εδώ με τον κωδικό του. '
+      + 'Ο σύντομος κωδικός (PLU) γράφεται στη σάρωση του ταμείου αντί για barcode.'),
+    w ? el('form', {
+      class: 'panel row',
+      onsubmit: async (ev) => {
+        ev.preventDefault();
+        const nmv = name.value.trim();
+        if (nmv && await call('tiles/groups', { name: nmv, color: color.value }, 'Νέα ομάδα ' + nmv)) name.value = '';
+      },
+    }, el('label', { class: 'grow' }, 'Νέα ομάδα', name), el('label', {}, 'Χρώμα', color), el('button', { class: 'primary', type: 'submit' }, 'Νέα ομάδα')) : null,
+    out);
+  try { draw(await api('tiles')); } catch (e) { fail(e); }
 }
 
 // -- the poster of the door: a QR of the page of the orders of the customers (/shop/), A4, printed
@@ -2612,6 +2719,7 @@ function render() {
     'trial-customers': 'TRIAL_CUSTOMERS', 'trial-suppliers': 'TRIAL_SUPPLIERS', profit: 'PROFIT', 'stock-value': 'STOCK_VALUE' };
   switch (p[0]) {
     case 'pos': return need('POS', () => posPage(params));
+    case 'tiles': return need('TILES', () => tilesPage());
     case 'orders': return need('ORDERS', () => ordersPage(params));
     case 'poster': return need('ORDERS', () => posterPage());
     case 'docs': return need('DOCS', () => docsPage(params));
