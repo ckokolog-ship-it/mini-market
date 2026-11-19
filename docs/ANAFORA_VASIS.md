@@ -4,7 +4,7 @@
 
 ## Περιεχόμενα
 
-- [Πίνακες](#πίνακες) (46)
+- [Πίνακες](#πίνακες) (48)
 - [Όψεις](#όψεις) (25)
 - [Πακέτα](#πακέτα) (9)
 - [Triggers](#triggers) (20)
@@ -54,6 +54,8 @@
 | [`MM_SIZE`](#mm_size) | Τα μεγέθη των παραλλαγών, με τη σειρά τους. |
 | [`MM_STOCK_MOVE`](#mm_stock_move) | Οι κινήσεις αποθήκης: κάθε αλλαγή του αποθέματος, ανά αποθήκη (παραστατικό, διόρθωση, απογραφή, συναρμολόγηση). |
 | [`MM_SUPPLIER`](#mm_supplier) | Οι προμηθευτές, με τα ίδια στοιχεία με τους πελάτες. |
+| [`MM_TILE`](#mm_tile) | Τα κουμπιά του ταμείου: ένα είδος σε μια ομάδα, με τη σειρά του. |
+| [`MM_TILE_GROUP`](#mm_tile_group) | Οι ομάδες κουμπιών του ταμείου (καφέ): όνομα, χρώμα, σειρά, ενεργή. |
 | [`MM_USER`](#mm_user) | Οι χρήστες: όνομα, ρόλος του επιπέδου, κωδικός (μόνο PBKDF2), ενεργός, κλείδωμα, κατάστημα και ταμείο. |
 | [`MM_USER_ROLE`](#mm_user_role) | Οι ρόλοι κάθε χρήστη (πολλοί: το περισσότερο του καθενός). |
 | [`MM_VAT`](#mm_vat) | Οι συντελεστές ΦΠΑ. |
@@ -417,6 +419,7 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 | `color_id` | NUMBER | ναι |  | FK → [`MM_COLOR`](#mm_color) |  |
 | `size_id` | NUMBER | ναι |  | FK → [`MM_SIZE`](#mm_size) |  |
 | `wholesale_price` | NUMBER(12,4) | ναι |  |  |  |
+| `plu` | NUMBER(5) | ναι |  |  |  |
 
 - μοναδικό: `barcode`
 - μοναδικό: `code`
@@ -427,6 +430,7 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 - έλεγχος: `max_per_sale > 0`
 - έλεγχος: `min_stock >= 0`
 - έλεγχος: `is_model in ('Y', 'N')`
+- έλεγχος: `plu between 1 and 99999`
 - έλεγχος: `price >= 0`
 - έλεγχος: `serial_tracked in ('Y', 'N')`
 - έλεγχος: `unit in ('PCS', 'KG', 'L')`
@@ -913,6 +917,38 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 - έλεγχος: `regexp_like(afm, '^[0-9]{9}$')`
 - έλεγχος: `email like '_%@_%._%'`
 
+### MM_TILE
+
+Τα κουμπιά του ταμείου: ένα είδος σε μια ομάδα, με τη σειρά του.
+
+_Ορίζεται στο `db/MM_TABLES.sql`._
+
+| Στήλη | Τύπος | Κενή | Προεπιλογή | Κλειδί | Σχόλιο του κώδικα |
+|---|---|---|---|---|---|
+| `id` | NUMBER | όχι | identity | PK |  |
+| `group_id` | NUMBER | όχι |  | FK → [`MM_TILE_GROUP`](#mm_tile_group) (on delete cascade) |  |
+| `item_id` | NUMBER | όχι |  | FK → [`MM_ITEM`](#mm_item) (on delete cascade) |  |
+| `sort_no` | NUMBER | όχι | 0 |  |  |
+
+- μοναδικό: `group_id, item_id`
+
+### MM_TILE_GROUP
+
+Οι ομάδες κουμπιών του ταμείου (καφέ): όνομα, χρώμα, σειρά, ενεργή.
+
+_Ορίζεται στο `db/MM_TABLES.sql`._
+
+| Στήλη | Τύπος | Κενή | Προεπιλογή | Κλειδί | Σχόλιο του κώδικα |
+|---|---|---|---|---|---|
+| `id` | NUMBER | όχι | identity | PK |  |
+| `name` | VARCHAR2(40) | όχι |  |  |  |
+| `color` | VARCHAR2(7) | όχι | '#6b7280' |  |  |
+| `sort_no` | NUMBER | όχι | 0 |  |  |
+| `active` | VARCHAR2(1) | όχι | 'Y' |  |  |
+
+- έλεγχος: `active in ('Y', 'N')`
+- έλεγχος: `regexp_like(color, '^#[0-9a-fA-F]{6}$')`
+
 ### MM_USER
 
 Οι χρήστες: όνομα, ρόλος του επιπέδου, κωδικός (μόνο PBKDF2), ενεργός, κλείδωμα, κατάστημα και ταμείο.
@@ -1191,7 +1227,8 @@ same transaction still sees the stock before the change (the change is applied a
   function afm_ok(p_afm varchar2) return varchar2;
   function ean_ok(p_code varchar2) return varchar2;
 
-  -- an item by barcode or by code; null if there is none (or it is inactive and p_active = 'Y')
+  -- an item by barcode or by code, else by its short number (PLU, the buttons of the till); null if there is
+  -- none (or it is inactive and p_active = 'Y')
   function find_item(p_code varchar2, p_active varchar2 default 'Y') return number;
 
   -- net, VAT and total of a line: the price with VAT (p_incl = 'Y') or without
@@ -1373,6 +1410,17 @@ same transaction still sees the stock before the change (the change is applied a
   -- the backup of the database (db/backup.ps1) says how it went: p_ok Y (p_text its file) or N (p_text
   -- the error); MM_BACKUP_STATE tells the pages when the last good one is too old
   procedure backup_done(p_ok varchar2, p_text varchar2);
+
+  -- the buttons of the till (MM_TILE_GROUP, MM_TILE; errors MM-132): a group new (p_id null: at the end) or
+  -- changed, out with its tiles; an item into a group (at its end; not a model, not inactive), a tile out;
+  -- a group (p_kind G) or a tile (T) one place before (p_dir -1) or after (+1); the short number of an item
+  -- (PLU, null: none): not the PLU, the code or the barcode of another item
+  function tile_group_save(p_id number, p_name varchar2, p_color varchar2, p_active varchar2) return number;
+  procedure tile_group_delete(p_id number);
+  function tile_add(p_group_id number, p_item_id number) return number;
+  procedure tile_delete(p_id number);
+  procedure tile_move(p_kind varchar2, p_id number, p_dir number);
+  procedure set_plu(p_item_id number, p_plu number);
 ```
 
 ### MM_LEDGER
@@ -1706,6 +1754,7 @@ form). UTF-8: run by INSTALL.sql, or by the build scripts with NLS_LANG ...AL32U
 | MM-129 | Το παραστατικό έχει κάρτες με serials: ακύρωσέ το (όσο το Ζ είναι ανοιχτό) |
 | MM-130 | Από τις κάρτες αυτής της αγοράς έχουν πουληθεί ή δεσμευτεί |
 | MM-131 | Τα είδη με serials δεν μετριούνται στην απογραφή: το απόθεμά τους είναι οι κάρτες τους |
+| MM-132 | Η ομάδα κουμπιών θέλει όνομα<br>Το όνομα της ομάδας: ως 40 χαρακτήρες<br>Το χρώμα της ομάδας: #RRGGBB, π.χ. #8b5a2b<br>Ενεργή: Y ή N<br>Δεν υπάρχει ομάδα κουμπιών<br>Ένα μοντέλο δεν πουλιέται: βάλε μια παραλλαγή του |
 | MM-133 | Το απόθεμα ενός είδους με serials αλλάζει με τα serials (load_serial) |
 | MM-134 | Λάθος serial: 4 έως 40 γράμματα, ψηφία ή - |
 | MM-135 | Λάθος PIN: 4 έως 20 ψηφία |
@@ -1773,4 +1822,4 @@ form). UTF-8: run by INSTALL.sql, or by the build scripts with NLS_LANG ...AL32U
 | MM-198 | Δεν υπάρχει ρόλος<br>Πρέπει να μείνει τουλάχιστον ένας ενεργός χρήστης με όλα τα δικαιώματα<br>Κωδικός ρόλου: 2 έως 30 λατινικά γράμματα, ψηφία ή _, από γράμμα<br>Ο ρόλος θέλει όνομα<br>Όλα τα δικαιώματα: Y ή N<br>Υπάρχει ήδη ρόλος |
 | MM-199 | Το ιστορικό κρατιέται τουλάχιστον 30 ημέρες |
 
-_Φτιάχτηκε στις 18/11/2026._
+_Φτιάχτηκε στις 19/11/2026._

@@ -19,6 +19,7 @@
 | Οθόνη | Σελίδα | Φόρμα | Ταμίας | Προϊστάμενος | Πεδία και ενέργειες |
 |---|---|---|---|---|---|
 | **Ταμείο** `POS` | `#/pos` | `MM_POS` | W | W | ενέργεια `OPEN_Z` Άνοιγμα Ζ (W/W)<br>ενέργεια `CLOSE_Z` Κλείσιμο Ζ (W/W)<br>ενέργεια `CASH` Μετρητά μέσα και έξω (W/W)<br>ενέργεια `VOID` Ακύρωση απόδειξης (W/W)<br>ενέργεια `PRIZE` Κέρδος σκρατς (W/W)<br>ενέργεια `WAREHOUSE` Αποθήκη του ταμείου (N/W)<br>ενέργεια `SETTINGS` Κεφαλίδα και υποσέλιδο αποδείξεων (N/W) |
+| **Κουμπιά ταμείου** `TILES` | `#/tiles` |  | N | W | ενέργεια `PLU` Σύντομοι κωδικοί (PLU) (N/W) |
 | **Παραγγελίες** `ORDERS` | `#/orders` |  | W | W | ενέργεια `CONFIRM` Επιβεβαίωση (W/W)<br>ενέργεια `CANCEL` Ακύρωση (W/W)<br>ενέργεια `NOTE` Δελτίο αποστολής (N/W) |
 | **Κρατήσεις** `RESERVATIONS` |  | `MM_RESERVATIONS` | W | W | ενέργεια `CREATE` Νέα (W/W)<br>ενέργεια `DELIVER` Παράδοση (W/W)<br>ενέργεια `CANCEL` Ακύρωση (W/W) |
 | **Προσφορές** `PROMOS` |  | `MM_PROMOS` | N | W | ενέργεια `CREATE` Νέα (N/W)<br>ενέργεια `ACTIVE` Ενεργή ή όχι (N/W) |
@@ -246,7 +247,9 @@ The till of the pages (as the form MM_POS): a register by its code, its Z, the d
   POST /api/pos/{register}/open {cash}       a Z opened, with the cash in the drawer
   POST /api/pos/{register}/close             the Z closed: its totals in "closed"
   POST /api/pos/{register}/cash {amount, note}   money in (+) or out (-) of the drawer
-  POST /api/pos/{register}/scan {code, qty}  an item by barcode or code (a card of mobile: one, the
+  GET  /api/pos/tiles                        the buttons of the till (Tiles: groups, tiles, the frequent)
+  POST /api/pos/{register}/item {item_id, qty}   a button of the till: the item, as a scan of its code
+  POST /api/pos/{register}/scan {code, qty}  an item by barcode, code or short number (PLU) (a card of mobile: one, the
                                              oldest), or a card by its serial (a scratch ticket: its barcode)
   POST /api/pos/{register}/prize {amount, ticket}   a prize of a scratch ticket, paid from the drawer
   POST /api/pos/{register}/customer {code}   the customer of the receipt (points): its card (a scan of it
@@ -316,6 +319,24 @@ The page of the shop for its customers (/shop/, the WiFi of the shop): no login.
   POST /api/shop/orders {name, phone, notes, lines: [{code, qty}]}   an order: its token
   GET  /api/shop/orders/{token}              its status, its lines, its total
   POST /api/shop/orders/{token}/cancel       cancelled, while the shop has not confirmed it
+```
+
+### Tiles.java
+
+The buttons of the till (a cafe: coffees, juices, sweets without a barcode): groups of buttons, in each the items as tiles, and the short number of an item (PLU, typed at the till instead of a scan). Every rule is in mm_core (tile_group_save, tile_add, tile_move, set_plu ...); errors MM-132. Each POST returns the page again, as GET /api/tiles.
+
+```
+  GET  /api/pos/tiles                        the till: the active groups with their tiles (active items),
+                                             and "frequent": the 8 tiles sold most in the last 7 days
+  GET  /api/tiles                            the page Κουμπιά ταμείου: every group (and the inactive), its tiles
+  POST /api/tiles/groups {name, color, active}           a new group, at the end
+  POST /api/tiles/groups/{id} {name, color, active}      a group changed
+  POST /api/tiles/groups/{id}/move {dir}     one place before (-1) or after (+1)
+  POST /api/tiles/groups/{id}/delete         out, with its tiles
+  POST /api/tiles/groups/{id}/tiles {code}   an item (its code, barcode or PLU) into the group, at its end
+  POST /api/tiles/{id}/move {dir}            a tile one place before or after
+  POST /api/tiles/{id}/delete                a tile out (the item stays)
+  POST /api/tiles/plu {code, plu}            the PLU of an item (null: none)   (TILES: PLU)
 ```
 
 ### Web.java
@@ -458,9 +479,10 @@ The pages of the shop (step 8): index.html, app.js, codes.js (the barcodes and Q
 | `test_sales_by.py` (1) | the sales by store, register and cashier (MM_SALES_DOC; MM_DOC.CREATED_BY, POSTED_BY by the trigger of MM_AUDIT): who made and posted a receipt of the till of the pages; the report by each (the costs and the profit only with the right to the gross profit); the summary of the day; the cashier on the receipt. |
 | `test_scratch.py` (1) | the scratch tickets in packs (MM_SCRATCH_GAME, mm_core.load_pack, scratch_prize; the REST of Scratch.java and the till): a game and its item; a pack loaded from the barcode of one of its tickets (game 4 digits, pack 7, ticket 3): its tickets as serials, the stock; at the till a scan sells that very ticket, a second scan says it is sold; a prize paid from the drawer; what is refused. |
 | `test_serials.py` (11) | the cards of mobile phones (items with serial numbers) in MM_CORE, and their PINs (MM_PIN, encrypted). Needs EXECUTE on DBMS_CRYPTO (db/GRANT_CRYPTO.sql). |
+| `test_tiles.py` (4) | the buttons of the till (a cafe: coffees, juices, sweets without a barcode): MM_TILE_GROUP, MM_TILE and MM_ITEM.PLU, the rules of mm_core (tile_group_save, tile_add, tile_move, tile_delete, set_plu, find_item by PLU; errors MM-132), the REST of Tiles.java (the page Κουμπιά ταμείου, the rights of TILES) and of the till (GET /api/pos/tiles, POST /api/pos/{register}/item): a receipt from the buttons, posted, the database still adding up (MM_CHECK); the pages in a browser (tests/tiles_check.js). |
 | `test_transfer.py` (2) | the transfer between two warehouses (Δελτίο ενδοδιακίνησης, DEN; mm_core.new_doc with p_to_warehouse_id, add_line at cost, post_doc, cancel_doc; FIFO): bought at two costs into the main one, sent to a branch: its lines at the cost of each layer (x at a, y at b), no VAT; posted, out of the one and into the other with the same layers and costs; sold there at those costs; a transfer cancelled: back in both; FIFO built again, the same; not a sale (no profit, no VAT); what is refused. |
 | `test_variants.py` (5) | clothes and shoes: a model and its variants (a colour and/or a size), each an item of its own; the model is not sold, counted, reserved or put in a basket; its price goes to its variants; a promotion on the model holds for its variants. |
 | `test_warehouse.py` (4) | the warehouses (MM_WAREHOUSE; the warehouse of each move, layer of FIFO, document, register; mm_core.new_doc, stock_move, main_warehouse; the view MM_WAREHOUSE_STOCK; MM_CHECK FIFO_WH): the main one; a second one; a receipt into each, a sale from each (its register): the stock and the layers of each apart; FIFO built again, the same; what is refused. |
 | `test_web.py` (2) | the pages of the mini market (api/src/main/resources/web) in a real browser: the jar of test_api.py, its manager and cashier; tests/web_check.js with Playwright (Chromium). |
 
-_Φτιάχτηκε στις 18/11/2026._
+_Φτιάχτηκε στις 19/11/2026._
