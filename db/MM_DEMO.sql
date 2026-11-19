@@ -400,4 +400,48 @@ begin
 end;
 /
 
+-- the options of the cafe (sugar, milk, extras), on its coffees
+declare
+  sugar number;
+  milk number;
+  extra number;
+  n number;
+  o number;
+  function id_of(p_code varchar2) return number is
+    v number;
+  begin
+    select id into v from mm_item where code = p_code;
+    return v;
+  end;
+begin
+  select count(*) into n from mm_option_group;
+  if n = 0 then
+    sugar := mm_core.option_group_save(null, 'Ζάχαρη', 'O', 'Y', 'Y');
+    o := mm_core.option_save(null, sugar, 'Σκέτος', 0, 'N', 'Y');
+    o := mm_core.option_save(null, sugar, 'Μέτριος', 0, 'Y', 'Y');
+    o := mm_core.option_save(null, sugar, 'Γλυκός', 0, 'N', 'Y');
+    o := mm_core.option_save(null, sugar, 'Με στέβια', 0, 'N', 'Y');
+    milk := mm_core.option_group_save(null, 'Γάλα', 'O', 'N', 'Y');
+    o := mm_core.option_save(null, milk, 'Φρέσκο', 0, 'N', 'Y');
+    o := mm_core.option_save(null, milk, 'Βρώμης', 0.30, 'N', 'Y');
+    o := mm_core.option_save(null, milk, 'Αμυγδάλου', 0.30, 'N', 'Y');
+    o := mm_core.option_save(null, milk, 'Χωρίς λακτόζη', 0.20, 'N', 'Y');
+    extra := mm_core.option_group_save(null, 'Έξτρα', 'M', 'N', 'Y');
+    o := mm_core.option_save(null, extra, 'Έξτρα σφηνάκι', 0.50, 'N', 'Y');
+    o := mm_core.option_save(null, extra, 'Σιρόπι καραμέλα', 0.30, 'N', 'Y');
+    o := mm_core.option_save(null, extra, 'Σαντιγί', 0.40, 'N', 'Y');
+    o := mm_core.option_save(null, extra, 'Κανέλα', 0, 'N', 'Y');
+    for c in (select column_value code from table(sys.odcivarchar2list('CAF01', 'CAF02', 'CAF03', 'CAF04', 'CAF05', 'CAF06'))) loop
+      mm_core.item_option(id_of(c.code), sugar, 'Y');
+    end loop;
+    for c in (select column_value code from table(sys.odcivarchar2list('CAF02', 'CAF04', 'CAF06', 'CAF07'))) loop
+      mm_core.item_option(id_of(c.code), milk, 'Y');
+    end loop;
+    for c in (select column_value code from table(sys.odcivarchar2list('CAF01', 'CAF02', 'CAF03', 'CAF04', 'CAF06', 'CAF07'))) loop
+      mm_core.item_option(id_of(c.code), extra, 'Y');
+    end loop;
+  end if;
+end;
+/
+
 commit;

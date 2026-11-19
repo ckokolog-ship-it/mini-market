@@ -210,6 +210,28 @@ create or replace package mm_core as
   procedure tile_move(p_kind varchar2, p_id number, p_dir number);
   procedure set_plu(p_item_id number, p_plu number);
 
+  -- the options at the till (MM_OPTION_GROUP, MM_OPTION, MM_ITEM_OPTION; errors MM-132): a group new (p_id
+  -- null) or changed (pick O one, M any; required: of a pick O), out with its options; an option new or
+  -- changed (its price with VAT, >= 0; is_default: the one of its group, the others not), out (used on a
+  -- receipt already: not, made inactive instead); a group (p_kind G) or an option (O) one place before or
+  -- after; the groups of an item (p_on Y: in, N: out)
+  function option_group_save(p_id number, p_name varchar2, p_pick varchar2, p_required varchar2,
+                             p_active varchar2) return number;
+  procedure option_group_delete(p_id number);
+  function option_save(p_id number, p_group_id number, p_name varchar2, p_price number, p_default varchar2,
+                       p_active varchar2) return number;
+  procedure option_delete(p_id number);
+  procedure option_move(p_kind varchar2, p_id number, p_dir number);
+  procedure item_option(p_item_id number, p_group_id number, p_on varchar2);
+  -- a line with its options (p_options: their ids, comma separated; null: none chosen): only the active
+  -- options of the groups of the item, one of a group O; a required group without one: its default, else
+  -- refused; the price of the line its price (default_price) and the extras; the options with the line
+  -- (MM_DOC_LINE_OPTION) and their text (MM_DOC_LINE.OPTIONS: "Μέτριος, Βρώμης +0,30")
+  function add_line_options(p_doc_id number, p_item_id number, p_qty number, p_options varchar2) return number;
+  -- the number at the counter of a posted retail receipt with an item of the buttons of the till (MM_TILE):
+  -- the next of the day (all the registers), once; null: none of them
+  function counter_ticket(p_doc_id number) return number;
+
 end mm_core;
 /
 
@@ -2639,6 +2661,295 @@ create or replace package body mm_core as
     if sql%rowcount = 0 then
       fail(6, 'Δεν υπάρχει είδος ' || p_item_id);
     end if;
+  end;
+
+  -- ---------------------------------------------------------------------------------------------
+  -- the options at the till
+  function option_group_save(p_id number, p_name varchar2, p_pick varchar2, p_required varchar2,
+                             p_active varchar2) return number is
+    v number := p_id;
+    n number;
+  begin
+    if trim(p_name) is null or length(trim(p_name)) > 40 then
+      fail(32, 'Η ομάδα επιλογών θέλει όνομα, ως 40 χαρακτήρες');
+    end if;
+    if nvl(p_pick, 'O') not in ('O', 'M') then
+      fail(32, 'Η ομάδα επιλογών: O (μία από αυτές) ή M (όσες θέλεις)');
+    end if;
+    if nvl(p_required, 'N') not in ('Y', 'N') or nvl(p_active, 'Y') not in ('Y', 'N') then
+      fail(32, 'Υποχρεωτική, ενεργή: Y ή N');
+    end if;
+    if nvl(p_pick, 'O') = 'M' and p_required = 'Y' then
+      fail(32, 'Υποχρεωτική είναι μόνο μια ομάδα «μία από αυτές» (O)');
+    end if;
+    if v is null then
+      select nvl(max(sort_no), 0) + 10 into n from mm_option_group;
+      insert into mm_option_group (name, pick, required, sort_no, active)
+      values (trim(p_name), nvl(p_pick, 'O'), nvl(p_required, 'N'), n, nvl(p_active, 'Y')) returning id into v;
+    else
+      update mm_option_group set name = trim(p_name), pick = nvl(p_pick, pick),
+             required = case when nvl(p_pick, pick) = 'M' then 'N' else nvl(p_required, required) end,
+             active = nvl(p_active, active)
+      where id = v;
+      if sql%rowcount = 0 then
+        fail(32, 'Δεν υπάρχει ομάδα επιλογών ' || v);
+      end if;
+      -- (one of them now: one default at most)
+      for x in (select id from mm_option where group_id = v and is_default = 'Y'
+                and (select pick from mm_option_group where id = v) = 'O' order by sort_no, id offset 1 rows) loop
+        update mm_option set is_default = 'N' where id = x.id;
+      end loop;
+    end if;
+    return v;
+  end;
+
+  procedure option_group_delete(p_id number) is
+    n number;
+  begin
+    select count(*) into n from mm_doc_line_option x join mm_option o on o.id = x.option_id where o.group_id = p_id;
+    if n > 0 then
+      fail(32, 'Οι επιλογές της ομάδας έχουν μπει σε αποδείξεις: κάνε την ανενεργή');
+    end if;
+    delete from mm_option_group where id = p_id;
+    if sql%rowcount = 0 then
+      fail(32, 'Δεν υπάρχει ομάδα επιλογών ' || p_id);
+    end if;
+  end;
+
+  function option_save(p_id number, p_group_id number, p_name varchar2, p_price number, p_default varchar2,
+                       p_active varchar2) return number is
+    v number := p_id;
+    g number := p_group_id;
+    pk varchar2(1);
+    n number;
+  begin
+    if trim(p_name) is null or length(trim(p_name)) > 40 then
+      fail(32, 'Η επιλογή θέλει όνομα, ως 40 χαρακτήρες');
+    end if;
+    if p_price < 0 or p_price <> round(p_price, 2) then
+      fail(32, 'Η τιμή της επιλογής: 0 ή περισσότερο, με δύο δεκαδικά');
+    end if;
+    if nvl(p_default, 'N') not in ('Y', 'N') or nvl(p_active, 'Y') not in ('Y', 'N') then
+      fail(32, 'Προεπιλογή, ενεργή: Y ή N');
+    end if;
+    if v is not null then
+      select max(group_id) into g from mm_option where id = v;
+      if g is null then
+        fail(32, 'Δεν υπάρχει επιλογή ' || v);
+      end if;
+    end if;
+    begin
+      select pick into pk from mm_option_group where id = g;
+    exception
+      when no_data_found then fail(32, 'Δεν υπάρχει ομάδα επιλογών ' || g);
+    end;
+    if v is null then
+      select nvl(max(sort_no), 0) + 10 into n from mm_option where group_id = g;
+      insert into mm_option (group_id, name, price, is_default, sort_no, active)
+      values (g, trim(p_name), nvl(p_price, 0), nvl(p_default, 'N'), n, nvl(p_active, 'Y')) returning id into v;
+    else
+      update mm_option set name = trim(p_name), price = nvl(p_price, price), is_default = nvl(p_default, is_default),
+             active = nvl(p_active, active)
+      where id = v;
+    end if;
+    if pk = 'O' and p_default = 'Y' then              -- one default in a group of one
+      update mm_option set is_default = 'N' where group_id = g and id <> v and is_default = 'Y';
+    end if;
+    return v;
+  end;
+
+  procedure option_delete(p_id number) is
+    n number;
+  begin
+    select count(*) into n from mm_doc_line_option where option_id = p_id;
+    if n > 0 then
+      fail(32, 'Η επιλογή έχει μπει σε αποδείξεις: κάνε την ανενεργή');
+    end if;
+    delete from mm_option where id = p_id;
+    if sql%rowcount = 0 then
+      fail(32, 'Δεν υπάρχει επιλογή ' || p_id);
+    end if;
+  end;
+
+  procedure option_move(p_kind varchar2, p_id number, p_dir number) is
+    type t_ids is table of number;
+    ids t_ids;
+    g number;
+    k pls_integer;
+    j pls_integer;
+    x number;
+  begin
+    if p_kind = 'G' then
+      select id bulk collect into ids from mm_option_group order by sort_no, id;
+    elsif p_kind = 'O' then
+      select max(group_id) into g from mm_option where id = p_id;
+      select id bulk collect into ids from mm_option where group_id = g order by sort_no, id;
+    else
+      fail(32, 'Μετακίνηση: G (ομάδα) ή O (επιλογή)');
+    end if;
+    for i in 1 .. ids.count loop
+      if ids(i) = p_id then
+        k := i;
+      end if;
+    end loop;
+    if k is null then
+      fail(32, case p_kind when 'G' then 'Δεν υπάρχει ομάδα επιλογών ' else 'Δεν υπάρχει επιλογή ' end || p_id);
+    end if;
+    j := k + sign(nvl(p_dir, 0));
+    if j between 1 and ids.count then
+      x := ids(k);
+      ids(k) := ids(j);
+      ids(j) := x;
+    end if;
+    for i in 1 .. ids.count loop
+      if p_kind = 'G' then
+        update mm_option_group set sort_no = i * 10 where id = ids(i);
+      else
+        update mm_option set sort_no = i * 10 where id = ids(i);
+      end if;
+    end loop;
+  end;
+
+  procedure item_option(p_item_id number, p_group_id number, p_on varchar2) is
+    n number;
+  begin
+    select count(*) into n from mm_item where id = p_item_id;
+    if n = 0 then
+      fail(6, 'Δεν υπάρχει είδος ' || p_item_id);
+    end if;
+    select count(*) into n from mm_option_group where id = p_group_id;
+    if n = 0 then
+      fail(32, 'Δεν υπάρχει ομάδα επιλογών ' || p_group_id);
+    end if;
+    if p_on = 'Y' then
+      merge into mm_item_option x using (select p_item_id item_id, p_group_id group_id from dual) y
+      on (x.item_id = y.item_id and x.group_id = y.group_id)
+      when not matched then insert (item_id, group_id) values (y.item_id, y.group_id);
+    elsif p_on = 'N' then
+      delete from mm_item_option where item_id = p_item_id and group_id = p_group_id;
+    else
+      fail(32, 'Η ομάδα στο είδος: Y (ναι) ή N (όχι)');
+    end if;
+  end;
+
+  function add_line_options(p_doc_id number, p_item_id number, p_qty number, p_options varchar2) return number is
+    type t_ids is table of number index by pls_integer;
+    chosen t_ids;
+    k pls_integer := 0;
+    extra number := 0;
+    txt varchar2(4000);
+    v number;
+    o mm_option%rowtype;
+    g mm_option_group%rowtype;
+    n number;
+    d mm_doc%rowtype;
+    function has(p_id number) return boolean is
+    begin
+      for i in 1 .. k loop
+        if chosen(i) = p_id then
+          return true;
+        end if;
+      end loop;
+      return false;
+    end;
+  begin
+    -- the options given: each an active option of a group of the item, once; one of a group O
+    for i in 1 .. regexp_count(nvl(p_options, ''), '[^,]+') loop
+      begin
+        v := to_number(trim(regexp_substr(p_options, '[^,]+', 1, i)));
+      exception
+        when value_error then fail(32, 'Επιλογές: οι κωδικοί τους, χωρισμένοι με κόμμα');
+      end;
+      begin
+        select * into o from mm_option where id = v;
+      exception
+        when no_data_found then fail(32, 'Δεν υπάρχει επιλογή ' || v);
+      end;
+      select * into g from mm_option_group where id = o.group_id;
+      select count(*) into n from mm_item_option where item_id = p_item_id and group_id = o.group_id;
+      if n = 0 or o.active = 'N' or g.active = 'N' then
+        fail(32, 'Η επιλογή «' || o.name || '» δεν είναι για αυτό το είδος');
+      end if;
+      if not has(v) then
+        if g.pick = 'O' then
+          for i2 in 1 .. k loop
+            select count(*) into n from mm_option where id = chosen(i2) and group_id = g.id;
+            if n > 0 then
+              fail(32, 'Από την ομάδα «' || g.name || '» μία επιλογή μόνο');
+            end if;
+          end loop;
+        end if;
+        k := k + 1;
+        chosen(k) := v;
+      end if;
+    end loop;
+    -- a required group without a choice: its default, else refused
+    for r in (select og.id, og.name from mm_item_option io join mm_option_group og on og.id = io.group_id
+              where io.item_id = p_item_id and og.active = 'Y' and og.required = 'Y' order by og.sort_no, og.id) loop
+      select count(*) into n from mm_option where group_id = r.id and active = 'Y';
+      if n > 0 then
+        n := 0;
+        for i in 1 .. k loop
+          select n + count(*) into n from mm_option where id = chosen(i) and group_id = r.id;
+        end loop;
+        if n = 0 then
+          select min(id) into v from mm_option where group_id = r.id and active = 'Y' and is_default = 'Y';
+          if v is null then
+            fail(32, 'Διάλεξε από την ομάδα «' || r.name || '»');
+          end if;
+          k := k + 1;
+          chosen(k) := v;
+        end if;
+      end if;
+    end loop;
+    -- in the order of the groups and of their options: the extras, the text
+    for x in (select o2.id, o2.name, o2.price from mm_option o2 join mm_option_group g2 on g2.id = o2.group_id
+              order by g2.sort_no, g2.id, o2.sort_no, o2.id) loop
+      if has(x.id) then
+        extra := extra + x.price;
+        txt := txt || case when txt is not null then ', ' end || x.name
+               || case when x.price > 0 then ' +' || to_char(x.price, 'FM990D00', q'[NLS_NUMERIC_CHARACTERS=',.]') end;
+      end if;
+    end loop;
+    select * into d from mm_doc where id = p_doc_id;
+    v := add_line(p_doc_id, p_item_id, p_qty, default_price(d.doc_type, p_item_id) + extra);
+    if k > 0 then
+      for x in (select o2.id, o2.name, o2.price from mm_option o2) loop
+        if has(x.id) then
+          insert into mm_doc_line_option (line_id, option_id, name, price) values (v, x.id, x.name, x.price);
+        end if;
+      end loop;
+      update mm_doc_line set options = substr(txt, 1, 400) where id = v;
+    end if;
+    return v;
+  end;
+
+  function counter_ticket(p_doc_id number) return number is
+    d mm_doc%rowtype;
+    n number;
+    s varchar2(400);
+    today varchar2(8) := to_char(sysdate, 'YYYYMMDD');
+  begin
+    select * into d from mm_doc where id = p_doc_id;
+    if d.ticket_no is not null then
+      return d.ticket_no;
+    end if;
+    if d.doc_type <> 'ALP' or d.status <> 'P' then
+      return null;
+    end if;
+    select count(*) into n from mm_doc_line l where l.doc_id = p_doc_id
+      and exists (select 1 from mm_tile t where t.item_id = l.item_id);
+    if n = 0 then
+      return null;
+    end if;
+    -- the counter of the day (MM_SETTING COUNTER_TICKET "YYYYMMDD:n"), locked: two registers never the same
+    merge into mm_setting x using (select 'COUNTER_TICKET' name from dual) y on (x.name = y.name)
+    when not matched then insert (name, value) values ('COUNTER_TICKET', today || ':0');
+    select value into s from mm_setting where name = 'COUNTER_TICKET' for update;
+    n := case when substr(s, 1, 8) = today then to_number(substr(s, 10)) else 0 end + 1;
+    update mm_setting set value = today || ':' || n where name = 'COUNTER_TICKET';
+    update mm_doc set ticket_no = n where id = p_doc_id;
+    return n;
   end;
 
 end mm_core;
