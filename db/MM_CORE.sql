@@ -231,6 +231,9 @@ create or replace package mm_core as
   -- the number at the counter of a posted retail receipt with an item of the buttons of the till (MM_TILE):
   -- the next of the day (all the registers), once; null: none of them
   function counter_ticket(p_doc_id number) return number;
+  -- the materials of an option (MM_OPTION_COMPONENT): more of a material (qty > 0) or less of one of the
+  -- recipe (< 0); 0: out. A material: not a kit, not with serials, not a model (errors MM-132)
+  procedure option_component(p_option_id number, p_component_id number, p_qty number);
 
 end mm_core;
 /
@@ -1107,12 +1110,26 @@ create or replace package body mm_core as
           ready := greatest(ready, 0);
           take := least(ready, l.qty);
           stock_move(l.item_id, 'DOC', -take, p_doc_id, l.id);
-          for c in (select component_id, qty from mm_kit_component where kit_id = l.item_id) loop
-            stock_move(c.component_id, 'DOC', -(l.qty - take) * c.qty, p_doc_id, l.id);
+          -- the rest from its components (a recipe of a cafe: all of it), and the materials of the options
+          -- of the line (more or less of them: of this line, never below 0)
+          for c in (select component_id, greatest(sum(q), 0) q from (
+                      select component_id, (l.qty - take) * qty q from mm_kit_component where kit_id = l.item_id
+                      union all
+                      select oc.component_id, l.qty * oc.qty from mm_doc_line_option x
+                      join mm_option_component oc on oc.option_id = x.option_id where x.line_id = l.id)
+                    group by component_id order by component_id) loop
+            stock_move(c.component_id, 'DOC', -c.q, p_doc_id, l.id);
           end loop;
         end;
       else
         stock_move(l.item_id, 'DOC', t.stock_sign * l.qty, p_doc_id, l.id);
+        if t.stock_sign = -1 then               -- the materials of its options (a sale: more of them only)
+          for c in (select oc.component_id, sum(l.qty * oc.qty) q from mm_doc_line_option x
+                    join mm_option_component oc on oc.option_id = x.option_id
+                    where x.line_id = l.id group by oc.component_id having sum(oc.qty) > 0 order by 1) loop
+            stock_move(c.component_id, 'DOC', -c.q, p_doc_id, l.id);
+          end loop;
+        end if;
       end if;
       if t.side = 'P' and (t.stock_sign = 1 or t.partner_sign = 1) and l.qty > 0 and l.net > 0 then
         update mm_item set cost = round(l.net / l.qty, 4) where id = l.item_id;   -- the last cost
@@ -2950,6 +2967,36 @@ create or replace package body mm_core as
     update mm_setting set value = today || ':' || n where name = 'COUNTER_TICKET';
     update mm_doc set ticket_no = n where id = p_doc_id;
     return n;
+  end;
+
+  procedure option_component(p_option_id number, p_component_id number, p_qty number) is
+    c mm_item%rowtype;
+    n number;
+  begin
+    select count(*) into n from mm_option where id = p_option_id;
+    if n = 0 then
+      fail(32, 'Δεν υπάρχει επιλογή ' || p_option_id);
+    end if;
+    begin
+      select * into c from mm_item where id = p_component_id;
+    exception
+      when no_data_found then fail(6, 'Δεν υπάρχει είδος ' || p_component_id);
+    end;
+    if p_qty is null or p_qty <> round(p_qty, 3) then
+      fail(32, 'Η ποσότητα του υλικού: με ως 3 δεκαδικά (λιγότερο: με μείον)');
+    end if;
+    if p_qty = 0 then
+      delete from mm_option_component where option_id = p_option_id and component_id = p_component_id;
+      return;
+    end if;
+    if c.kit = 'Y' or c.serial_tracked = 'Y' or c.is_model = 'Y' then
+      fail(32, 'Το ' || c.code || ' δεν γίνεται υλικό (είναι σετ, έχει serials ή είναι μοντέλο)');
+    end if;
+    merge into mm_option_component x
+    using (select p_option_id option_id, p_component_id component_id from dual) s
+    on (x.option_id = s.option_id and x.component_id = s.component_id)
+    when matched then update set qty = p_qty
+    when not matched then insert (option_id, component_id, qty) values (s.option_id, s.component_id, p_qty);
   end;
 
 end mm_core;

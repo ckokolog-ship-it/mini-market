@@ -444,4 +444,81 @@ begin
 end;
 /
 
+-- the recipes of the cafe: its materials (bought, so that they have stock and a cost by FIFO), each coffee a
+-- kit never assembled (a sale takes its materials), the materials of the options (Βρώμης: oat milk instead of
+-- the fresh one); the snacks bought ready
+insert into mm_category (name)
+select 'Υλικά καφέ' from dual where not exists (select 1 from mm_category where name = 'Υλικά καφέ');
+insert into mm_item (code, barcode, name, category_id, vat_code, unit, price, cost, min_stock)
+select v.code, null, v.name, c.id, v.vat_code, v.unit, 0, v.cost, v.min_stock
+from (values
+  ('RAW01', 'Καφές espresso (κόκκοι)',              'B', 'KG',  18.00,   2),
+  ('RAW02', 'Καφές ελληνικός (για τον πάγκο)',      'B', 'KG',  12.00,   1),
+  ('RAW03', 'Καφές στιγμιαίος (φραπέ)',             'B', 'KG',  20.00, 0.5),
+  ('RAW04', 'Γάλα φρέσκο (για τον πάγκο)',          'B', 'L',    1.20,   6),
+  ('RAW05', 'Ρόφημα βρώμης',                        'B', 'L',    2.80,   2),
+  ('RAW06', 'Ρόφημα αμυγδάλου',                     'B', 'L',    3.20,   2),
+  ('RAW07', 'Ποτήρι χάρτινο 12 oz με καπάκι',       'A', 'PCS',  0.08, 100),
+  ('RAW08', 'Ποτήρι 14 oz με καπάκι και καλαμάκι',  'A', 'PCS',  0.10, 100),
+  ('RAW09', 'Πορτοκάλια χυμού',                     'C', 'KG',   1.00,  10),
+  ('RAW10', 'Σιρόπι καραμέλα',                      'A', 'L',    8.00,   1)
+) v (code, name, vat_code, unit, cost, min_stock)
+join mm_category c on c.name = 'Υλικά καφέ'
+where not exists (select 1 from mm_item i where i.code = v.code);
+
+declare
+  n number;
+  d number;
+  l number;
+  s number;
+  function id_of(p_code varchar2) return number is
+    v number;
+  begin
+    select id into v from mm_item where code = p_code;
+    return v;
+  end;
+  function opt(p_group varchar2, p_name varchar2) return number is
+    v number;
+  begin
+    select o.id into v from mm_option o join mm_option_group g on g.id = o.group_id
+    where g.name = p_group and o.name = p_name;
+    return v;
+  end;
+begin
+  select count(*) into n from mm_kit_component where kit_id = id_of('CAF01');
+  if n = 0 then
+    -- bought: the materials and the snacks (a delivery note of the supplier, posted)
+    select min(id) into s from mm_supplier;
+    d := mm_core.new_doc('DPA', p_supplier_id => s, p_payment => 'CREDIT', p_doc_date => trunc(sysdate) - 7);
+    for x in (select 'RAW01' c, 5 q from dual union all select 'RAW02', 2 from dual union all select 'RAW03', 1 from dual
+              union all select 'RAW04', 24 from dual union all select 'RAW05', 6 from dual union all select 'RAW06', 6 from dual
+              union all select 'RAW07', 500 from dual union all select 'RAW08', 500 from dual union all select 'RAW09', 40 from dual
+              union all select 'RAW10', 2 from dual union all select 'CAF41', 40 from dual union all select 'CAF42', 40 from dual
+              union all select 'CAF43', 30 from dual union all select 'CAF44', 24 from dual union all select 'CAF45', 30 from dual) loop
+      l := mm_core.add_line(d, id_of(x.c), x.q);
+    end loop;
+    n := mm_core.post_doc(d);
+    -- the recipes
+    for r in (select 'CAF01' k, 'RAW01' c, 0.018 q from dual union all select 'CAF01', 'RAW08', 1 from dual
+              union all select 'CAF02', 'RAW01', 0.018 from dual union all select 'CAF02', 'RAW04', 0.1 from dual
+              union all select 'CAF02', 'RAW08', 1 from dual
+              union all select 'CAF03', 'RAW01', 0.009 from dual union all select 'CAF03', 'RAW07', 1 from dual
+              union all select 'CAF04', 'RAW01', 0.009 from dual union all select 'CAF04', 'RAW04', 0.15 from dual
+              union all select 'CAF04', 'RAW07', 1 from dual
+              union all select 'CAF05', 'RAW02', 0.007 from dual union all select 'CAF05', 'RAW07', 1 from dual
+              union all select 'CAF06', 'RAW03', 0.004 from dual union all select 'CAF06', 'RAW08', 1 from dual
+              union all select 'CAF21', 'RAW09', 0.5 from dual union all select 'CAF21', 'RAW08', 1 from dual) loop
+      mm_core.set_component(id_of(r.k), id_of(r.c), r.q);
+    end loop;
+    -- the materials of the options: oat or almond instead of the fresh milk, a shot more, the syrup
+    mm_core.option_component(opt('Γάλα', 'Βρώμης'), id_of('RAW05'), 0.15);
+    mm_core.option_component(opt('Γάλα', 'Βρώμης'), id_of('RAW04'), -0.15);
+    mm_core.option_component(opt('Γάλα', 'Αμυγδάλου'), id_of('RAW06'), 0.15);
+    mm_core.option_component(opt('Γάλα', 'Αμυγδάλου'), id_of('RAW04'), -0.15);
+    mm_core.option_component(opt('Έξτρα', 'Έξτρα σφηνάκι'), id_of('RAW01'), 0.009);
+    mm_core.option_component(opt('Έξτρα', 'Σιρόπι καραμέλα'), id_of('RAW10'), 0.02);
+  end if;
+end;
+/
+
 commit;
