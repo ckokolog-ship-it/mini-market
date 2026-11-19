@@ -18,10 +18,12 @@ set define off
 whenever sqlerror exit failure rollback
 
 -- the cafe of the shop (the buttons of the till, #/tiles): coffees, juices, sweets without a barcode, each with a
--- short number (PLU, typed at the till), in three groups of buttons. A category of their own (not the
--- promotion of the coffees in packs)
+-- short number (PLU, typed at the till), in three groups of buttons. Four categories of their own (the options
+-- are by category: sugar and a double for the coffees, not for the bougatsa; not the promotion of the coffees
+-- in packs): CAF0x coffees, CAF07/08 the other hot drinks, CAF2x juices, CAF4x snacks and sweets
 insert into mm_category (name)
-select 'Καφέ πάγκου' from dual where not exists (select 1 from mm_category where name = 'Καφέ πάγκου');
+select v.name from (values ('Καφές (πάγκος)'), ('Ροφήματα (πάγκος)'), ('Χυμοί (πάγκος)'), ('Σνακ και γλυκά (πάγκος)')) v (name)
+where not exists (select 1 from mm_category c where c.name = v.name);
 insert into mm_item (code, barcode, name, category_id, vat_code, unit, price, cost, min_stock, plu)
 select v.code, null, v.name, c.id, v.vat_code, 'PCS', v.price, v.cost, 0,
        case when not exists (select 1 from mm_item p where p.plu = v.plu) then v.plu end   -- (a PLU taken: none)
@@ -43,8 +45,16 @@ from (values
   ('CAF44', 'Κέικ σοκολάτα (κομμάτι)',  'B', 2.50, 0.80, 144),
   ('CAF45', 'Τοστ γαλοπούλα-τυρί',      'B', 2.60, 1.00, 145)
 ) v (code, name, vat_code, price, cost, plu)
-join mm_category c on c.name = 'Καφέ πάγκου'
+join mm_category c on c.name = case when v.code in ('CAF07', 'CAF08') then 'Ροφήματα (πάγκος)'
+                                    when v.code like 'CAF0%' then 'Καφές (πάγκος)'
+                                    when v.code like 'CAF2%' then 'Χυμοί (πάγκος)' else 'Σνακ και γλυκά (πάγκος)' end
 where not exists (select 1 from mm_item i where i.code = v.code);
+-- (the items of before, all in the one category «Καφέ πάγκου»: into the four; it out, if empty)
+update mm_item i set category_id = (select c.id from mm_category c where c.name =
+         case when i.code in ('CAF07', 'CAF08') then 'Ροφήματα (πάγκος)' when i.code like 'CAF0%' then 'Καφές (πάγκος)'
+              when i.code like 'CAF2%' then 'Χυμοί (πάγκος)' else 'Σνακ και γλυκά (πάγκος)' end)
+where i.code like 'CAF%' and i.category_id = (select min(id) from mm_category where name = 'Καφέ πάγκου');
+delete from mm_category c where c.name = 'Καφέ πάγκου' and not exists (select 1 from mm_item i where i.category_id = c.id);
 
 -- the groups of buttons, by name: one missing made; in each, the items of the cafe it does not have yet
 declare
@@ -66,17 +76,29 @@ begin
 end;
 /
 
--- the options of the cafe (sugar, milk, extras), on its coffees: by name, a group or an option missing made
--- (those of the shop stay as they are)
+-- the options of the cafe, by category (by name: a group or an option missing made; those of the shop stay as
+-- they are): Μέγεθος (μονός / διπλός +0,50, required) and Ζάχαρη (required, μέτριος) on the coffees; Γάλα and
+-- Έξτρα on the coffees and the hot drinks, the shot only for the coffees
 declare
+  size_ number;
   sugar number;
   milk number;
   extra number;
   o number;
+  coffee number;
+  drinks number;
+  made boolean;
+  function cat(p_name varchar2) return number is
+    v number;
+  begin
+    select min(id) into v from mm_category where name = p_name;
+    return v;
+  end;
   function grp(p_name varchar2, p_pick varchar2, p_required varchar2) return number is
     v number;
   begin
     select min(id) into v from mm_option_group where name = p_name;
+    made := v is null;
     if v is null then                   -- (not nvl: it makes both of its arguments)
       v := mm_core.option_group_save(null, p_name, p_pick, p_required, 'Y');
     end if;
@@ -91,17 +113,23 @@ declare
     end if;
     return v;
   end;
-  procedure on_items(p_group number, p_codes sys.odcivarchar2list) is
-    v number;
+  procedure on_cat(p_group number, p_cat number) is
   begin
-    for i in 1 .. p_codes.count loop
-      select min(id) into v from mm_item where code = p_codes(i);
-      if v is not null then
-        mm_core.item_option(v, p_group, 'Y');
-      end if;
-    end loop;
+    if p_cat is not null then
+      mm_core.category_option(p_cat, p_group, 'Y');
+    end if;
   end;
 begin
+  coffee := cat('Καφές (πάγκος)');
+  drinks := cat('Ροφήματα (πάγκος)');
+  size_ := grp('Μέγεθος', 'O', 'Y');
+  if made then                          -- (new: the first of the groups)
+    for k in 1 .. 20 loop
+      mm_core.option_move('G', size_, -1);
+    end loop;
+  end if;
+  o := opt(size_, 'Μονός', 0, 'Y');
+  o := opt(size_, 'Διπλός', 0.50, 'N');
   sugar := grp('Ζάχαρη', 'O', 'Y');
   o := opt(sugar, 'Σκέτος', 0, 'N');
   o := opt(sugar, 'Μέτριος', 0, 'Y');
@@ -114,12 +142,21 @@ begin
   o := opt(milk, 'Χωρίς λακτόζη', 0.20, 'N');
   extra := grp('Έξτρα', 'M', 'N');
   o := opt(extra, 'Έξτρα σφηνάκι', 0.50, 'N');
+  if coffee is not null then
+    mm_core.option_category(o, coffee, 'Y');      -- (not for the chocolate, not for the tea)
+  end if;
   o := opt(extra, 'Σιρόπι καραμέλα', 0.30, 'N');
   o := opt(extra, 'Σαντιγί', 0.40, 'N');
   o := opt(extra, 'Κανέλα', 0, 'N');
-  on_items(sugar, sys.odcivarchar2list('CAF01', 'CAF02', 'CAF03', 'CAF04', 'CAF05', 'CAF06'));
-  on_items(milk, sys.odcivarchar2list('CAF02', 'CAF04', 'CAF06', 'CAF07'));
-  on_items(extra, sys.odcivarchar2list('CAF01', 'CAF02', 'CAF03', 'CAF04', 'CAF06', 'CAF07'));
+  on_cat(size_, coffee);
+  on_cat(sugar, coffee);
+  on_cat(milk, coffee);
+  on_cat(milk, drinks);
+  on_cat(extra, coffee);
+  on_cat(extra, drinks);
+  -- (the groups of the coffees of before, item by item: now of their categories)
+  delete from mm_item_option where included = 'Y' and group_id in (size_, sugar, milk, extra)
+  and item_id in (select id from mm_item where code like 'CAF%');
 end;
 /
 
@@ -206,6 +243,25 @@ begin
     material(opt('Γάλα', 'Αμυγδάλου'), 'RAW04', -0.15);
     material(opt('Έξτρα', 'Έξτρα σφηνάκι'), 'RAW01', 0.009);
     material(opt('Έξτρα', 'Σιρόπι καραμέλα'), 'RAW10', 0.02);
+  end if;
+end;
+/
+
+-- a double: a dose more of the coffee of each recipe (freddo 18 g, espresso 9 g, ελληνικός 7 g, φραπέ 4 g),
+-- every time (a database with the recipes of before too)
+declare
+  d number;
+  v number;
+begin
+  select min(o.id) into d from mm_option o join mm_option_group g on g.id = o.group_id
+  where g.name = 'Μέγεθος' and o.name = 'Διπλός';
+  if d is not null then
+    for x in (select id from mm_item where code in ('RAW01', 'RAW02', 'RAW03')) loop
+      select count(*) into v from mm_option_component where option_id = d and component_id = x.id;
+      if v = 0 then
+        mm_core.option_component(d, x.id, 1, 'Y');
+      end if;
+    end loop;
   end if;
 end;
 /

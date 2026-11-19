@@ -1138,6 +1138,55 @@ create table if not exists mm_option_component (
   constraint mm_option_component_pk primary key (option_id, component_id)
 );
 create index if not exists mm_opt_comp_item_ix on mm_option_component (component_id);
+-- the options by category (a cafe: Ζάχαρη on the coffees, not on the bougatsa): a group of options on a
+-- category, for all of its items (MM_CATEGORY_OPTION); an option only for some categories (MM_OPTION_CATEGORY;
+-- none: for all, e.g. Διπλός only for the coffees, not for the chocolate); an item its own exceptions
+-- (MM_ITEM_OPTION.INCLUDED: Y a group of its own, N a group of its category not for it). A material of an
+-- option per recipe (PER_RECIPE Y: its qty times what the recipe of the item has of it, e.g. Διπλός: 1 dose
+-- more of the coffee of each recipe; nothing if the recipe has none)
+create table if not exists mm_category_option (
+  category_id  number       not null constraint mm_cat_opt_cat_fk references mm_category on delete cascade,
+  group_id     number       not null constraint mm_cat_opt_group_fk references mm_option_group on delete cascade,
+  constraint mm_category_option_pk primary key (category_id, group_id)
+);
+create index if not exists mm_cat_opt_group_ix on mm_category_option (group_id);
+create table if not exists mm_option_category (
+  option_id    number       not null constraint mm_opt_cat_opt_fk references mm_option on delete cascade,
+  category_id  number       not null constraint mm_opt_cat_cat_fk references mm_category on delete cascade,
+  constraint mm_option_category_pk primary key (option_id, category_id)
+);
+create index if not exists mm_opt_cat_cat_ix on mm_option_category (category_id);
+declare
+  n number;
+begin
+  select count(*) into n from user_tab_cols where table_name = 'MM_ITEM_OPTION' and column_name = 'INCLUDED';
+  if n = 0 then
+    execute immediate q'[alter table mm_item_option add (included varchar2(1) default 'Y' not null
+                         constraint mm_item_option_inc_ck check (included in ('Y', 'N')))]';
+  end if;
+  select count(*) into n from user_tab_cols where table_name = 'MM_OPTION_COMPONENT' and column_name = 'PER_RECIPE';
+  if n = 0 then
+    execute immediate q'[alter table mm_option_component add (per_recipe varchar2(1) default 'N' not null
+                         constraint mm_opt_comp_rec_ck check (per_recipe in ('Y', 'N')))]';
+  end if;
+end;
+/
+-- the groups of options of each item: those of its category (not the ones it says N to) and its own (Y)
+create or replace view mm_item_option_group as
+select i.id item_id, co.group_id, 'C' source_
+from mm_item i join mm_category_option co on co.category_id = i.category_id
+where not exists (select 1 from mm_item_option x where x.item_id = i.id and x.group_id = co.group_id and x.included = 'N')
+union all
+select x.item_id, x.group_id, 'I' from mm_item_option x
+where x.included = 'Y'
+  and not exists (select 1 from mm_item i join mm_category_option co on co.category_id = i.category_id
+                  where i.id = x.item_id and co.group_id = x.group_id);
+-- the options an item may have: of its groups, each for all categories or for that of the item
+create or replace view mm_item_option_allowed as
+select g.item_id, g.group_id, o.id option_id
+from mm_item_option_group g join mm_option o on o.group_id = g.group_id join mm_item i on i.id = g.item_id
+where not exists (select 1 from mm_option_category c where c.option_id = o.id)
+   or exists (select 1 from mm_option_category c where c.option_id = o.id and c.category_id = i.category_id);
 declare
   n number;
 begin
