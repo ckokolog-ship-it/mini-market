@@ -4,8 +4,8 @@
 
 ## Περιεχόμενα
 
-- [Πίνακες](#πίνακες) (53)
-- [Όψεις](#όψεις) (25)
+- [Πίνακες](#πίνακες) (55)
+- [Όψεις](#όψεις) (27)
 - [Πακέτα](#πακέτα) (9)
 - [Triggers](#triggers) (20)
 - [Είδη παραστατικών](#είδη-παραστατικών)
@@ -19,6 +19,7 @@
 | [`MM_AUTH_LOG`](#mm_auth_log) | Οι συνδέσεις και οι αλλαγές των χρηστών: σύνδεση, λάθος κωδικός, κλείδωμα, αποσύνδεση, νέος χρήστης, κωδικός, ρόλος. Ποτέ ο ίδιος ο κωδικός. |
 | [`MM_CASH_MOVE`](#mm_cash_move) | Οι κινήσεις χρημάτων ενός ταμείου μέσα σε ένα Ζ: αρχικό ταμείο, πωλήσεις, επιστροφές, προκαταβολές, μετρητά μέσα και έξω. |
 | [`MM_CATEGORY`](#mm_category) | Οι κατηγορίες των ειδών. |
+| [`MM_CATEGORY_OPTION`](#mm_category_option) | Οι ομάδες επιλογών κάθε κατηγορίας: τις έχουν όλα τα είδη της. |
 | [`MM_COLOR`](#mm_color) | Τα χρώματα των παραλλαγών (ρούχα, παπούτσια). |
 | [`MM_COUNT`](#mm_count) | Οι απογραφές: μία αποθήκη, ανοιχτή, καταχωρημένη ή ακυρωμένη. Τα κινητά σαρώνουν, το γραφείο καταχωρίζει τις διαφορές στο απόθεμα. |
 | [`MM_COUNT_LINE`](#mm_count_line) | Οι γραμμές μιας απογραφής: είδος, πόσα μετρήθηκαν, πόσα είχε το σύστημα στην πρώτη σάρωση, από ποια συσκευή. |
@@ -38,6 +39,7 @@
 | [`MM_OBJECT`](#mm_object) | Το μενού: ομάδες και οθόνες, με σελίδα web και/ή φόρμα, όνομα, σειρά, ενεργό. |
 | [`MM_OBJECT_ITEM`](#mm_object_item) | Τα πεδία και οι ενέργειες κάθε οθόνης, για τα δικαιώματα. |
 | [`MM_OPTION`](#mm_option) | Οι επιλογές μιας ομάδας: όνομα, έξτρα τιμή με ΦΠΑ, προεπιλογή, σειρά. |
+| [`MM_OPTION_CATEGORY`](#mm_option_category) | Μια επιλογή μόνο για κάποιες κατηγορίες (καμία γραμμή: για όλες). |
 | [`MM_OPTION_COMPONENT`](#mm_option_component) | Τα υλικά μιας επιλογής: περισσότερο ενός υλικού, ή λιγότερο ενός της συνταγής (με μείον). |
 | [`MM_OPTION_GROUP`](#mm_option_group) | Οι ομάδες επιλογών του ταμείου (ζάχαρη, γάλα, έξτρα): μία ή όσες θέλεις, υποχρεωτική, σειρά. |
 | [`MM_PARTNER_MONTH`](#mm_partner_month) | Τα σύνολα κάθε μήνα ανά πελάτη και προμηθευτή (χρέωση και πίστωση). Τα κρατούν triggers. |
@@ -140,6 +142,19 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 | `name` | VARCHAR2(60) | όχι |  |  |  |
 
 - μοναδικό: `name`
+
+### MM_CATEGORY_OPTION
+
+Οι ομάδες επιλογών κάθε κατηγορίας: τις έχουν όλα τα είδη της.
+
+> the options by category (a cafe: Ζάχαρη on the coffees, not on the bougatsa): a group of options on a category, for all of its items (MM_CATEGORY_OPTION); an option only for some categories (MM_OPTION_CATEGORY; none: for all, e.g. Διπλός only for the coffees, not for the chocolate); an item its own exceptions (MM_ITEM_OPTION.INCLUDED: Y a group of its own, N a group of its category not for it). A material of an option per recipe (PER_RECIPE Y: its qty times what the recipe of the item has of it, e.g. Διπλός: 1 dose more of the coffee of each recipe; nothing if the recipe has none)
+
+_Ορίζεται στο `db/MM_TABLES.sql`._
+
+| Στήλη | Τύπος | Κενή | Προεπιλογή | Κλειδί | Σχόλιο του κώδικα |
+|---|---|---|---|---|---|
+| `category_id` | NUMBER | όχι |  | PK FK → [`MM_CATEGORY`](#mm_category) (on delete cascade) |  |
+| `group_id` | NUMBER | όχι |  | PK FK → [`MM_OPTION_GROUP`](#mm_option_group) (on delete cascade) |  |
 
 ### MM_COLOR
 
@@ -484,6 +499,9 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 |---|---|---|---|---|---|
 | `item_id` | NUMBER | όχι |  | PK FK → [`MM_ITEM`](#mm_item) (on delete cascade) |  |
 | `group_id` | NUMBER | όχι |  | PK FK → [`MM_OPTION_GROUP`](#mm_option_group) (on delete cascade) |  |
+| `included` | VARCHAR2(1) | όχι | 'Y' |  |  |
+
+- έλεγχος: `included in ('Y', 'N')`
 
 ### MM_KIT_COMPONENT
 
@@ -583,6 +601,17 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 - έλεγχος: `is_default in ('Y', 'N')`
 - έλεγχος: `price >= 0`
 
+### MM_OPTION_CATEGORY
+
+Μια επιλογή μόνο για κάποιες κατηγορίες (καμία γραμμή: για όλες).
+
+_Ορίζεται στο `db/MM_TABLES.sql`._
+
+| Στήλη | Τύπος | Κενή | Προεπιλογή | Κλειδί | Σχόλιο του κώδικα |
+|---|---|---|---|---|---|
+| `option_id` | NUMBER | όχι |  | PK FK → [`MM_OPTION`](#mm_option) (on delete cascade) |  |
+| `category_id` | NUMBER | όχι |  | PK FK → [`MM_CATEGORY`](#mm_category) (on delete cascade) |  |
+
 ### MM_OPTION_COMPONENT
 
 Τα υλικά μιας επιλογής: περισσότερο ενός υλικού, ή λιγότερο ενός της συνταγής (με μείον).
@@ -596,8 +625,10 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 | `option_id` | NUMBER | όχι |  | PK FK → [`MM_OPTION`](#mm_option) (on delete cascade) |  |
 | `component_id` | NUMBER | όχι |  | PK FK → [`MM_ITEM`](#mm_item) |  |
 | `qty` | NUMBER(12,3) | όχι |  |  |  |
+| `per_recipe` | VARCHAR2(1) | όχι | 'N' |  |  |
 
 - έλεγχος: `qty <> 0`
+- έλεγχος: `per_recipe in ('Y', 'N')`
 
 ### MM_OPTION_GROUP
 
@@ -1188,6 +1219,8 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 | `MM_EXPIRY` | Οι λήξεις: οι στρώσεις FIFO με ημερομηνία λήξης που έχουν ακόμα απόθεμα, ανά αποθήκη. | `item_id`, `code`, `name`, `unit`, `category`, `fifo_id`, `line_id`, `warehouse_id`, `warehouse`, `warehouse_name`, `expires`, `days_left`, `qty`, `left_`, `doc_id`, `doc_type`, `doc_no`, `doc_date`, `supplier` |
 | `MM_FIFO_VALUE` | Η αξία του αποθέματος κάθε είδους με FIFO, και το κόστος της επόμενης εξόδου. | `item_id`, `code`, `name`, `unit`, `category`, `stock`, `last_cost`, `value`, `unit_cost`, `next_cost`, `value_last` |
 | `MM_ITEM_AVAIL` | Το διαθέσιμο κάθε είδους: απόθεμα μείον όσα είναι δεσμευμένα σε κρατήσεις. | `item_id`, `code`, `name`, `stock`, `reserved`, `available` |
+| `MM_ITEM_OPTION_ALLOWED` | Οι επιλογές που μπορεί να έχει κάθε είδος: των ομάδων του, για την κατηγορία του. | `item_id`, `group_id`, `option_id` |
+| `MM_ITEM_OPTION_GROUP` | Οι ομάδες επιλογών κάθε είδους: της κατηγορίας του (εκτός από όσες εξαιρεί) και οι δικές του. | `item_id`, `group_id`, `source_` |
 | `MM_ITEM_WAREHOUSE` | Ένα είδος σε κάθε αποθήκη (η φόρμα των ειδών): απόθεμα, ελάχιστο, όσα λείπουν, αξία FIFO, πρώτη λήξη. | `id`, `item_id`, `code`, `name`, `main`, `stock`, `min_stock`, `missing`, `value_`, `expires` |
 | `MM_KIT_AVAIL` | Πόσα καλάθια ή σετ μπορούν να φτιαχτούν από το απόθεμα των ειδών τους. | `kit_id`, `code`, `name`, `ready`, `can_make` |
 | `MM_MIN_STOCK` | Τα είδη κάτω από το ελάχιστο απόθεμα, με τον τελευταίο προμηθευτή. | `category`, `code`, `name`, `unit`, `stock`, `min_stock`, `missing`, `supplier`, `item_id`, `serial_tracked`, `supplier_id` |
@@ -1524,6 +1557,9 @@ same transaction still sees the stock before the change (the change is applied a
   procedure option_delete(p_id number);
   procedure option_move(p_kind varchar2, p_id number, p_dir number);
   procedure item_option(p_item_id number, p_group_id number, p_on varchar2);
+  -- the options by category (MM_CATEGORY_OPTION, MM_OPTION_CATEGORY): a group on a category (Y) or off (N);
+  -- an option only for a category too (Y) or not (N; none left: for all). item_option is of one item: Y it
+  -- has the group (of its category: its exception N out), N it does not (of its category: an exception N)
   -- a line with its options (p_options: their ids, comma separated; null: none chosen): only the active
   -- options of the groups of the item, one of a group O; a required group without one: its default, else
   -- refused; the price of the line its price (default_price) and the extras; the options with the line
@@ -1533,8 +1569,12 @@ same transaction still sees the stock before the change (the change is applied a
   -- the next of the day (all the registers), once; null: none of them
   function counter_ticket(p_doc_id number) return number;
   -- the materials of an option (MM_OPTION_COMPONENT): more of a material (qty > 0) or less of one of the
-  -- recipe (< 0); 0: out. A material: not a kit, not with serials, not a model (errors MM-132)
-  procedure option_component(p_option_id number, p_component_id number, p_qty number);
+  -- recipe (< 0); 0: out; per recipe (p_per_recipe Y): its qty times what the recipe of the item has of it
+  -- (Διπλός: 1, a dose more). A material: not a kit, not with serials, not a model (errors MM-132)
+  procedure option_component(p_option_id number, p_component_id number, p_qty number,
+                             p_per_recipe varchar2 default 'N');
+  procedure category_option(p_category_id number, p_group_id number, p_on varchar2);
+  procedure option_category(p_option_id number, p_category_id number, p_on varchar2);
 ```
 
 ### MM_LEDGER

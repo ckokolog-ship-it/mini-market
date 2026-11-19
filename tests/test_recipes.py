@@ -113,6 +113,29 @@ def test_a_coffee_takes_its_materials(cafe):
     assert db.one('select count(*) from mm_check')[0] == 0
 
 
+def test_a_double_per_recipe(cafe):
+    """a material per recipe (Διπλός: 1): a dose more of what the recipe of the item has of it; a material the
+    recipe has not: nothing"""
+    db, ids, m, o = cafe
+    g = db.fn('option_group_save', int, None, 'TST Μέγεθος', 'O', 'N', 'Y')
+    dbl = db.fn('option_save', int, None, g, 'Διπλός', 0.50, 'N', 'Y')
+    db.proc('option_component', dbl, m['coffee'], 1, 'Y')
+    db.proc('option_component', dbl, m['oat'], 1, 'Y')                              # (not in the recipe)
+    db.proc('item_option', m['freddo'], g, 'Y')
+    assert db.one('select per_recipe from mm_option_component where option_id = :o and component_id = :c',
+                  o=dbl, c=m['coffee'])[0] == 'Y'
+    db.commit()
+    assert 'Ανά συνταγή' in fails(db, 'option_component', dbl, m['coffee'], 1, 'X')
+    d = db.fn('new_doc', int, 'ALP', p_register_id=ids['reg'])
+    db.fn('add_line_options', int, d, m['freddo'], 2, str(dbl))
+    db.proc('set_payment', d, 'CARD')
+    db.fn('post_doc', int, d)
+    db.commit()
+    assert moves(db, d) == {'COF': -0.072, 'MIL': -0.2, 'CUP': -2.0}              # 2 × (18 g + 18 g)
+    assert db.one('select price from mm_doc_line where doc_id = :d', d=d)[0] == 3.5
+    assert db.one('select count(*) from mm_check')[0] == 0
+
+
 def test_an_item_of_its_own_with_the_materials_of_its_options(cafe):
     """not a kit (bought ready, e.g. a croissant): its own stock, and the materials of its options (more only)"""
     db, ids, m, o = cafe

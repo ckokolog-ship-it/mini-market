@@ -74,9 +74,13 @@ async function lines(page) {      // [item, quantity] of each line of the receip
   if (SHOTS) await page.screenshot({ path: SHOTS + '/tiles.png', fullPage: true });
   // the options: their groups on the page, and on each tile which of them it has
   const optNames = await page.$$eval('section.opt-admin input[aria-label^="Όνομα επιλογών"]', (x) => x.map((y) => y.value));
-  ok(optNames.join(',') === 'Ζάχαρη,Γάλα,Έξτρα', 'the options of the demo: ' + optNames.join(','));
-  ok(await page.isChecked('input[aria-label="Ζάχαρη: Freddo espresso"]') && !(await page.isChecked('input[aria-label="Γάλα: Freddo espresso"]')),
-    'a tile: which options it has');
+  ok(optNames.join(',') === 'Μέγεθος,Ζάχαρη,Γάλα,Έξτρα', 'the options of the demo: ' + optNames.join(','));
+  // by category: the coffees their four groups, the bougatsa none; the shot only for the coffees
+  ok(await page.isChecked('input[aria-label="Μέγεθος: Freddo espresso"]') && await page.isChecked('input[aria-label="Ζάχαρη: Freddo espresso"]')
+    && !(await page.isChecked('input[aria-label="Μέγεθος: Μπουγάτσα κρέμα"]')), 'a tile: the options of its category');
+  ok(await page.isChecked('input[aria-label="Μέγεθος στην κατηγορία Καφές (πάγκος)"]')
+    && !(await page.isChecked('input[aria-label="Μέγεθος στην κατηγορία Σνακ και γλυκά (πάγκος)"]')), 'a group: its categories');
+  ok((await page.textContent('tr:has(input[aria-label="Όνομα: Έξτρα σφηνάκι"]) .only-for summary')) === 'Καφές (πάγκος)', 'an option only for a category');
   // the recipe of a coffee: its materials, its cost, what is left of its price; a material more, then out
   ok((await page.textContent('button[aria-label="Συνταγή: Freddo espresso"]')).startsWith('Συνταγή (2) · κόστος 0,42'),
     'a tile: its recipe and cost ' + await page.textContent('button[aria-label="Συνταγή: Freddo espresso"]'));
@@ -149,7 +153,27 @@ async function lines(page) {      // [item, quantity] of each line of the receip
   await page.waitForSelector('dialog.options-dialog', { state: 'detached' });
   await page.waitForFunction(() => [...document.querySelectorAll('main .line-options')].some((x) => x.textContent.includes('Σφηνάκι') || x.textContent.includes('σφηνάκι')));
   const opt = await page.$$eval('main .line-options', (x) => x.map((y) => y.textContent));
-  ok(opt.includes('Σκέτος, Έξτρα σφηνάκι +0,50, Κανέλα'), 'the line with its options: ' + opt.join(' | '));
+  ok(opt.includes('Μονός, Σκέτος, Έξτρα σφηνάκι +0,50, Κανέλα'), 'the line with its options: ' + opt.join(' | '));
+  // a double: its price; the chocolate: no shot, no sugar; the bougatsa: no dialog at all
+  await page.click('.tile-grid button.tile:has-text("Cappuccino") >> nth=1');
+  await page.waitForSelector('dialog.options-dialog[open]');
+  await page.click('dialog button.opt:has-text("Διπλός")');
+  ok((await page.textContent('dialog .opt-price')).startsWith('3,30'), 'a double cappuccino: ' + await page.textContent('dialog .opt-price'));
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog.options-dialog', { state: 'detached' });
+  await page.click('.tile-grid button.tile:has-text("Σοκολάτα")');
+  await page.waitForSelector('dialog.options-dialog[open]');
+  const choco = await page.$$eval('dialog button.opt', (x) => x.map((y) => y.firstChild.textContent));
+  ok(!choco.includes('Έξτρα σφηνάκι') && !choco.includes('Διπλός') && !choco.includes('Σκέτος') && choco.includes('Σαντιγί'),
+    'the chocolate: its options only ' + choco.join(','));
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog.options-dialog', { state: 'detached' });
+  const n0 = (await lines(page)).length;
+  await page.click('.tile-tab:has-text("Σνακ")');
+  await page.click('.tile-grid button.tile:has-text("Μπουγάτσα")');
+  await page.waitForFunction((k) => document.querySelectorAll('main table tbody tr').length === k + 1, n0);
+  ok(!(await page.$('dialog.options-dialog')), 'the bougatsa: straight into the receipt');
+  await page.click('.tile-tab:has-text("Καφέδες")');
   // its PLU typed: the dialog too; Esc: nothing
   await page.fill('input[name=code]', '101');
   await page.press('input[name=code]', 'Enter');
@@ -157,7 +181,7 @@ async function lines(page) {      // [item, quantity] of each line of the receip
   ok(true, 'a PLU of a coffee: its dialog');
   await page.keyboard.press('Escape');
   await page.waitForSelector('dialog.options-dialog', { state: 'detached' });
-  ok((await lines(page)).length === 3, 'Esc: nothing into the receipt');
+  ok((await lines(page)).length === 4, 'Esc: nothing into the receipt');
   // the phone: the tiles in two columns at least, no page wider than the screen
   await page.setViewportSize({ width: 390, height: 844 });
   const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);

@@ -202,3 +202,77 @@ def test_the_options_in_the_rest(api, opts, users):
     r = post(api, '/api/tiles/options/%d/delete' % sg['id'])
     assert sg['id'] not in [x['id'] for x in r['options']]
     assert db.one('select count(*) from mm_check')[0] == 0
+
+
+def test_the_options_by_category(api, opts, users):
+    """a group on a category: all of its items have it (not one that says no); an option only for some
+    categories: not for the others; a required group whose default is not for the item: its default not taken"""
+    db, ids, g, o = opts
+    cat_a = db.one('select category_id from mm_item where id = :i', i=ids['a'])[0]
+    v = db.cur.var(int)
+    db.cur.execute("insert into mm_category (name) values ('Test κατηγορία επιλογών') returning id into :v", v=v)
+    cat_t = v.getvalue()[0]
+    db.cur.execute('update mm_item set category_id = :c where id = :i', c=cat_t, i=ids['b'])
+    db.cur.execute('delete from mm_item_option where item_id = :i', i=ids['a'])          # (a: no groups of its own)
+    db.commit()
+    try:
+        def groups(item):
+            db.cur.execute('select group_id, source_ from mm_item_option_group where item_id = :i order by group_id', i=item)
+            return [tuple(r) for r in db.cur]
+        assert groups(ids['b']) == []
+        db.proc('category_option', cat_t, g['milk'], 'Y')
+        db.proc('category_option', cat_t, g['extra'], 'Y')
+        assert groups(ids['b']) == [(g['milk'], 'C'), (g['extra'], 'C')]
+        # the item says no to one of its category, then yes again; one of its own besides
+        db.proc('item_option', ids['b'], g['extra'], 'N')
+        assert groups(ids['b']) == [(g['milk'], 'C')]
+        db.proc('item_option', ids['b'], g['extra'], 'Y')
+        db.proc('item_option', ids['b'], g['sugar'], 'Y')
+        assert groups(ids['b']) == [(g['sugar'], 'I'), (g['milk'], 'C'), (g['extra'], 'C')]
+        assert db.one('select count(*) from mm_item_option where item_id = :i', i=ids['b'])[0] == 1   # (only its own)
+        # the shot only for the category of a: not for b
+        db.proc('option_category', o['shot'], cat_a, 'Y')
+        db.commit()
+        db.fn('open_z', int, ids['reg'], 0)
+        d = new_receipt(db, ids)
+        db.commit()
+        assert 'δεν είναι για αυτό το είδος' in fails(db, 'f:add_line_options', d, ids['b'], 1, str(o['shot']))
+        v = db.fn('add_line_options', int, d, ids['b'], 1, '%d,%d' % (o['cinnamon'], o['oat']))
+        assert db.one('select options from mm_doc_line where id = :v', v=v)[0] == 'Μέτριος, Βρώμης +0,30, Κανέλα'
+        # the default of a required group only for another category: none, so refused
+        db.proc('option_category', o['medium'], cat_a, 'Y')
+        db.commit()
+        assert 'Διάλεξε από την ομάδα «TST Ζάχαρη»' in fails(db, 'f:add_line_options', d, ids['b'], 1, None)
+        db.fn('add_line_options', int, d, ids['b'], 1, str(o['plain']))                 # (chosen: fine)
+        # a group off its category: its exceptions out too; the rules
+        db.proc('category_option', cat_t, g['extra'], 'N')
+        assert groups(ids['b']) == [(g['sugar'], 'I'), (g['milk'], 'C')]
+        assert 'Δεν υπάρχει κατηγορία' in fails(db, 'category_option', -1, g['milk'], 'Y')
+        assert 'Y (ναι) ή N' in fails(db, 'option_category', o['oat'], cat_t, 'X')
+        db.commit()
+        # the REST: the till has the options of each item; the page the categories
+        tg = db.fn('tile_group_save', int, None, 'TST Ομάδα', None, 'Y')
+        db.fn('tile_add', int, tg, ids['b'])
+        db.commit()
+        t = get(api, '/api/pos/tiles', token='CASHIER')
+        tb = [x for grp in t['groups'] for x in grp['tiles'] if x['item_id'] == ids['b']][0]
+        assert o['shot'] not in tb['option_ids'] and o['oat'] in tb['option_ids'] and o['medium'] not in tb['option_ids']
+        r = post(api, '/api/tiles/options/%d/category' % g['extra'], {'category_id': cat_t, 'on': True})
+        assert cat_t in [c['id'] for c in r['categories']]
+        assert cat_t in [x for x in r['options'] if x['id'] == g['extra']][0]['categories']
+        r = post(api, '/api/tiles/option/%d/category' % o['cinnamon'], {'category_id': cat_a, 'on': True})
+        assert [x for grp in r['options'] for x in grp['options'] if x['id'] == o['cinnamon']][0]['categories'] == [cat_a]
+        tile = [x for grp in r['groups'] for x in grp['tiles'] if x['item_id'] == ids['b']][0]
+        assert g['extra'] in tile['category_groups'] and g['sugar'] not in tile['category_groups']
+        assert post(api, '/api/tiles/options/%d/category' % g['extra'], {'on': True}, status=400)['error'] == 'missing'
+        assert post(api, '/api/tiles/options/%d/category' % g['extra'], {'category_id': cat_t, 'on': False},
+                    token='CASHIER', status=403)['error'] == 'forbidden'
+    finally:
+        db.conn.rollback()
+        test_core.close_open_z(db, ids['reg'])
+        for (d,) in db.cur.execute("select id from mm_doc where register_id = :r and status = 'D'", r=ids['reg']).fetchall():
+            db.proc('delete_doc', d)
+        db.cur.execute('update mm_item set category_id = :c where id = :i', c=cat_a, i=ids['b'])
+        db.cur.execute('delete from mm_item_option where item_id = :i', i=ids['b'])
+        db.cur.execute('delete from mm_category where id = :c', c=cat_t)
+        db.commit()
