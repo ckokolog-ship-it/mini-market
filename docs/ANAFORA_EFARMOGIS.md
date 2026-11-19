@@ -324,7 +324,7 @@ The page of the shop for its customers (/shop/, the WiFi of the shop): no login.
 
 ### Tiles.java
 
-The buttons of the till (a cafe: coffees, juices, sweets without a barcode): groups of buttons, in each the items as tiles, and the short number of an item (PLU, typed at the till instead of a scan). Every rule is in mm_core (tile_group_save, tile_add, tile_move, set_plu ...); errors MM-132. The till: each tile has the ids of its groups of options ("option_groups"), the groups with their active options in "options". The page: every group of options, its options, and the groups of each tile. Each POST returns the page again, as GET /api/tiles.
+The buttons of the till (a cafe: coffees, juices, sweets without a barcode): groups of buttons, in each the items as tiles, and the short number of an item (PLU, typed at the till instead of a scan). Every rule is in mm_core (tile_group_save, tile_add, tile_move, set_plu ...); errors MM-132. The page: the recipe of each tile ("recipe", its cost by the last price of each material "recipe_cost"), the materials of each option ("components"). The till: each tile has the ids of its groups of options ("option_groups"), the groups with their active options in "options". The page: every group of options, its options, and the groups of each tile. Each POST returns the page again, as GET /api/tiles.
 
 ```
   GET  /api/pos/tiles                        the till: the active groups with their tiles (active items),
@@ -346,6 +346,11 @@ The buttons of the till (a cafe: coffees, juices, sweets without a barcode): gro
   POST /api/tiles/option/{id} {name, price, default, active}    an option changed
   POST /api/tiles/option/{id}/move {dir}     /delete
   POST /api/tiles/item-options {code, group_id, on}   a group of options on an item (on: true) or off
+  POST /api/tiles/recipe {code, component, qty}      the recipe of an item (a kit never assembled: a sale
+                                             takes its materials): a material (its code) and how much
+                                             of it (0: out)
+  POST /api/tiles/option/{id}/component {component, qty}   the materials of an option: more (qty > 0)
+                                             or less of one of the recipe (< 0); 0: out
 ```
 
 ### Web.java
@@ -481,6 +486,7 @@ The pages of the shop (step 8): index.html, app.js, codes.js (the barcodes and Q
 | `test_places.py` (2) | where a user works (mm_auth.set_place, may_use; MM_USER.WAREHOUSE_ID, REGISTER_ID): its store and its register; the till of the pages only on the registers it may use (a cashier with a register: only that one; with a store: the registers of it; a manager: of its store; an administrator: all); the users in the pages (ADMIN): one made, changed (its place, role, active, password). |
 | `test_points.py` (2) | the points of the retail customers (MM_POINTS; mm_core.new_card, card_customer, set_doc_customer, use_points, post_doc, cancel_doc): a card (EAN-13 2990...), a receipt of a customer gives points by its total, points used as the discount of a receipt (its VAT right), a receipt cancelled gives them back; what is refused. The settings POINTS_PER_EURO, POINT_VALUE, POINTS_MIN. |
 | `test_promos.py` (9) | the promotions of MM_CORE.REPRICE on a draft sale, at each change: % off, buy N get M free (the cheapest pieces), a bundle for a price, one promotion a line (bundle, then N+M, then the best %), and the discount of the whole document spread by value (the VAT of each rate right). |
+| `test_recipes.py` (4) | the recipes of the cafe: a coffee is a kit never assembled (MM_KIT_COMPONENT), each sale takes its materials by FIFO; the materials of an option (MM_OPTION_COMPONENT, mm_core.option_component): more of one (a shot of coffee) or less of one of the recipe (oat milk instead of the fresh), never below 0; a cancel gives them back exactly; the cost of the line its materials; the REST of the page (the recipe of a tile, its cost; the materials of an option). |
 | `test_reports.py` (4) | the reports (reports/mkreports.py): the ledgers, sales, VAT, minimum stock; their XML (ASCII, every field with its source, every formula with its function, the summaries of a page only in the margin), and with MM_DSN their query and their words in the database, and the carry-over from page to page. |
 | `test_reservations.py` (9) | the reservations of MM_CORE (e.g. New Year cakes): the quantities reserved, the deposit in the cash register on its day, the delivery with a receipt that takes only the rest, the cancel with the deposit back. |
 | `test_rights.py` (3) | the rights (MM_RIGHTS): the roles of the system as the shop worked before them; the role of the level of a user kept with it (mm_auth.create_user, set_role); a role of the shop (made, a copy of another, its grants); a user in more than one role (the most of each); a field not above its screen; an action on a screen read only; the menu of a user; need (MM-197); what is refused (MM-198). |

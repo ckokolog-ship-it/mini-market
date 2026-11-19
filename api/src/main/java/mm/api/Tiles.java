@@ -35,7 +35,14 @@ import java.util.Map;
  *   POST /api/tiles/option/{id} {name, price, default, active}    an option changed
  *   POST /api/tiles/option/{id}/move {dir}     /delete
  *   POST /api/tiles/item-options {code, group_id, on}   a group of options on an item (on: true) or off
+ *   POST /api/tiles/recipe {code, component, qty}      the recipe of an item (a kit never assembled: a sale
+ *                                              takes its materials): a material (its code) and how much
+ *                                              of it (0: out)
+ *   POST /api/tiles/option/{id}/component {component, qty}   the materials of an option: more (qty > 0)
+ *                                              or less of one of the recipe (< 0); 0: out
  * </pre>
+ * The page: the recipe of each tile ("recipe", its cost by the last price of each material "recipe_cost"),
+ * the materials of each option ("components").
  * The till: each tile has the ids of its groups of options ("option_groups"), the groups with their active
  * options in "options". The page: every group of options, its options, and the groups of each tile.
  * Each POST returns the page again, as GET /api/tiles.
@@ -127,6 +134,21 @@ final class Tiles {
                 "select id, name, color, active from mm_tile_group order by sort_no, id");
         List<Map<String, Object>> tiles = Db.rows(c, TILES);
         withGroups(tiles, itemGroups(c, false));
+        List<Map<String, Object>> recipe = Db.rows(c, """
+                select k.kit_id item_id, i.id component_id, i.code, i.name, i.unit, k.qty, i.cost
+                from mm_kit_component k join mm_item i on i.id = k.component_id order by i.code""");
+        for (Map<String, Object> t : tiles) {
+            List<Map<String, Object>> mine = new ArrayList<>();
+            BigDecimal cost = BigDecimal.ZERO;
+            for (Map<String, Object> r : recipe) {
+                if (r.get("item_id").equals(t.get("item_id"))) {
+                    mine.add(r);
+                    cost = cost.add(((BigDecimal) r.get("qty")).multiply((BigDecimal) r.get("cost")));
+                }
+            }
+            t.put("recipe", mine);
+            t.put("recipe_cost", mine.isEmpty() ? null : cost.setScale(2, java.math.RoundingMode.HALF_UP));
+        }
         for (Map<String, Object> g : groups) {
             List<Map<String, Object>> mine = new ArrayList<>();
             for (Map<String, Object> t : tiles) {
@@ -136,11 +158,34 @@ final class Tiles {
             }
             g.put("tiles", mine);
         }
-        return Map.of("groups", groups, "options", optionGroups(c, false));
+        List<Map<String, Object>> options = optionGroups(c, false);
+        List<Map<String, Object>> comps = Db.rows(c, """
+                select oc.option_id, i.id component_id, i.code, i.name, i.unit, oc.qty, i.cost
+                from mm_option_component oc join mm_item i on i.id = oc.component_id order by i.code""");
+        for (Map<String, Object> g : options) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> os = (List<Map<String, Object>>) g.get("options");
+            for (Map<String, Object> o : os) {
+                List<Map<String, Object>> mine = new ArrayList<>();
+                for (Map<String, Object> x : comps) {
+                    if (x.get("option_id").equals(o.get("id"))) {
+                        mine.add(x);
+                    }
+                }
+                o.put("components", mine);
+            }
+        }
+        return Map.of("groups", groups, "options", options);
     }
 
     static Object post(Connection c, String[] p, Map<String, Object> in) throws SQLException {
         int n = p.length;
+        if (n == 2 && "recipe".equals(p[1])) {
+            long item = item(c, Http.text(in, "code", true));
+            long comp = item(c, Http.text(in, "component", true));
+            Db.exec(c, "begin mm_core.set_component(?, ?, ?); end;", item, comp, qtyOf(in));
+            return page(c);
+        }
         if (n == 2 && "item-options".equals(p[1])) {
             long item = item(c, Http.text(in, "code", true));
             BigDecimal g = Http.decimal(in, "group_id", null);
@@ -200,6 +245,11 @@ final class Tiles {
             }
             if (n == 4 && "delete".equals(p[3])) {
                 Db.exec(c, "begin mm_core.option_delete(?); end;", o);
+                return page(c);
+            }
+            if (n == 4 && "component".equals(p[3])) {
+                long comp = item(c, Http.text(in, "component", true));
+                Db.exec(c, "begin mm_core.option_component(?, ?, ?); end;", o, comp, qtyOf(in));
                 return page(c);
             }
             throw new Http.Fail(404, "not_found", "no such endpoint");
@@ -301,6 +351,14 @@ final class Tiles {
 
     private static boolean yes(Object v) {
         return Boolean.TRUE.equals(v) || "Y".equals(v) || "true".equals(v);
+    }
+
+    private static BigDecimal qtyOf(Map<String, Object> in) {
+        BigDecimal q = Http.decimal(in, "qty", null);
+        if (q == null) {
+            throw new Http.Fail(400, "missing", "qty");
+        }
+        return q;
     }
 
     private static int dir(Map<String, Object> in) {

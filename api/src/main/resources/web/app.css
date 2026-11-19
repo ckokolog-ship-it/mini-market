@@ -353,3 +353,6 @@ button.opt[aria-pressed="true"] { background: var(--accent); color: var(--accent
 .rc-cut { text-align: center; margin: 10px 0 6px; letter-spacing: 1px; }
 .rc-no { text-align: center; font-size: 34px; font-weight: 800; line-height: 1.1; }
 .rc-make { font-size: 14px; margin: 3px 0; }
+/* a recipe, the materials of an option */
+.recipe-btn { font-size: 12px; padding: 3px 8px; text-align: left; }
+dialog.materials { width: min(760px, calc(100vw - 32px)); }

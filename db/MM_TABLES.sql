@@ -1128,6 +1128,16 @@ create table if not exists mm_doc_line_option (
   constraint mm_doc_line_option_pk primary key (line_id, option_id)
 );
 create index if not exists mm_dlo_option_ix on mm_doc_line_option (option_id);
+-- the materials of an option (a cafe: the recipe of a coffee is a kit never assembled, MM_KIT_COMPONENT:
+-- each sale takes its materials): more (qty > 0, e.g. Έξτρα σφηνάκι: 9 g of coffee) or less of the recipe
+-- (qty < 0, e.g. Βρώμης: 0,15 L of oat milk and 0,15 L less of the fresh one); of a line, never below 0
+create table if not exists mm_option_component (
+  option_id    number       not null constraint mm_opt_comp_opt_fk references mm_option on delete cascade,
+  component_id number       not null constraint mm_opt_comp_item_fk references mm_item,
+  qty          number(12,3) not null constraint mm_opt_comp_qty_ck check (qty <> 0),
+  constraint mm_option_component_pk primary key (option_id, component_id)
+);
+create index if not exists mm_opt_comp_item_ix on mm_option_component (component_id);
 declare
   n number;
 begin

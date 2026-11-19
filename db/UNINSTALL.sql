@@ -64,6 +64,7 @@ drop table if exists mm_fifo_out cascade constraints purge;
 drop table if exists mm_fifo cascade constraints purge;
 drop table if exists mm_warehouse_min cascade constraints purge;
 drop table if exists mm_tile cascade constraints purge;
+drop table if exists mm_option_component cascade constraints purge;
 drop table if exists mm_doc_line_option cascade constraints purge;
 drop table if exists mm_item_option cascade constraints purge;
 drop table if exists mm_option cascade constraints purge;

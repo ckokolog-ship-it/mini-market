@@ -77,6 +77,32 @@ async function lines(page) {      // [item, quantity] of each line of the receip
   ok(optNames.join(',') === 'Ζάχαρη,Γάλα,Έξτρα', 'the options of the demo: ' + optNames.join(','));
   ok(await page.isChecked('input[aria-label="Ζάχαρη: Freddo espresso"]') && !(await page.isChecked('input[aria-label="Γάλα: Freddo espresso"]')),
     'a tile: which options it has');
+  // the recipe of a coffee: its materials, its cost, what is left of its price; a material more, then out
+  ok((await page.textContent('button[aria-label="Συνταγή: Freddo espresso"]')).startsWith('Συνταγή (2) · κόστος 0,42'),
+    'a tile: its recipe and cost ' + await page.textContent('button[aria-label="Συνταγή: Freddo espresso"]'));
+  await page.click('button[aria-label="Συνταγή: Freddo espresso"]');
+  await page.waitForSelector('dialog.materials[open] table');
+  const mats = await page.$$eval('dialog.materials tbody tr td:first-child', (x) => x.map((y) => y.textContent));
+  ok(mats.length === 2 && mats[0].startsWith('RAW01') && mats[1].startsWith('RAW08'), 'the materials: ' + mats.join(' | '));
+  ok((await page.textContent('dialog.materials')).includes('μένουν 2,08 €'), 'what is left of the price');
+  await page.fill('dialog.materials input[name=material_code]', 'RAW10');
+  await page.fill('dialog.materials input[name=material_qty]', '0.01');
+  await page.click('dialog.materials button:has-text("Βάλε")');
+  await page.waitForFunction(() => document.querySelectorAll('dialog.materials tbody tr').length === 3);
+  ok(true, 'a material more');
+  if (SHOTS) await page.screenshot({ path: SHOTS + '/recipe.png' });
+  await page.click('dialog.materials button[aria-label^="Έξω: Σιρόπι"]');
+  await page.waitForFunction(() => document.querySelectorAll('dialog.materials tbody tr').length === 2);
+  await page.click('dialog.materials button:has-text("Κλείσιμο")');
+  await page.waitForSelector('dialog.materials', { state: 'detached' });
+  ok(true, 'and out');
+  await page.click('button[aria-label="Υλικά: Βρώμης"]');
+  await page.waitForSelector('dialog.materials[open] table');
+  const oat = await page.$$eval('dialog.materials tbody tr', (x) => x.map((y) => y.cells[0].textContent + ' ' + y.cells[1].querySelector('input').value));
+  ok(oat.some((x) => x.startsWith('RAW04') && x.endsWith('-0.15')) && oat.some((x) => x.startsWith('RAW05') && x.endsWith('0.15')),
+    'the materials of an option, signed: ' + oat.join(' | '));
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog.materials', { state: 'detached' });
 
   // the cashier: no page of the buttons; the till with them
   await login(page, CASHIER);
