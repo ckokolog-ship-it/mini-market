@@ -2854,7 +2854,7 @@ create or replace package body mm_core as
     end;
   begin
     -- the options given: each an active option of a group of the item, once; one of a group O
-    for i in 1 .. regexp_count(nvl(p_options, ''), '[^,]+') loop
+    for i in 1 .. nvl(regexp_count(p_options, '[^,]+'), 0) loop
       begin
         v := to_number(trim(regexp_substr(p_options, '[^,]+', 1, i)));
       exception

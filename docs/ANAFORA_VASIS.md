@@ -4,7 +4,7 @@
 
 ## Περιεχόμενα
 
-- [Πίνακες](#πίνακες) (48)
+- [Πίνακες](#πίνακες) (52)
 - [Όψεις](#όψεις) (25)
 - [Πακέτα](#πακέτα) (9)
 - [Triggers](#triggers) (20)
@@ -25,16 +25,20 @@
 | [`MM_CUSTOMER`](#mm_customer) | Οι πελάτες: επωνυμία, ΑΦΜ (με έλεγχο ψηφίου), ΔΟΥ, στοιχεία επικοινωνίας, κάρτα και πόντοι. |
 | [`MM_DOC`](#mm_doc) | Τα παραστατικά: πρόχειρο (D), καταχωρημένο (P) με αριθμό και κινήσεις αποθήκης, ακυρωμένο (C). Πελάτης ή προμηθευτής, ταμείο και Ζ, αποθήκη (και αποθήκη παραλαβής της ενδοδιακίνησης), σύνολα, myDATA, ποιος το έφτιαξε και ποιος το καταχώρισε. |
 | [`MM_DOC_LINE`](#mm_doc_line) | Οι γραμμές των παραστατικών: είδος, ποσότητα, τιμή, εκπτώσεις, ΦΠΑ, σύνολα, ημερομηνία λήξης (στην παραλαβή). |
+| [`MM_DOC_LINE_OPTION`](#mm_doc_line_option) | Οι επιλογές κάθε γραμμής, με το όνομα και την τιμή τους εκείνη τη στιγμή. |
 | [`MM_DOC_TYPE`](#mm_doc_type) | Τα είδη παραστατικών: πώληση, αγορά ή εσωτερικό, τι κάνουν στο απόθεμα, στο υπόλοιπο και στον ΦΠΑ, ο επόμενος αριθμός, ο τύπος του myDATA. |
 | [`MM_FIFO`](#mm_fifo) | Οι στρώσεις FIFO: κάθε είσοδος στο απόθεμα μιας αποθήκης, με το κόστος της, πόσα μένουν και την ημερομηνία λήξης της. |
 | [`MM_FIFO_OUT`](#mm_fifo_out) | Τι πήρε κάθε έξοδος από κάθε στρώση FIFO, και με ποιο κόστος. Από εδώ βγαίνει το κόστος των πωλήσεων. |
 | [`MM_GRANT`](#mm_grant) | Τα δικαιώματα: τι επιτρέπει ένας ρόλος σε μια οθόνη, ένα πεδίο ή μια ενέργεια (N, R, W). |
 | [`MM_ITEM`](#mm_item) | Τα είδη: κωδικός, barcode, περιγραφή, κατηγορία, ΦΠΑ, μονάδα, τιμή λιανικής και χονδρικής, κόστος, απόθεμα, ελάχιστο, serials, σετ, παραλλαγές, όριο ανά πώληση. |
 | [`MM_ITEM_MONTH`](#mm_item_month) | Τα σύνολα κάθε μήνα ανά είδος (είσοδοι και έξοδοι): οι καρτέλες παίρνουν από εδώ το «από μεταφορά». Τα κρατούν triggers. |
+| [`MM_ITEM_OPTION`](#mm_item_option) | Ποιες ομάδες επιλογών έχει κάθε είδος. |
 | [`MM_KIT_COMPONENT`](#mm_kit_component) | Η σύνθεση ενός καλαθιού ή σετ: ποια είδη και πόσα από το καθένα. |
 | [`MM_LEDGER_ROW`](#mm_ledger_row) | Προσωρινές γραμμές για τα reports των καρτελών (μέσα στη συναλλαγή που τις τυπώνει). |
 | [`MM_OBJECT`](#mm_object) | Το μενού: ομάδες και οθόνες, με σελίδα web και/ή φόρμα, όνομα, σειρά, ενεργό. |
 | [`MM_OBJECT_ITEM`](#mm_object_item) | Τα πεδία και οι ενέργειες κάθε οθόνης, για τα δικαιώματα. |
+| [`MM_OPTION`](#mm_option) | Οι επιλογές μιας ομάδας: όνομα, έξτρα τιμή με ΦΠΑ, προεπιλογή, σειρά. |
+| [`MM_OPTION_GROUP`](#mm_option_group) | Οι ομάδες επιλογών του ταμείου (ζάχαρη, γάλα, έξτρα): μία ή όσες θέλεις, υποχρεωτική, σειρά. |
 | [`MM_PARTNER_MONTH`](#mm_partner_month) | Τα σύνολα κάθε μήνα ανά πελάτη και προμηθευτή (χρέωση και πίστωση). Τα κρατούν triggers. |
 | [`MM_PAYMENT`](#mm_payment) | Οι εισπράξεις από πελάτες και οι πληρωμές σε προμηθευτές· με ταμείο, και κίνηση στο Ζ του. |
 | [`MM_PIN_LOG`](#mm_pin_log) | Κάθε φορά που φάνηκε το PIN μιας κάρτας κινητής: ποιος, πότε, ποια κάρτα. |
@@ -263,6 +267,7 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 | `warehouse_id` | NUMBER | ναι |  | FK → [`MM_WAREHOUSE`](#mm_warehouse) |  |
 | `to_warehouse_id` | NUMBER | ναι |  | FK → [`MM_WAREHOUSE`](#mm_warehouse) | a transfer between two warehouses (Δελτίο ενδοδιακίνησης, DEN: side T): the warehouse it goes to |
 | `reason` | VARCHAR2(10) | ναι |  |  | a consumption (DAN): why the goods went out: USE (used by the shop), DAMAGE, SAMPLE, EXPIRED |
+| `ticket_no` | NUMBER(5) | ναι |  |  |  |
 
 - έλεγχος: `deposit >= 0`
 - έλεγχος: `disc_amount >= 0`
@@ -300,12 +305,26 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 | `promo_id` | NUMBER | ναι |  | FK → [`MM_PROMO`](#mm_promo) (on delete set null) |  |
 | `promo_disc` | NUMBER(12,2) | όχι | 0 |  |  |
 | `doc_disc` | NUMBER(12,2) | όχι | 0 |  |  |
+| `options` | VARCHAR2(400) | ναι |  |  |  |
 
 - μοναδικό: `doc_id, line_no`
 - έλεγχος: `discount between 0 and 100`
 - έλεγχος: `price >= 0`
 - έλεγχος: `qty > 0`
 - έλεγχος: `total = net + vat`
+
+### MM_DOC_LINE_OPTION
+
+Οι επιλογές κάθε γραμμής, με το όνομα και την τιμή τους εκείνη τη στιγμή.
+
+_Ορίζεται στο `db/MM_TABLES.sql`._
+
+| Στήλη | Τύπος | Κενή | Προεπιλογή | Κλειδί | Σχόλιο του κώδικα |
+|---|---|---|---|---|---|
+| `line_id` | NUMBER | όχι |  | PK FK → [`MM_DOC_LINE`](#mm_doc_line) (on delete cascade) |  |
+| `option_id` | NUMBER | όχι |  | PK FK → [`MM_OPTION`](#mm_option) |  |
+| `name` | VARCHAR2(40) | όχι |  |  |  |
+| `price` | NUMBER(8,2) | όχι |  |  |  |
 
 ### MM_DOC_TYPE
 
@@ -454,6 +473,17 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 
 - έλεγχος: `month = trunc(month, 'MM')`
 
+### MM_ITEM_OPTION
+
+Ποιες ομάδες επιλογών έχει κάθε είδος.
+
+_Ορίζεται στο `db/MM_TABLES.sql`._
+
+| Στήλη | Τύπος | Κενή | Προεπιλογή | Κλειδί | Σχόλιο του κώδικα |
+|---|---|---|---|---|---|
+| `item_id` | NUMBER | όχι |  | PK FK → [`MM_ITEM`](#mm_item) (on delete cascade) |  |
+| `group_id` | NUMBER | όχι |  | PK FK → [`MM_OPTION_GROUP`](#mm_option_group) (on delete cascade) |  |
+
 ### MM_KIT_COMPONENT
 
 Η σύνθεση ενός καλαθιού ή σετ: ποια είδη και πόσα από το καθένα.
@@ -531,6 +561,48 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 - μοναδικό: `object_id, code`
 - έλεγχος: `regexp_like(code, '^[A-Z][A-Z0-9_]{1,29}$')`
 - έλεγχος: `kind in ('F', 'A')`
+
+### MM_OPTION
+
+Οι επιλογές μιας ομάδας: όνομα, έξτρα τιμή με ΦΠΑ, προεπιλογή, σειρά.
+
+_Ορίζεται στο `db/MM_TABLES.sql`._
+
+| Στήλη | Τύπος | Κενή | Προεπιλογή | Κλειδί | Σχόλιο του κώδικα |
+|---|---|---|---|---|---|
+| `id` | NUMBER | όχι | identity | PK |  |
+| `group_id` | NUMBER | όχι |  | FK → [`MM_OPTION_GROUP`](#mm_option_group) (on delete cascade) |  |
+| `name` | VARCHAR2(40) | όχι |  |  |  |
+| `price` | NUMBER(8,2) | όχι | 0 |  |  |
+| `is_default` | VARCHAR2(1) | όχι | 'N' |  |  |
+| `sort_no` | NUMBER | όχι | 0 |  |  |
+| `active` | VARCHAR2(1) | όχι | 'Y' |  |  |
+
+- έλεγχος: `active in ('Y', 'N')`
+- έλεγχος: `is_default in ('Y', 'N')`
+- έλεγχος: `price >= 0`
+
+### MM_OPTION_GROUP
+
+Οι ομάδες επιλογών του ταμείου (ζάχαρη, γάλα, έξτρα): μία ή όσες θέλεις, υποχρεωτική, σειρά.
+
+> the options of an item at the till (a cafe: sugar, milk, extras): groups of options, one of them (pick O, e.g. Ζάχαρη: σκέτος / μέτριος / γλυκός; required: a line has one, its default if none chosen) or any of them (M, e.g. Έξτρα: σφηνάκι, σιρόπι); an option may cost more (price, with VAT, added to the price of the line); the groups of each item (MM_ITEM_OPTION). A line keeps the options chosen (MM_DOC_LINE_OPTION: name and price as they were) and their text (MM_DOC_LINE.OPTIONS, for the screens and the prints)
+
+_Ορίζεται στο `db/MM_TABLES.sql`._
+
+| Στήλη | Τύπος | Κενή | Προεπιλογή | Κλειδί | Σχόλιο του κώδικα |
+|---|---|---|---|---|---|
+| `id` | NUMBER | όχι | identity | PK |  |
+| `name` | VARCHAR2(40) | όχι |  |  |  |
+| `pick` | VARCHAR2(1) | όχι | 'O' |  |  |
+| `required` | VARCHAR2(1) | όχι | 'N' |  |  |
+| `sort_no` | NUMBER | όχι | 0 |  |  |
+| `active` | VARCHAR2(1) | όχι | 'Y' |  |  |
+
+- έλεγχος: `active in ('Y', 'N')`
+- έλεγχος: `pick = 'O' or required = 'N'`
+- έλεγχος: `pick in ('O', 'M')`
+- έλεγχος: `required in ('Y', 'N')`
 
 ### MM_PARTNER_MONTH
 
@@ -1421,6 +1493,28 @@ same transaction still sees the stock before the change (the change is applied a
   procedure tile_delete(p_id number);
   procedure tile_move(p_kind varchar2, p_id number, p_dir number);
   procedure set_plu(p_item_id number, p_plu number);
+
+  -- the options at the till (MM_OPTION_GROUP, MM_OPTION, MM_ITEM_OPTION; errors MM-132): a group new (p_id
+  -- null) or changed (pick O one, M any; required: of a pick O), out with its options; an option new or
+  -- changed (its price with VAT, >= 0; is_default: the one of its group, the others not), out (used on a
+  -- receipt already: not, made inactive instead); a group (p_kind G) or an option (O) one place before or
+  -- after; the groups of an item (p_on Y: in, N: out)
+  function option_group_save(p_id number, p_name varchar2, p_pick varchar2, p_required varchar2,
+                             p_active varchar2) return number;
+  procedure option_group_delete(p_id number);
+  function option_save(p_id number, p_group_id number, p_name varchar2, p_price number, p_default varchar2,
+                       p_active varchar2) return number;
+  procedure option_delete(p_id number);
+  procedure option_move(p_kind varchar2, p_id number, p_dir number);
+  procedure item_option(p_item_id number, p_group_id number, p_on varchar2);
+  -- a line with its options (p_options: their ids, comma separated; null: none chosen): only the active
+  -- options of the groups of the item, one of a group O; a required group without one: its default, else
+  -- refused; the price of the line its price (default_price) and the extras; the options with the line
+  -- (MM_DOC_LINE_OPTION) and their text (MM_DOC_LINE.OPTIONS: "Μέτριος, Βρώμης +0,30")
+  function add_line_options(p_doc_id number, p_item_id number, p_qty number, p_options varchar2) return number;
+  -- the number at the counter of a posted retail receipt with an item of the buttons of the till (MM_TILE):
+  -- the next of the day (all the registers), once; null: none of them
+  function counter_ticket(p_doc_id number) return number;
 ```
 
 ### MM_LEDGER
