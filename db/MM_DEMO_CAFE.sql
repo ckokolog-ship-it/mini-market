@@ -77,13 +77,19 @@ declare
     v number;
   begin
     select min(id) into v from mm_option_group where name = p_name;
-    return nvl(v, mm_core.option_group_save(null, p_name, p_pick, p_required, 'Y'));
+    if v is null then                   -- (not nvl: it makes both of its arguments)
+      v := mm_core.option_group_save(null, p_name, p_pick, p_required, 'Y');
+    end if;
+    return v;
   end;
   function opt(p_group number, p_name varchar2, p_price number, p_default varchar2) return number is
     v number;
   begin
     select min(id) into v from mm_option where group_id = p_group and name = p_name;
-    return nvl(v, mm_core.option_save(null, p_group, p_name, p_price, p_default, 'Y'));
+    if v is null then
+      v := mm_core.option_save(null, p_group, p_name, p_price, p_default, 'Y');
+    end if;
+    return v;
   end;
   procedure on_items(p_group number, p_codes sys.odcivarchar2list) is
     v number;
