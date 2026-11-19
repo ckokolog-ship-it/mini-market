@@ -15,7 +15,8 @@ create or replace package mm_core as
   function afm_ok(p_afm varchar2) return varchar2;
   function ean_ok(p_code varchar2) return varchar2;
 
-  -- an item by barcode or by code; null if there is none (or it is inactive and p_active = 'Y')
+  -- an item by barcode or by code, else by its short number (PLU, the buttons of the till); null if there is
+  -- none (or it is inactive and p_active = 'Y')
   function find_item(p_code varchar2, p_active varchar2 default 'Y') return number;
 
   -- net, VAT and total of a line: the price with VAT (p_incl = 'Y') or without
@@ -198,6 +199,17 @@ create or replace package mm_core as
   -- the error); MM_BACKUP_STATE tells the pages when the last good one is too old
   procedure backup_done(p_ok varchar2, p_text varchar2);
 
+  -- the buttons of the till (MM_TILE_GROUP, MM_TILE; errors MM-132): a group new (p_id null: at the end) or
+  -- changed, out with its tiles; an item into a group (at its end; not a model, not inactive), a tile out;
+  -- a group (p_kind G) or a tile (T) one place before (p_dir -1) or after (+1); the short number of an item
+  -- (PLU, null: none): not the PLU, the code or the barcode of another item
+  function tile_group_save(p_id number, p_name varchar2, p_color varchar2, p_active varchar2) return number;
+  procedure tile_group_delete(p_id number);
+  function tile_add(p_group_id number, p_item_id number) return number;
+  procedure tile_delete(p_id number);
+  procedure tile_move(p_kind varchar2, p_id number, p_dir number);
+  procedure set_plu(p_item_id number, p_plu number);
+
 end mm_core;
 /
 
@@ -299,6 +311,9 @@ create or replace package body mm_core as
     select min(id) into v from mm_item
     where (barcode = trim(p_code) or code = upper(trim(p_code)))
       and (p_active = 'N' or active = 'Y');
+    if v is null and regexp_like(trim(p_code), '^[0-9]{1,5}$') then
+      select min(id) into v from mm_item where plu = to_number(trim(p_code)) and (p_active = 'N' or active = 'Y');
+    end if;
     return v;
   end;
 
@@ -2487,6 +2502,142 @@ create or replace package body mm_core as
     else
       put('BACKUP_FAILED_AT', to_char(sysdate, 'YYYY-MM-DD HH24:MI:SS'));
       put('BACKUP_ERROR', p_text);
+    end if;
+  end;
+
+  -- ---------------------------------------------------------------------------------------------
+  -- the buttons of the till
+  function tile_group_save(p_id number, p_name varchar2, p_color varchar2, p_active varchar2) return number is
+    v number := p_id;
+    n number;
+  begin
+    if trim(p_name) is null then
+      fail(32, 'Η ομάδα κουμπιών θέλει όνομα');
+    end if;
+    if length(trim(p_name)) > 40 then
+      fail(32, 'Το όνομα της ομάδας: ως 40 χαρακτήρες');
+    end if;
+    if p_color is not null and not regexp_like(p_color, '^#[0-9a-fA-F]{6}$') then
+      fail(32, 'Το χρώμα της ομάδας: #RRGGBB, π.χ. #8b5a2b');
+    end if;
+    if nvl(p_active, 'Y') not in ('Y', 'N') then
+      fail(32, 'Ενεργή: Y ή N');
+    end if;
+    if v is null then
+      select nvl(max(sort_no), 0) + 10 into n from mm_tile_group;
+      insert into mm_tile_group (name, color, sort_no, active)
+      values (trim(p_name), nvl(p_color, '#6b7280'), n, nvl(p_active, 'Y')) returning id into v;
+    else
+      update mm_tile_group set name = trim(p_name), color = nvl(p_color, color), active = nvl(p_active, active)
+      where id = v;
+      if sql%rowcount = 0 then
+        fail(32, 'Δεν υπάρχει ομάδα κουμπιών ' || v);
+      end if;
+    end if;
+    return v;
+  end;
+
+  procedure tile_group_delete(p_id number) is
+  begin
+    delete from mm_tile_group where id = p_id;
+    if sql%rowcount = 0 then
+      fail(32, 'Δεν υπάρχει ομάδα κουμπιών ' || p_id);
+    end if;
+  end;
+
+  function tile_add(p_group_id number, p_item_id number) return number is
+    v number;
+    n number;
+    m varchar2(1);
+    a varchar2(1);
+  begin
+    select count(*) into n from mm_tile_group where id = p_group_id;
+    if n = 0 then
+      fail(32, 'Δεν υπάρχει ομάδα κουμπιών ' || p_group_id);
+    end if;
+    begin
+      select is_model, active into m, a from mm_item where id = p_item_id;
+    exception
+      when no_data_found then fail(6, 'Δεν υπάρχει είδος ' || p_item_id);
+    end;
+    if m = 'Y' then
+      fail(32, 'Ένα μοντέλο δεν πουλιέται: βάλε μια παραλλαγή του');
+    end if;
+    if a = 'N' then
+      fail(32, 'Το είδος δεν είναι ενεργό');
+    end if;
+    select count(*) into n from mm_tile where group_id = p_group_id and item_id = p_item_id;
+    if n > 0 then
+      fail(32, 'Το είδος είναι ήδη σε αυτή την ομάδα');
+    end if;
+    select nvl(max(sort_no), 0) + 10 into n from mm_tile where group_id = p_group_id;
+    insert into mm_tile (group_id, item_id, sort_no) values (p_group_id, p_item_id, n) returning id into v;
+    return v;
+  end;
+
+  procedure tile_delete(p_id number) is
+  begin
+    delete from mm_tile where id = p_id;
+    if sql%rowcount = 0 then
+      fail(32, 'Δεν υπάρχει κουμπί ' || p_id);
+    end if;
+  end;
+
+  procedure tile_move(p_kind varchar2, p_id number, p_dir number) is
+    type t_ids is table of number;
+    ids t_ids;
+    g number;
+    k pls_integer;
+    j pls_integer;
+    x number;
+  begin
+    if p_kind = 'G' then
+      select id bulk collect into ids from mm_tile_group order by sort_no, id;
+    elsif p_kind = 'T' then
+      select max(group_id) into g from mm_tile where id = p_id;
+      select id bulk collect into ids from mm_tile where group_id = g order by sort_no, id;
+    else
+      fail(32, 'Μετακίνηση: G (ομάδα) ή T (κουμπί)');
+    end if;
+    for i in 1 .. ids.count loop
+      if ids(i) = p_id then
+        k := i;
+      end if;
+    end loop;
+    if k is null then
+      fail(32, case p_kind when 'G' then 'Δεν υπάρχει ομάδα κουμπιών ' else 'Δεν υπάρχει κουμπί ' end || p_id);
+    end if;
+    j := k + sign(nvl(p_dir, 0));
+    if j between 1 and ids.count then
+      x := ids(k);
+      ids(k) := ids(j);
+      ids(j) := x;
+    end if;
+    for i in 1 .. ids.count loop
+      if p_kind = 'G' then
+        update mm_tile_group set sort_no = i * 10 where id = ids(i);
+      else
+        update mm_tile set sort_no = i * 10 where id = ids(i);
+      end if;
+    end loop;
+  end;
+
+  procedure set_plu(p_item_id number, p_plu number) is
+    n number;
+  begin
+    if p_plu is not null and (p_plu <> trunc(p_plu) or p_plu not between 1 and 99999) then
+      fail(32, 'Ο σύντομος κωδικός (PLU): ένας αριθμός από 1 ως 99999');
+    end if;
+    if p_plu is not null then
+      select count(*) into n from mm_item
+      where id <> p_item_id and (plu = p_plu or code = to_char(p_plu) or barcode = to_char(p_plu));
+      if n > 0 then
+        fail(32, 'Ο σύντομος κωδικός ' || p_plu || ' είναι ήδη άλλου είδους (PLU, κωδικός ή barcode)');
+      end if;
+    end if;
+    update mm_item set plu = p_plu where id = p_item_id;
+    if sql%rowcount = 0 then
+      fail(6, 'Δεν υπάρχει είδος ' || p_item_id);
     end if;
   end;
 
