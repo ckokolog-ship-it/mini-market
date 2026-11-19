@@ -1739,7 +1739,9 @@ async function posPage(params) {
   };
   // an item with options (a coffee: sugar, milk, extras): a dialog, big buttons, the defaults chosen
   const press = (t) => {
-    const groups = (t.option_groups || []).map((id) => optGroups.get(id)).filter((g) => g && g.options.length);
+    const mine = new Set(t.option_ids || []);          // (the options for its category)
+    const groups = (t.option_groups || []).map((id) => optGroups.get(id)).filter(Boolean)
+      .map((g) => ({ ...g, options: g.options.filter((o) => mine.has(o.id)) })).filter((g) => g.options.length);
     if (!groups.length) return put(t, Number(n.value || 1));
     return chooseOptions(t, groups, Number(n.value || 1), put);
   };
@@ -2090,37 +2092,44 @@ async function tilesPage() {
     const code = el('input', { name: 'material_code', placeholder: 'κωδικός ή barcode του υλικού', class: 'w11', 'aria-label': 'Υλικό' });
     const q = el('input', { name: 'material_qty', type: 'number', step: '0.001', class: 'w6', 'aria-label': 'Ποσότητα υλικού' });
     const close = () => { dlg.close(); dlg.remove(); };
-    const change = async (c, v) => {
+    const perRecipe = el('input', { type: 'checkbox', name: 'material_per_recipe' });
+    const change = async (c, v, pr) => {
       try {
-        const r = await set(c, v);
+        const r = await set(c, v, pr);
         draw(r);
         fill(rowsOf(find(r)) || []);
         return true;
       } catch (e) { fail(e); return false; }
     };
     const fill = (rows) => {
-      const cost = rows.reduce((s, x) => s + x.qty * x.cost, 0);
+      const cost = rows.reduce((s, x) => s + (x.per_recipe === 'Y' ? 0 : x.qty * x.cost), 0);
       body.replaceChildren(rows.length ? table([['Υλικό'], ['Ποσότητα', 'num'], [''], ['Κόστος €', 'num'], ['']], rows.map((x) => {
         const inp = el('input', { type: 'number', step: '0.001', value: x.qty, class: 'w6', 'aria-label': 'Ποσότητα: ' + x.name });
-        inp.addEventListener('change', () => change(x.code, Number(inp.value || 0)));
-        return el('tr', {}, el('td', { class: 'wrap' }, `${x.code} ${x.name}`), el('td', { class: 'num' }, inp), el('td', {}, UNIT_TEXT[x.unit] || x.unit),
-          num(x.qty * x.cost), el('td', { class: 'num' }, el('button', { type: 'button', class: 'danger', 'aria-label': 'Έξω: ' + x.name, onclick: () => change(x.code, 0) }, '×')));
+        const rec = x.per_recipe === 'Y';
+        inp.addEventListener('change', () => change(x.code, Number(inp.value || 0), rec));
+        return el('tr', {}, el('td', { class: 'wrap' }, `${x.code} ${x.name}`), el('td', { class: 'num' }, inp),
+          el('td', {}, rec ? '× της συνταγής' : UNIT_TEXT[x.unit] || x.unit),
+          rec ? el('td', { class: 'num muted' }, 'όσο η συνταγή') : num(x.qty * x.cost),
+          el('td', { class: 'num' }, el('button', { type: 'button', class: 'danger', 'aria-label': 'Έξω: ' + x.name, onclick: () => change(x.code, 0, rec) }, '×')));
       })) : el('p', { class: 'muted' }, signed ? 'Κανένα υλικό: η επιλογή δεν αλλάζει τη συνταγή.' : 'Καμία συνταγή: το είδος πουλιέται από το δικό του απόθεμα.'),
       el('p', {}, el('strong', {}, `Κόστος ${money(cost)} €`),
         price !== null && rows.length ? ` · μένουν ${money(price - cost)} € από τα ${money(price)} € (${Math.round((price - cost) / price * 100)}%)` : '',
         el('span', { class: 'muted' }, ' · με την τελευταία τιμή αγοράς κάθε υλικού')));
     };
     dlg.append(el('h2', {}, title),
-      el('p', { class: 'muted' }, signed ? 'Περισσότερο από ένα υλικό (π.χ. 0,009 kg καφέ για ένα σφηνάκι) ή λιγότερο από ένα της συνταγής, με μείον (π.χ. −0,15 L φρέσκο γάλα όταν μπαίνει ρόφημα βρώμης).'
+      el('p', { class: 'muted' }, signed ? 'Περισσότερο από ένα υλικό (π.χ. 0,009 kg καφέ για ένα σφηνάκι) ή λιγότερο από ένα της συνταγής, με μείον (π.χ. −0,15 L φρέσκο γάλα όταν μπαίνει ρόφημα βρώμης). '
+        + '«× της συνταγής»: όσο έχει η συνταγή του κάθε είδους από αυτό το υλικό, επί την ποσότητα (Διπλός: 1 δόση ακόμα, σε κάθε καφέ η δική του).'
         : 'Ό,τι φεύγει από την αποθήκη με κάθε πώληση (π.χ. 0,018 kg καφέ, 1 ποτήρι). Τα υλικά είναι κανονικά είδη, που αγοράζονται με δελτίο παραλαβής.'),
       body,
       el('form', {
         class: 'row',
         onsubmit: async (ev) => {
           ev.preventDefault();
-          if (code.value.trim() && q.value !== '' && await change(code.value.trim(), Number(q.value))) { code.value = ''; q.value = ''; code.focus(); }
+          if (code.value.trim() && q.value !== '' && await change(code.value.trim(), Number(q.value), perRecipe.checked)) { code.value = ''; q.value = ''; code.focus(); }
         },
-      }, el('label', { class: 'grow' }, 'Υλικό', code), camera(code), el('label', {}, 'Ποσότητα', q), el('button', { type: 'submit' }, 'Βάλε')),
+      }, el('label', { class: 'grow' }, 'Υλικό', code), camera(code), el('label', {}, 'Ποσότητα', q),
+      signed ? el('label', { class: 'check', title: 'Η ποσότητα × όσο έχει η συνταγή του είδους από αυτό το υλικό (Διπλός: 1)' }, perRecipe, '× της συνταγής') : null,
+      el('button', { type: 'submit' }, 'Βάλε')),
       el('div', { class: 'row opt-foot' }, el('span', { class: 'grow' }), el('button', { type: 'button', class: 'primary', onclick: close }, 'Κλείσιμο')));
     dlg.addEventListener('cancel', (ev) => { ev.preventDefault(); close(); });
     document.body.append(dlg);
@@ -2150,12 +2159,26 @@ async function tilesPage() {
         w ? el('button', { type: 'button', 'aria-label': 'Πιο πάνω: ' + g.name, disabled: gi === 0, onclick: () => call(`tiles/options/${g.id}/move`, { dir: -1 }) }, '↑') : null,
         w ? el('button', { type: 'button', 'aria-label': 'Πιο κάτω: ' + g.name, disabled: gi === r.options.length - 1, onclick: () => call(`tiles/options/${g.id}/move`, { dir: 1 }) }, '↓') : null,
         w ? el('button', { type: 'button', class: 'danger', onclick: () => { if (confirm(`Να φύγουν οι επιλογές «${g.name}»;`)) call(`tiles/options/${g.id}/delete`, {}, 'Έφυγαν'); } }, 'Διαγραφή') : null),
-      g.options.length ? table([['Επιλογή'], ['Έξτρα €', 'num'], ['Προεπιλογή'], ['Ενεργή'], ['']], g.options.map((o, oi) => {
+      (r.categories || []).length ? el('div', { class: 'row cat-row' }, el('span', { class: 'muted' }, 'Σε κατηγορίες (όλα τους τα είδη):'),
+        r.categories.map((c) => el('label', { class: 'check' }, el('input', {
+          type: 'checkbox', checked: (g.categories || []).includes(c.id), disabled: !w, 'aria-label': `${g.name} στην κατηγορία ${c.name}`,
+          onchange: (ev) => call(`tiles/options/${g.id}/category`, { category_id: c.id, on: ev.target.checked },
+            `${g.name}: ${ev.target.checked ? 'σε' : 'όχι σε'} ${c.name}`),
+        }), c.name))) : null,
+      g.options.length ? table([['Επιλογή'], ['Έξτρα €', 'num'], ['Προεπιλογή'], ['Ενεργή'], ['Μόνο για'], ['']], g.options.map((o, oi) => {
+        const only = (o.categories || []);
+        const onlyFor = el('details', { class: 'only-for' }, el('summary', {}, only.length
+          ? (r.categories || []).filter((c) => only.includes(c.id)).map((c) => c.name).join(', ') : 'όλες'),
+        (r.categories || []).map((c) => el('label', { class: 'check' }, el('input', {
+          type: 'checkbox', checked: only.includes(c.id), disabled: !w, 'aria-label': `${o.name} μόνο για ${c.name}`,
+          onchange: (ev) => call(`tiles/option/${o.id}/category`, { category_id: c.id, on: ev.target.checked },
+            `${o.name}: ${ev.target.checked ? 'και για' : 'όχι για'} ${c.name}`),
+        }), c.name)));
         const on2 = el('input', { value: o.name, maxlength: 40, 'aria-label': 'Όνομα: ' + o.name, disabled: !w });
         const pr = el('input', { type: 'number', step: '0.01', min: '0', value: o.price, class: 'w6', 'aria-label': 'Έξτρα: ' + o.name, disabled: !w });
         const df = el('input', { type: 'checkbox', checked: o.is_default === 'Y', 'aria-label': 'Προεπιλογή: ' + o.name, disabled: !w });
         const ac = el('input', { type: 'checkbox', checked: o.active === 'Y', 'aria-label': 'Ενεργή: ' + o.name, disabled: !w });
-        return el('tr', { class: o.active === 'Y' ? null : 'cancelled' }, el('td', {}, on2), el('td', { class: 'num' }, pr), el('td', {}, df), el('td', {}, ac),
+        return el('tr', { class: o.active === 'Y' ? null : 'cancelled' }, el('td', {}, on2), el('td', { class: 'num' }, pr), el('td', {}, df), el('td', {}, ac), el('td', {}, onlyFor),
           el('td', { class: 'num' }, w ? [
             el('button', { type: 'button', onclick: () => call('tiles/option/' + o.id, { name: on2.value.trim(), price: Number(pr.value || 0), default: df.checked, active: ac.checked }, 'Αποθηκεύτηκε: ' + on2.value.trim()) }, 'Αποθήκευση'),
             el('button', { type: 'button', 'aria-label': 'Πιο πάνω: ' + o.name, disabled: oi === 0, onclick: () => call(`tiles/option/${o.id}/move`, { dir: -1 }) }, '↑'),
@@ -2164,7 +2187,7 @@ async function tilesPage() {
             el('button', {
               type: 'button', 'aria-label': 'Υλικά: ' + o.name,
               onclick: () => materials(`Υλικά της επιλογής: ${o.name}`, true, (x) => x.options.flatMap((gg) => gg.options).find((y) => y.id === o.id),
-                (y) => y.components, (code, q) => api(`tiles/option/${o.id}/component`, { component: code, qty: q }), null),
+                (y) => y.components, (code, q, pr) => api(`tiles/option/${o.id}/component`, { component: code, qty: q, per_recipe: !!pr }), null),
             }, (o.components || []).length ? `Υλικά (${o.components.length})` : 'Υλικά')] : null));
       })) : el('p', { class: 'muted' }, 'Καμία επιλογή ακόμα.'),
       w ? el('form', {
@@ -2200,7 +2223,7 @@ async function tilesPage() {
             type: 'checkbox', checked: (t.option_groups || []).includes(o.id), disabled: !w, 'aria-label': `${o.name}: ${t.name}`,
             onchange: (ev) => call('tiles/item-options', { code: t.code, group_id: o.id, on: ev.target.checked },
               (ev.target.checked ? 'Με ' : 'Χωρίς ') + o.name + ': ' + t.name),
-          }), o.name))) : null;
+          }), o.name, (t.category_groups || []).includes(o.id) ? el('span', { class: 'muted', title: 'Από την κατηγορία του είδους' }, ' ᶜ') : null))) : null;
         return paint(el('div', { class: 'tile' + (t.active === 'Y' ? '' : ' cancelled') },
           el('span', { class: 'tile-name' }, t.name), el('span', { class: 'tile-price' }, `${t.code} · ${money(t.price)} €`),
           el('label', { class: 'tile-plu-edit' }, 'PLU', p), og,

@@ -223,6 +223,9 @@ create or replace package mm_core as
   procedure option_delete(p_id number);
   procedure option_move(p_kind varchar2, p_id number, p_dir number);
   procedure item_option(p_item_id number, p_group_id number, p_on varchar2);
+  -- the options by category (MM_CATEGORY_OPTION, MM_OPTION_CATEGORY): a group on a category (Y) or off (N);
+  -- an option only for a category too (Y) or not (N; none left: for all). item_option is of one item: Y it
+  -- has the group (of its category: its exception N out), N it does not (of its category: an exception N)
   -- a line with its options (p_options: their ids, comma separated; null: none chosen): only the active
   -- options of the groups of the item, one of a group O; a required group without one: its default, else
   -- refused; the price of the line its price (default_price) and the extras; the options with the line
@@ -232,8 +235,12 @@ create or replace package mm_core as
   -- the next of the day (all the registers), once; null: none of them
   function counter_ticket(p_doc_id number) return number;
   -- the materials of an option (MM_OPTION_COMPONENT): more of a material (qty > 0) or less of one of the
-  -- recipe (< 0); 0: out. A material: not a kit, not with serials, not a model (errors MM-132)
-  procedure option_component(p_option_id number, p_component_id number, p_qty number);
+  -- recipe (< 0); 0: out; per recipe (p_per_recipe Y): its qty times what the recipe of the item has of it
+  -- (Διπλός: 1, a dose more). A material: not a kit, not with serials, not a model (errors MM-132)
+  procedure option_component(p_option_id number, p_component_id number, p_qty number,
+                             p_per_recipe varchar2 default 'N');
+  procedure category_option(p_category_id number, p_group_id number, p_on varchar2);
+  procedure option_category(p_option_id number, p_category_id number, p_on varchar2);
 
 end mm_core;
 /
@@ -1116,7 +1123,13 @@ create or replace package body mm_core as
                       select component_id, (l.qty - take) * qty q from mm_kit_component where kit_id = l.item_id
                       union all
                       select oc.component_id, l.qty * oc.qty from mm_doc_line_option x
-                      join mm_option_component oc on oc.option_id = x.option_id where x.line_id = l.id)
+                      join mm_option_component oc on oc.option_id = x.option_id
+                      where x.line_id = l.id and oc.per_recipe = 'N'
+                      union all
+                      select oc.component_id, (l.qty - take) * oc.qty * kc.qty from mm_doc_line_option x
+                      join mm_option_component oc on oc.option_id = x.option_id and oc.per_recipe = 'Y'
+                      join mm_kit_component kc on kc.kit_id = l.item_id and kc.component_id = oc.component_id
+                      where x.line_id = l.id)
                     group by component_id order by component_id) loop
             stock_move(c.component_id, 'DOC', -c.q, p_doc_id, l.id);
           end loop;
@@ -1125,7 +1138,7 @@ create or replace package body mm_core as
         stock_move(l.item_id, 'DOC', t.stock_sign * l.qty, p_doc_id, l.id);
         if t.stock_sign = -1 then               -- the materials of its options (a sale: more of them only)
           for c in (select oc.component_id, sum(l.qty * oc.qty) q from mm_doc_line_option x
-                    join mm_option_component oc on oc.option_id = x.option_id
+                    join mm_option_component oc on oc.option_id = x.option_id and oc.per_recipe = 'N'
                     where x.line_id = l.id group by oc.component_id having sum(oc.qty) > 0 order by 1) loop
             stock_move(c.component_id, 'DOC', -c.q, p_doc_id, l.id);
           end loop;
@@ -2838,14 +2851,68 @@ create or replace package body mm_core as
     if n = 0 then
       fail(32, 'Δεν υπάρχει ομάδα επιλογών ' || p_group_id);
     end if;
-    if p_on = 'Y' then
-      merge into mm_item_option x using (select p_item_id item_id, p_group_id group_id from dual) y
-      on (x.item_id = y.item_id and x.group_id = y.group_id)
-      when not matched then insert (item_id, group_id) values (y.item_id, y.group_id);
-    elsif p_on = 'N' then
+    if nvl(p_on, 'X') not in ('Y', 'N') then
+      fail(32, 'Η ομάδα στο είδος: Y (ναι) ή N (όχι)');
+    end if;
+    -- the group of its category: an exception of the item (N), or none (Y); else a group of its own
+    select count(*) into n from mm_item i join mm_category_option co on co.category_id = i.category_id
+    where i.id = p_item_id and co.group_id = p_group_id;
+    if (n > 0 and p_on = 'Y') or (n = 0 and p_on = 'N') then
       delete from mm_item_option where item_id = p_item_id and group_id = p_group_id;
     else
-      fail(32, 'Η ομάδα στο είδος: Y (ναι) ή N (όχι)');
+      merge into mm_item_option x using (select p_item_id item_id, p_group_id group_id from dual) y
+      on (x.item_id = y.item_id and x.group_id = y.group_id)
+      when matched then update set included = p_on
+      when not matched then insert (item_id, group_id, included) values (y.item_id, y.group_id, p_on);
+    end if;
+  end;
+
+  procedure category_option(p_category_id number, p_group_id number, p_on varchar2) is
+    n number;
+  begin
+    select count(*) into n from mm_category where id = p_category_id;
+    if n = 0 then
+      fail(32, 'Δεν υπάρχει κατηγορία ' || p_category_id);
+    end if;
+    select count(*) into n from mm_option_group where id = p_group_id;
+    if n = 0 then
+      fail(32, 'Δεν υπάρχει ομάδα επιλογών ' || p_group_id);
+    end if;
+    if p_on = 'Y' then
+      merge into mm_category_option x using (select p_category_id category_id, p_group_id group_id from dual) y
+      on (x.category_id = y.category_id and x.group_id = y.group_id)
+      when not matched then insert (category_id, group_id) values (y.category_id, y.group_id);
+      -- (an item of it with the group of its own: now of the category)
+      delete from mm_item_option where group_id = p_group_id and included = 'Y'
+      and item_id in (select id from mm_item where category_id = p_category_id);
+    elsif p_on = 'N' then
+      delete from mm_category_option where category_id = p_category_id and group_id = p_group_id;
+      delete from mm_item_option where group_id = p_group_id and included = 'N'
+      and item_id in (select id from mm_item where category_id = p_category_id);
+    else
+      fail(32, 'Η ομάδα στην κατηγορία: Y (ναι) ή N (όχι)');
+    end if;
+  end;
+
+  procedure option_category(p_option_id number, p_category_id number, p_on varchar2) is
+    n number;
+  begin
+    select count(*) into n from mm_option where id = p_option_id;
+    if n = 0 then
+      fail(32, 'Δεν υπάρχει επιλογή ' || p_option_id);
+    end if;
+    select count(*) into n from mm_category where id = p_category_id;
+    if n = 0 then
+      fail(32, 'Δεν υπάρχει κατηγορία ' || p_category_id);
+    end if;
+    if p_on = 'Y' then
+      merge into mm_option_category x using (select p_option_id option_id, p_category_id category_id from dual) y
+      on (x.option_id = y.option_id and x.category_id = y.category_id)
+      when not matched then insert (option_id, category_id) values (y.option_id, y.category_id);
+    elsif p_on = 'N' then
+      delete from mm_option_category where option_id = p_option_id and category_id = p_category_id;
+    else
+      fail(32, 'Η επιλογή στην κατηγορία: Y (ναι) ή N (όχι)');
     end if;
   end;
 
@@ -2883,7 +2950,7 @@ create or replace package body mm_core as
         when no_data_found then fail(32, 'Δεν υπάρχει επιλογή ' || v);
       end;
       select * into g from mm_option_group where id = o.group_id;
-      select count(*) into n from mm_item_option where item_id = p_item_id and group_id = o.group_id;
+      select count(*) into n from mm_item_option_allowed where item_id = p_item_id and option_id = v;
       if n = 0 or o.active = 'N' or g.active = 'N' then
         fail(32, 'Η επιλογή «' || o.name || '» δεν είναι για αυτό το είδος');
       end if;
@@ -2901,16 +2968,18 @@ create or replace package body mm_core as
       end if;
     end loop;
     -- a required group without a choice: its default, else refused
-    for r in (select og.id, og.name from mm_item_option io join mm_option_group og on og.id = io.group_id
+    for r in (select og.id, og.name from mm_item_option_group io join mm_option_group og on og.id = io.group_id
               where io.item_id = p_item_id and og.active = 'Y' and og.required = 'Y' order by og.sort_no, og.id) loop
-      select count(*) into n from mm_option where group_id = r.id and active = 'Y';
+      select count(*) into n from mm_item_option_allowed a join mm_option o3 on o3.id = a.option_id
+      where a.item_id = p_item_id and a.group_id = r.id and o3.active = 'Y';
       if n > 0 then
         n := 0;
         for i in 1 .. k loop
           select n + count(*) into n from mm_option where id = chosen(i) and group_id = r.id;
         end loop;
         if n = 0 then
-          select min(id) into v from mm_option where group_id = r.id and active = 'Y' and is_default = 'Y';
+          select min(o3.id) into v from mm_item_option_allowed a join mm_option o3 on o3.id = a.option_id
+          where a.item_id = p_item_id and a.group_id = r.id and o3.active = 'Y' and o3.is_default = 'Y';
           if v is null then
             fail(32, 'Διάλεξε από την ομάδα «' || r.name || '»');
           end if;
@@ -2969,7 +3038,8 @@ create or replace package body mm_core as
     return n;
   end;
 
-  procedure option_component(p_option_id number, p_component_id number, p_qty number) is
+  procedure option_component(p_option_id number, p_component_id number, p_qty number,
+                             p_per_recipe varchar2 default 'N') is
     c mm_item%rowtype;
     n number;
   begin
@@ -2989,14 +3059,18 @@ create or replace package body mm_core as
       delete from mm_option_component where option_id = p_option_id and component_id = p_component_id;
       return;
     end if;
+    if nvl(p_per_recipe, 'N') not in ('Y', 'N') then
+      fail(32, 'Ανά συνταγή: Y ή N');
+    end if;
     if c.kit = 'Y' or c.serial_tracked = 'Y' or c.is_model = 'Y' then
       fail(32, 'Το ' || c.code || ' δεν γίνεται υλικό (είναι σετ, έχει serials ή είναι μοντέλο)');
     end if;
     merge into mm_option_component x
     using (select p_option_id option_id, p_component_id component_id from dual) s
     on (x.option_id = s.option_id and x.component_id = s.component_id)
-    when matched then update set qty = p_qty
-    when not matched then insert (option_id, component_id, qty) values (s.option_id, s.component_id, p_qty);
+    when matched then update set qty = p_qty, per_recipe = nvl(p_per_recipe, 'N')
+    when not matched then insert (option_id, component_id, qty, per_recipe)
+                          values (s.option_id, s.component_id, p_qty, nvl(p_per_recipe, 'N'));
   end;
 
 end mm_core;

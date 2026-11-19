@@ -472,7 +472,7 @@ final class Pos {
             }
             // an item with options (a coffee: sugar, milk): its line through add_line_options (the defaults)
             boolean withOptions = options != null || ((BigDecimal) Db.rows(c, """
-                    select count(*) n from mm_item_option io join mm_option_group g on g.id = io.group_id
+                    select count(*) n from mm_item_option_group io join mm_option_group g on g.id = io.group_id
                     where io.item_id = ? and g.active = 'Y'""", v).get(0).get("n")).signum() > 0;
             try (CallableStatement cs = c.prepareCall(withOptions
                     ? "begin ? := mm_core.add_line_options(?, ?, ?, ?); end;" : "begin ? := mm_core.add_line(?, ?, ?); end;")) {

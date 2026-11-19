@@ -34,12 +34,18 @@ import java.util.Map;
  *   POST /api/tiles/options/{id}/add {name, price, default}       an option into the group
  *   POST /api/tiles/option/{id} {name, price, default, active}    an option changed
  *   POST /api/tiles/option/{id}/move {dir}     /delete
- *   POST /api/tiles/item-options {code, group_id, on}   a group of options on an item (on: true) or off
+ *   POST /api/tiles/options/{id}/category {category_id, on}   a group of options on a category (all of its
+ *                                              items) or off
+ *   POST /api/tiles/option/{id}/category {category_id, on}    an option only for a category too, or not (none:
+ *                                              for all)
+ *   POST /api/tiles/item-options {code, group_id, on}   a group of options on an item (on: true) or off (a
+ *                                              group of its category: its exception)
  *   POST /api/tiles/recipe {code, component, qty}      the recipe of an item (a kit never assembled: a sale
  *                                              takes its materials): a material (its code) and how much
  *                                              of it (0: out)
- *   POST /api/tiles/option/{id}/component {component, qty}   the materials of an option: more (qty > 0)
- *                                              or less of one of the recipe (< 0); 0: out
+ *   POST /api/tiles/option/{id}/component {component, qty, per_recipe}   the materials of an option: more
+ *                                              (qty > 0) or less of one of the recipe (< 0); 0: out; per_recipe:
+ *                                              qty times what the recipe has of it (a double: 1)
  * </pre>
  * The page: the recipe of each tile ("recipe", its cost by the last price of each material "recipe_cost"),
  * the materials of each option ("components").
@@ -52,17 +58,42 @@ final class Tiles {
     }
 
     private static final String TILES = """
-            select t.id, t.group_id, t.item_id, i.code, i.name, i.price, i.plu, i.active
+            select t.id, t.group_id, t.item_id, i.code, i.name, i.price, i.plu, i.active, i.category_id
             from mm_tile t join mm_item i on i.id = t.item_id
             order by t.sort_no, t.id""";
 
-    /** the groups of options of each item (active only: the till; all: the page), in their order */
+    /**
+     * the groups of options of each item (MM_ITEM_OPTION_GROUP: of its category, or its own; active only: the
+     * till; all: the page), in their order; with "C" the source of each (of its category), in "of_category"
+     */
     private static Map<Object, List<Object>> itemGroups(Connection c, boolean activeOnly) throws SQLException {
         Map<Object, List<Object>> out = new LinkedHashMap<>();
         for (Map<String, Object> r : Db.rows(c, """
-                select io.item_id, g.id from mm_item_option io join mm_option_group g on g.id = io.group_id
+                select io.item_id, g.id from mm_item_option_group io join mm_option_group g on g.id = io.group_id
                 where (? = 'N' or g.active = 'Y') order by g.sort_no, g.id""", activeOnly ? "Y" : "N")) {
             out.computeIfAbsent(r.get("item_id"), k -> new ArrayList<>()).add(r.get("id"));
+        }
+        return out;
+    }
+
+    /** the options each item may have (MM_ITEM_OPTION_ALLOWED: of its groups, and for its category) */
+    private static Map<Object, List<Object>> itemOptions(Connection c) throws SQLException {
+        Map<Object, List<Object>> out = new LinkedHashMap<>();
+        for (Map<String, Object> r : Db.rows(c, """
+                select a.item_id, a.option_id from mm_item_option_allowed a join mm_option o on o.id = a.option_id
+                order by o.sort_no, o.id""")) {
+            out.computeIfAbsent(r.get("item_id"), k -> new ArrayList<>()).add(r.get("option_id"));
+        }
+        return out;
+    }
+
+    /** the groups of each item that are of its category */
+    private static Map<Object, List<Object>> categoryGroups(Connection c) throws SQLException {
+        Map<Object, List<Object>> out = new LinkedHashMap<>();
+        for (Map<String, Object> r : Db.rows(c, """
+                select i.id item_id, co.group_id from mm_item i join mm_category_option co on co.category_id = i.category_id
+                where exists (select 1 from mm_tile t where t.item_id = i.id)""")) {
+            out.computeIfAbsent(r.get("item_id"), k -> new ArrayList<>()).add(r.get("group_id"));
         }
         return out;
     }
@@ -77,14 +108,24 @@ final class Tiles {
                 select id, group_id, name, price, is_default, active,
                        (select count(*) from mm_doc_line_option x where x.option_id = o.id) used
                 from mm_option o where (? = 'N' or active = 'Y') order by sort_no, id""", a);
+        Map<Object, List<Object>> only = new LinkedHashMap<>();
+        for (Map<String, Object> r : Db.rows(c, "select option_id, category_id from mm_option_category")) {
+            only.computeIfAbsent(r.get("option_id"), k -> new ArrayList<>()).add(r.get("category_id"));
+        }
+        Map<Object, List<Object>> on = new LinkedHashMap<>();
+        for (Map<String, Object> r : Db.rows(c, "select group_id, category_id from mm_category_option")) {
+            on.computeIfAbsent(r.get("group_id"), k -> new ArrayList<>()).add(r.get("category_id"));
+        }
         for (Map<String, Object> g : groups) {
             List<Map<String, Object>> mine = new ArrayList<>();
             for (Map<String, Object> o : opts) {
                 if (o.get("group_id").equals(g.get("id"))) {
+                    o.put("categories", only.getOrDefault(o.get("id"), List.of()));
                     mine.add(o);
                 }
             }
             g.put("options", mine);
+            g.put("categories", on.getOrDefault(g.get("id"), List.of()));
         }
         return groups;
     }
@@ -95,13 +136,21 @@ final class Tiles {
         }
     }
 
+    private static void withOptions(List<Map<String, Object>> tiles, Map<Object, List<Object>> io) {
+        for (Map<String, Object> t : tiles) {
+            t.put("option_ids", io.getOrDefault(t.get("item_id"), List.of()));
+        }
+    }
+
     /** the till: the active groups, their tiles of active items; the most sold of the last 7 days */
     static Map<String, Object> forTill(Connection c) throws SQLException {
         List<Map<String, Object>> groups = Db.rows(c,
                 "select id, name, color from mm_tile_group where active = 'Y' order by sort_no, id");
         List<Map<String, Object>> tiles = Db.rows(c, TILES);
         Map<Object, List<Object>> ig = itemGroups(c, true);
+        Map<Object, List<Object>> io = itemOptions(c);
         withGroups(tiles, ig);
+        withOptions(tiles, io);
         for (Map<String, Object> g : groups) {
             List<Map<String, Object>> mine = new ArrayList<>();
             for (Map<String, Object> t : tiles) {
@@ -121,6 +170,7 @@ final class Tiles {
                 group by i.id, i.code, i.name, i.price, i.plu
                 order by sold desc, i.code fetch first 8 rows only""");
         withGroups(frequent, ig);
+        withOptions(frequent, io);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("groups", groups);
         out.put("frequent", frequent);
@@ -134,6 +184,10 @@ final class Tiles {
                 "select id, name, color, active from mm_tile_group order by sort_no, id");
         List<Map<String, Object>> tiles = Db.rows(c, TILES);
         withGroups(tiles, itemGroups(c, false));
+        Map<Object, List<Object>> cg = categoryGroups(c);
+        for (Map<String, Object> t : tiles) {
+            t.put("category_groups", cg.getOrDefault(t.get("item_id"), List.of()));
+        }
         List<Map<String, Object>> recipe = Db.rows(c, """
                 select k.kit_id item_id, i.id component_id, i.code, i.name, i.unit, k.qty, i.cost
                 from mm_kit_component k join mm_item i on i.id = k.component_id order by i.code""");
@@ -160,7 +214,7 @@ final class Tiles {
         }
         List<Map<String, Object>> options = optionGroups(c, false);
         List<Map<String, Object>> comps = Db.rows(c, """
-                select oc.option_id, i.id component_id, i.code, i.name, i.unit, oc.qty, i.cost
+                select oc.option_id, i.id component_id, i.code, i.name, i.unit, oc.qty, i.cost, oc.per_recipe
                 from mm_option_component oc join mm_item i on i.id = oc.component_id order by i.code""");
         for (Map<String, Object> g : options) {
             @SuppressWarnings("unchecked")
@@ -175,7 +229,13 @@ final class Tiles {
                 o.put("components", mine);
             }
         }
-        return Map.of("groups", groups, "options", options);
+        List<Map<String, Object>> cats = Db.rows(c, """
+                select c.id, c.name from mm_category c
+                where exists (select 1 from mm_item i join mm_tile t on t.item_id = i.id where i.category_id = c.id)
+                   or exists (select 1 from mm_category_option x where x.category_id = c.id)
+                   or exists (select 1 from mm_option_category x where x.category_id = c.id)
+                order by c.name""");
+        return Map.of("groups", groups, "options", options, "categories", cats);
     }
 
     static Object post(Connection c, String[] p, Map<String, Object> in) throws SQLException {
@@ -227,6 +287,10 @@ final class Tiles {
                         saveOption(c, null, g, in);
                         return page(c);
                     }
+                    case "category" -> {
+                        Db.exec(c, "begin mm_core.category_option(?, ?, ?); end;", categoryOf(in), g, yes(in.get("on")) ? "Y" : "N");
+                        return page(c);
+                    }
                     default -> {
                     }
                 }
@@ -249,7 +313,12 @@ final class Tiles {
             }
             if (n == 4 && "component".equals(p[3])) {
                 long comp = item(c, Http.text(in, "component", true));
-                Db.exec(c, "begin mm_core.option_component(?, ?, ?); end;", o, comp, qtyOf(in));
+                Db.exec(c, "begin mm_core.option_component(?, ?, ?, ?); end;", o, comp, qtyOf(in),
+                        yes(in.get("per_recipe")) ? "Y" : "N");
+                return page(c);
+            }
+            if (n == 4 && "category".equals(p[3])) {
+                Db.exec(c, "begin mm_core.option_category(?, ?, ?); end;", o, categoryOf(in), yes(in.get("on")) ? "Y" : "N");
                 return page(c);
             }
             throw new Http.Fail(404, "not_found", "no such endpoint");
@@ -351,6 +420,14 @@ final class Tiles {
 
     private static boolean yes(Object v) {
         return Boolean.TRUE.equals(v) || "Y".equals(v) || "true".equals(v);
+    }
+
+    private static BigDecimal categoryOf(Map<String, Object> in) {
+        BigDecimal v = Http.decimal(in, "category_id", null);
+        if (v == null) {
+            throw new Http.Fail(400, "missing", "category_id");
+        }
+        return v;
     }
 
     private static BigDecimal qtyOf(Map<String, Object> in) {

@@ -356,3 +356,7 @@ button.opt[aria-pressed="true"] { background: var(--accent); color: var(--accent
 /* a recipe, the materials of an option */
 .recipe-btn { font-size: 12px; padding: 3px 8px; text-align: left; }
 dialog.materials { width: min(760px, calc(100vw - 32px)); }
+/* the options by category */
+.cat-row { gap: 4px 12px; margin: 4px 0 8px; }
+.only-for summary { cursor: pointer; white-space: nowrap; }
+.only-for[open] { display: flex; flex-direction: column; gap: 2px; }
