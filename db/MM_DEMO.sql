@@ -353,4 +353,51 @@ begin
 end;
 /
 
+-- the cafe of the shop (the buttons of the till, #/tiles): coffees, juices, sweets without a barcode, each with a
+-- short number (PLU, typed at the till), in three groups of buttons. A category of their own (not the
+-- promotion of the coffees in packs)
+insert into mm_category (name)
+select 'Καφέ πάγκου' from dual where not exists (select 1 from mm_category where name = 'Καφέ πάγκου');
+insert into mm_item (code, barcode, name, category_id, vat_code, unit, price, cost, min_stock, plu)
+select v.code, null, v.name, c.id, v.vat_code, 'PCS', v.price, v.cost, 0, v.plu
+from (values
+  ('CAF01', 'Freddo espresso',          'B', 2.50, 0.45, 101),
+  ('CAF02', 'Freddo cappuccino',        'B', 3.00, 0.60, 102),
+  ('CAF03', 'Espresso',                 'B', 1.60, 0.30, 103),
+  ('CAF04', 'Cappuccino',               'B', 2.80, 0.55, 104),
+  ('CAF05', 'Ελληνικός',                'B', 1.80, 0.25, 105),
+  ('CAF06', 'Φραπέ',                    'B', 2.20, 0.30, 106),
+  ('CAF07', 'Σοκολάτα ζεστή',           'B', 3.00, 0.70, 107),
+  ('CAF08', 'Τσάι',                     'B', 1.80, 0.20, 108),
+  ('CAF21', 'Χυμός πορτοκάλι φρέσκος',  'B', 3.50, 1.10, 121),
+  ('CAF22', 'Σμούθι φράουλα',           'B', 4.00, 1.40, 122),
+  ('CAF23', 'Λεμονάδα σπιτική',         'B', 2.80, 0.60, 123),
+  ('CAF41', 'Τυρόπιτα',                 'B', 2.20, 0.90, 141),
+  ('CAF42', 'Κρουασάν βουτύρου',        'B', 1.90, 0.70, 142),
+  ('CAF43', 'Μπουγάτσα κρέμα',          'B', 2.80, 1.00, 143),
+  ('CAF44', 'Κέικ σοκολάτα (κομμάτι)',  'B', 2.50, 0.80, 144),
+  ('CAF45', 'Τοστ γαλοπούλα-τυρί',      'B', 2.60, 1.00, 145)
+) v (code, name, vat_code, price, cost, plu)
+join mm_category c on c.name = 'Καφέ πάγκου'
+where not exists (select 1 from mm_item i where i.code = v.code);
+
+declare
+  g number;
+  n number;
+  t number;
+begin
+  select count(*) into n from mm_tile_group;
+  if n = 0 then
+    for x in (select 'Καφέδες' name, '#8b5a2b' color, 'CAF0' pfx from dual union all
+              select 'Χυμοί', '#e08a00', 'CAF2' from dual union all
+              select 'Σνακ και γλυκά', '#b4436c', 'CAF4' from dual) loop
+      g := mm_core.tile_group_save(null, x.name, x.color, 'Y');
+      for i in (select id from mm_item where code like x.pfx || '%' order by code) loop
+        t := mm_core.tile_add(g, i.id);
+      end loop;
+    end loop;
+  end if;
+end;
+/
+
 commit;

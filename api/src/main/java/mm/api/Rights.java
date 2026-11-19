@@ -103,6 +103,7 @@ final class Rights {
                 case "suppliers" -> needAny(u, "SUPPLIERS", "DOCS", "PAYMENTS");
                 case "ledger" -> need(u, "LEDGERS", null, "R");
                 case "scratch" -> need(u, "SCRATCH", null, "R");
+                case "tiles" -> need(u, "TILES", null, "R");
                 case "warehouses" -> {
                     if (n > 1) {
                         need(u, "WAREHOUSES", null, "R");
@@ -178,6 +179,7 @@ final class Rights {
                 }
             }
             case "roles", "menu" -> need(u, "ROLES", null, "W");
+            case "tiles" -> need(u, "TILES", n == 2 && "plu".equals(p[1]) ? "PLU" : null, "W");
             case "reports" -> need(u, "STOCK_VALUE", "COST_METHOD", "W");
             case "expiry" -> need(u, "EXPIRY", "WITHDRAW", "W");
             case "customers" -> need(u, "CUSTOMERS", "card".equals(a2) ? "CARD" : null, "W");

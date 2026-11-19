@@ -240,6 +240,9 @@ final class Api {
         if ("scratch".equals(p[0])) {
             return Scratch.post(c, p, in);
         }
+        if ("tiles".equals(p[0])) {
+            return Tiles.post(c, p, in);
+        }
         if ("warehouses".equals(p[0])) {          // a new warehouse; one renamed, (not) active
             if (n == 1) {
                 String code = String.valueOf(Http.text(in, "code", true)).trim().toUpperCase(java.util.Locale.ROOT);
@@ -644,6 +647,11 @@ final class Api {
             case "scratch" -> {
                 if (n == 1) {
                     return Scratch.get(c);
+                }
+            }
+            case "tiles" -> {               // the buttons of the till (the page Κουμπιά ταμείου)
+                if (n == 1) {
+                    return Tiles.page(c);
                 }
             }
             case "warehouses" -> {          // the warehouses: the main one first

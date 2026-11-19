@@ -22,7 +22,9 @@ import java.util.Map;
  *   POST /api/pos/{register}/open {cash}       a Z opened, with the cash in the drawer
  *   POST /api/pos/{register}/close             the Z closed: its totals in "closed"
  *   POST /api/pos/{register}/cash {amount, note}   money in (+) or out (-) of the drawer
- *   POST /api/pos/{register}/scan {code, qty}  an item by barcode or code (a card of mobile: one, the
+ *   GET  /api/pos/tiles                        the buttons of the till (Tiles: groups, tiles, the frequent)
+ *   POST /api/pos/{register}/item {item_id, qty}   a button of the till: the item, as a scan of its code
+ *   POST /api/pos/{register}/scan {code, qty}  an item by barcode, code or short number (PLU) (a card of mobile: one, the
  *                                              oldest), or a card by its serial (a scratch ticket: its barcode)
  *   POST /api/pos/{register}/prize {amount, ticket}   a prize of a scratch ticket, paid from the drawer
  *   POST /api/pos/{register}/customer {code}   the customer of the receipt (points): its card (a scan of it
@@ -49,6 +51,9 @@ final class Pos {
     static Object get(Connection c, Api.User u, String[] p) throws SQLException {
         if (p.length == 2 && "settings".equals(p[1])) {
             return settings(c);
+        }
+        if (p.length == 2 && "tiles".equals(p[1])) {
+            return Tiles.forTill(c);
         }
         if (p.length == 4 && "receipt".equals(p[2])) {
             return receipt(c, u, register(c, u, p[1]), Http.id(p[3]));
@@ -152,6 +157,19 @@ final class Pos {
                     break;
                 }
                 scan(c, reg, Http.text(in, "code", true), Http.decimal(in, "qty", BigDecimal.ONE));
+                return state(c, reg);
+            }
+            case "item" -> {                    // a button of the till: an item by its id, as a scan of its code
+                if (p.length != 3) {
+                    break;
+                }
+                BigDecimal id = Http.decimal(in, "item_id", null);
+                List<Map<String, Object>> it = id == null ? List.of()
+                        : Db.rows(c, "select code from mm_item where id = ? and active = 'Y'", id);
+                if (it.isEmpty()) {
+                    throw new Http.Fail(404, "not_found", "Δεν βρέθηκε ενεργό είδος " + id);
+                }
+                scan(c, reg, (String) it.get(0).get("code"), Http.decimal(in, "qty", BigDecimal.ONE));
                 return state(c, reg);
             }
             case "warehouse" -> {               // the warehouse of the register: its sales from there (MANAGER)

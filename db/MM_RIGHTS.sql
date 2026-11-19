@@ -376,6 +376,7 @@ begin
   scr('POS', 'SALES', 'Ταμείο', '#/pos', 'MM_POS', 10,
       'A:OPEN_Z:Άνοιγμα Ζ;A:CLOSE_Z:Κλείσιμο Ζ;A:CASH:Μετρητά μέσα και έξω;A:VOID:Ακύρωση απόδειξης;A:PRIZE:Κέρδος σκρατς;'
       || 'A:WAREHOUSE:Αποθήκη του ταμείου;A:SETTINGS:Κεφαλίδα και υποσέλιδο αποδείξεων');
+  scr('TILES', 'SALES', 'Κουμπιά ταμείου', '#/tiles', null, 15, 'A:PLU:Σύντομοι κωδικοί (PLU)');
   scr('ORDERS', 'SALES', 'Παραγγελίες', '#/orders', null, 20, 'A:CONFIRM:Επιβεβαίωση;A:CANCEL:Ακύρωση;A:NOTE:Δελτίο αποστολής');
   scr('RESERVATIONS', 'SALES', 'Κρατήσεις', null, 'MM_RESERVATIONS', 30, 'A:CREATE:Νέα;A:DELIVER:Παράδοση;A:CANCEL:Ακύρωση');
   scr('PROMOS', 'SALES', 'Προσφορές', null, 'MM_PROMOS', 40, 'A:CREATE:Νέα;A:ACTIVE:Ενεργή ή όχι');
@@ -422,7 +423,7 @@ begin
 
   grants('CASHIER', 'POS:W;POS.WAREHOUSE:N;POS.SETTINGS:N;ORDERS:W;ORDERS.NOTE:N;RESERVATIONS:W;ITEMS:R;ITEMS.COST:N;ITEMS.FIFO:N;'
                     || 'LABELS:W;COUNTS:W;COUNTS.CREATE:N;COUNTS.POST:N;COUNTS.CANCEL:N');
-  grants('MANAGER', 'REP_CONSUMPTION:R;REP_SALES_BY:R;POS:W;ORDERS:W;RESERVATIONS:W;PROMOS:W;ITEMS:W;VARIANTS:W;KITS:W;CARDS:W;LABELS:W;COUNTS:W;'
+  grants('MANAGER', 'TILES:W;REP_CONSUMPTION:R;REP_SALES_BY:R;POS:W;ORDERS:W;RESERVATIONS:W;PROMOS:W;ITEMS:W;VARIANTS:W;KITS:W;CARDS:W;LABELS:W;COUNTS:W;'
                     || 'SCRATCH:W;EXPIRY:W;WAREHOUSES:W;DOCS:W;PAYMENTS:W;CUSTOMERS:W;SUPPLIERS:W;LEDGERS:W;'
                     || 'DAY:R;CHART:R;REP_SALES:R;REP_VAT:R;REP_MIN_STOCK:W;TRIAL_ITEMS:R;TRIAL_CUSTOMERS:R;'
                     || 'TRIAL_SUPPLIERS:R;PROFIT:R;STOCK_VALUE:W;REPORTS_PDF:R');
