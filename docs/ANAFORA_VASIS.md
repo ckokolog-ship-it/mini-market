@@ -4,7 +4,7 @@
 
 ## Περιεχόμενα
 
-- [Πίνακες](#πίνακες) (52)
+- [Πίνακες](#πίνακες) (53)
 - [Όψεις](#όψεις) (25)
 - [Πακέτα](#πακέτα) (9)
 - [Triggers](#triggers) (20)
@@ -38,6 +38,7 @@
 | [`MM_OBJECT`](#mm_object) | Το μενού: ομάδες και οθόνες, με σελίδα web και/ή φόρμα, όνομα, σειρά, ενεργό. |
 | [`MM_OBJECT_ITEM`](#mm_object_item) | Τα πεδία και οι ενέργειες κάθε οθόνης, για τα δικαιώματα. |
 | [`MM_OPTION`](#mm_option) | Οι επιλογές μιας ομάδας: όνομα, έξτρα τιμή με ΦΠΑ, προεπιλογή, σειρά. |
+| [`MM_OPTION_COMPONENT`](#mm_option_component) | Τα υλικά μιας επιλογής: περισσότερο ενός υλικού, ή λιγότερο ενός της συνταγής (με μείον). |
 | [`MM_OPTION_GROUP`](#mm_option_group) | Οι ομάδες επιλογών του ταμείου (ζάχαρη, γάλα, έξτρα): μία ή όσες θέλεις, υποχρεωτική, σειρά. |
 | [`MM_PARTNER_MONTH`](#mm_partner_month) | Τα σύνολα κάθε μήνα ανά πελάτη και προμηθευτή (χρέωση και πίστωση). Τα κρατούν triggers. |
 | [`MM_PAYMENT`](#mm_payment) | Οι εισπράξεις από πελάτες και οι πληρωμές σε προμηθευτές· με ταμείο, και κίνηση στο Ζ του. |
@@ -581,6 +582,22 @@ _Ορίζεται στο `db/MM_TABLES.sql`._
 - έλεγχος: `active in ('Y', 'N')`
 - έλεγχος: `is_default in ('Y', 'N')`
 - έλεγχος: `price >= 0`
+
+### MM_OPTION_COMPONENT
+
+Τα υλικά μιας επιλογής: περισσότερο ενός υλικού, ή λιγότερο ενός της συνταγής (με μείον).
+
+> the materials of an option (a cafe: the recipe of a coffee is a kit never assembled, MM_KIT_COMPONENT: each sale takes its materials): more (qty > 0, e.g. Έξτρα σφηνάκι: 9 g of coffee) or less of the recipe (qty < 0, e.g. Βρώμης: 0,15 L of oat milk and 0,15 L less of the fresh one); of a line, never below 0
+
+_Ορίζεται στο `db/MM_TABLES.sql`._
+
+| Στήλη | Τύπος | Κενή | Προεπιλογή | Κλειδί | Σχόλιο του κώδικα |
+|---|---|---|---|---|---|
+| `option_id` | NUMBER | όχι |  | PK FK → [`MM_OPTION`](#mm_option) (on delete cascade) |  |
+| `component_id` | NUMBER | όχι |  | PK FK → [`MM_ITEM`](#mm_item) |  |
+| `qty` | NUMBER(12,3) | όχι |  |  |  |
+
+- έλεγχος: `qty <> 0`
 
 ### MM_OPTION_GROUP
 
@@ -1515,6 +1532,9 @@ same transaction still sees the stock before the change (the change is applied a
   -- the number at the counter of a posted retail receipt with an item of the buttons of the till (MM_TILE):
   -- the next of the day (all the registers), once; null: none of them
   function counter_ticket(p_doc_id number) return number;
+  -- the materials of an option (MM_OPTION_COMPONENT): more of a material (qty > 0) or less of one of the
+  -- recipe (< 0); 0: out. A material: not a kit, not with serials, not a model (errors MM-132)
+  procedure option_component(p_option_id number, p_component_id number, p_qty number);
 ```
 
 ### MM_LEDGER

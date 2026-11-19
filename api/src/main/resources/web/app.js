@@ -2055,6 +2055,8 @@ function chooseOptions(t, groups, q0, put) {
   dlg.querySelector('button[type=submit]').focus();
 }
 
+const UNIT_TEXT = { PCS: 'τεμ.', KG: 'kg', L: 'L' };
+
 // a color of a group of buttons on an element (CSSOM: the CSP allows no style attribute)
 function paint(e, color) {
   e.style.setProperty('--tile', color);
@@ -2079,6 +2081,53 @@ async function tilesPage() {
     } catch (e) { fail(e); return false; }
   };
   draw = (r) => { drawTiles(r); drawOptions(r); };
+  // the materials of a recipe (a kit never assembled: each sale takes them, by FIFO) or of an option (signed:
+  // more of a material, or less of one of the recipe, e.g. oat milk instead of the fresh); their cost by the
+  // last price of each, and what is left of the price of the item
+  const materials = (title, signed, find, rowsOf, set, price) => {
+    const dlg = el('dialog', { class: 'options-dialog materials', 'aria-label': title });
+    const body = el('div');
+    const code = el('input', { name: 'material_code', placeholder: 'κωδικός ή barcode του υλικού', class: 'w11', 'aria-label': 'Υλικό' });
+    const q = el('input', { name: 'material_qty', type: 'number', step: '0.001', class: 'w6', 'aria-label': 'Ποσότητα υλικού' });
+    const close = () => { dlg.close(); dlg.remove(); };
+    const change = async (c, v) => {
+      try {
+        const r = await set(c, v);
+        draw(r);
+        fill(rowsOf(find(r)) || []);
+        return true;
+      } catch (e) { fail(e); return false; }
+    };
+    const fill = (rows) => {
+      const cost = rows.reduce((s, x) => s + x.qty * x.cost, 0);
+      body.replaceChildren(rows.length ? table([['Υλικό'], ['Ποσότητα', 'num'], [''], ['Κόστος €', 'num'], ['']], rows.map((x) => {
+        const inp = el('input', { type: 'number', step: '0.001', value: x.qty, class: 'w6', 'aria-label': 'Ποσότητα: ' + x.name });
+        inp.addEventListener('change', () => change(x.code, Number(inp.value || 0)));
+        return el('tr', {}, el('td', { class: 'wrap' }, `${x.code} ${x.name}`), el('td', { class: 'num' }, inp), el('td', {}, UNIT_TEXT[x.unit] || x.unit),
+          num(x.qty * x.cost), el('td', { class: 'num' }, el('button', { type: 'button', class: 'danger', 'aria-label': 'Έξω: ' + x.name, onclick: () => change(x.code, 0) }, '×')));
+      })) : el('p', { class: 'muted' }, signed ? 'Κανένα υλικό: η επιλογή δεν αλλάζει τη συνταγή.' : 'Καμία συνταγή: το είδος πουλιέται από το δικό του απόθεμα.'),
+      el('p', {}, el('strong', {}, `Κόστος ${money(cost)} €`),
+        price !== null && rows.length ? ` · μένουν ${money(price - cost)} € από τα ${money(price)} € (${Math.round((price - cost) / price * 100)}%)` : '',
+        el('span', { class: 'muted' }, ' · με την τελευταία τιμή αγοράς κάθε υλικού')));
+    };
+    dlg.append(el('h2', {}, title),
+      el('p', { class: 'muted' }, signed ? 'Περισσότερο από ένα υλικό (π.χ. 0,009 kg καφέ για ένα σφηνάκι) ή λιγότερο από ένα της συνταγής, με μείον (π.χ. −0,15 L φρέσκο γάλα όταν μπαίνει ρόφημα βρώμης).'
+        : 'Ό,τι φεύγει από την αποθήκη με κάθε πώληση (π.χ. 0,018 kg καφέ, 1 ποτήρι). Τα υλικά είναι κανονικά είδη, που αγοράζονται με δελτίο παραλαβής.'),
+      body,
+      el('form', {
+        class: 'row',
+        onsubmit: async (ev) => {
+          ev.preventDefault();
+          if (code.value.trim() && q.value !== '' && await change(code.value.trim(), Number(q.value))) { code.value = ''; q.value = ''; code.focus(); }
+        },
+      }, el('label', { class: 'grow' }, 'Υλικό', code), camera(code), el('label', {}, 'Ποσότητα', q), el('button', { type: 'submit' }, 'Βάλε')),
+      el('div', { class: 'row opt-foot' }, el('span', { class: 'grow' }), el('button', { type: 'button', class: 'primary', onclick: close }, 'Κλείσιμο')));
+    dlg.addEventListener('cancel', (ev) => { ev.preventDefault(); close(); });
+    document.body.append(dlg);
+    api('tiles').then((r) => fill(rowsOf(find(r)) || [])).catch(fail);
+    dlg.showModal();
+    code.focus();
+  };
   // the options: groups (one of them / any, required, active, the order), their options (a price with VAT,
   // the default of a group of one, active, the order); which items have which: in each tile above
   const opts = el('div');
@@ -2111,7 +2160,12 @@ async function tilesPage() {
             el('button', { type: 'button', onclick: () => call('tiles/option/' + o.id, { name: on2.value.trim(), price: Number(pr.value || 0), default: df.checked, active: ac.checked }, 'Αποθηκεύτηκε: ' + on2.value.trim()) }, 'Αποθήκευση'),
             el('button', { type: 'button', 'aria-label': 'Πιο πάνω: ' + o.name, disabled: oi === 0, onclick: () => call(`tiles/option/${o.id}/move`, { dir: -1 }) }, '↑'),
             el('button', { type: 'button', 'aria-label': 'Πιο κάτω: ' + o.name, disabled: oi === g.options.length - 1, onclick: () => call(`tiles/option/${o.id}/move`, { dir: 1 }) }, '↓'),
-            el('button', { type: 'button', class: 'danger', 'aria-label': 'Έξω: ' + o.name, onclick: () => call(`tiles/option/${o.id}/delete`, {}, 'Έξω: ' + o.name) }, '×')] : null));
+            el('button', { type: 'button', class: 'danger', 'aria-label': 'Έξω: ' + o.name, onclick: () => call(`tiles/option/${o.id}/delete`, {}, 'Έξω: ' + o.name) }, '×'),
+            el('button', {
+              type: 'button', 'aria-label': 'Υλικά: ' + o.name,
+              onclick: () => materials(`Υλικά της επιλογής: ${o.name}`, true, (x) => x.options.flatMap((gg) => gg.options).find((y) => y.id === o.id),
+                (y) => y.components, (code, q) => api(`tiles/option/${o.id}/component`, { component: code, qty: q }), null),
+            }, (o.components || []).length ? `Υλικά (${o.components.length})` : 'Υλικά')] : null));
       })) : el('p', { class: 'muted' }, 'Καμία επιλογή ακόμα.'),
       w ? el('form', {
         class: 'row',
@@ -2150,6 +2204,11 @@ async function tilesPage() {
         return paint(el('div', { class: 'tile' + (t.active === 'Y' ? '' : ' cancelled') },
           el('span', { class: 'tile-name' }, t.name), el('span', { class: 'tile-price' }, `${t.code} · ${money(t.price)} €`),
           el('label', { class: 'tile-plu-edit' }, 'PLU', p), og,
+          el('button', {
+            type: 'button', class: 'recipe-btn', 'aria-label': 'Συνταγή: ' + t.name,
+            onclick: () => materials(`Συνταγή: ${t.name}`, false, (x) => x.groups.flatMap((gg) => gg.tiles).find((y) => y.code === t.code),
+              (y) => y.recipe, (code, q) => api('tiles/recipe', { code: t.code, component: code, qty: q }), t.price),
+          }, t.recipe && t.recipe.length ? `Συνταγή (${t.recipe.length}) · κόστος ${money(t.recipe_cost)}` : 'Συνταγή'),
           w ? el('div', { class: 'row tile-tools' },
             el('button', { type: 'button', 'aria-label': 'Πιο πριν: ' + t.name, disabled: ti === 0, onclick: () => call(`tiles/${t.id}/move`, { dir: -1 }) }, '←'),
             el('button', { type: 'button', 'aria-label': 'Πιο μετά: ' + t.name, disabled: ti === g.tiles.length - 1, onclick: () => call(`tiles/${t.id}/move`, { dir: 1 }) }, '→'),

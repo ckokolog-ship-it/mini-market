@@ -485,7 +485,8 @@ declare
     return v;
   end;
 begin
-  select count(*) into n from mm_kit_component where kit_id = id_of('CAF01');
+  d := id_of('CAF01');                -- (a function of this block: not in SQL, PLS-00231)
+  select count(*) into n from mm_kit_component where kit_id = d;
   if n = 0 then
     -- bought: the materials and the snacks (a delivery note of the supplier, posted)
     select min(id) into s from mm_supplier;
