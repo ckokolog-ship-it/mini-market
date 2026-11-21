@@ -2,7 +2,7 @@
 
 Μετά από κάθε merge ενός PR, στο PC του μαγαζιού. Τα βήματα τρέχουν με αυτή τη σειρά. Όποιο δεν χρειάζεται για ένα PR μπορεί να παραλειφθεί, αλλά όλα μπορούν να τρέξουν ξανά χωρίς πρόβλημα.
 
-Ο φάκελος του repo: `C:\Users\chris\eclipse-workspace\mini-market`.
+Ο φάκελος του repo: `C:\Users\chris\eclipse-workspace\mini-market`. Στο Linux (forms1) οι ίδιες εντολές είναι στο τέλος του [ODIGIES_LINUX.md](ODIGIES_LINUX.md).
 
 ## 0. Backup της βάσης (PowerShell ως διαχειριστής)
 

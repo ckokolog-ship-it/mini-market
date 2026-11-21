@@ -85,6 +85,8 @@ java -jar target/mm-api.jar                      # http://localhost:8090
 
 **Μετά από κάθε ενημέρωση**, όλες οι εντολές μαζί (backup, βάση, mm-api, φόρμες, reports) είναι στο [ODIGIES_ENIMEROSI.md](docs/ODIGIES_ENIMEROSI.md).
 
+**Στο Linux** (Oracle Linux 9 με Forms και Reports 14.1.2, π.χ. ο forms1): `tools/linux/mm_wallet.sh`, `api/install_service.sh` (υπηρεσία systemd), `db/backup.sh` (timer κάθε βράδυ), `forms/build_forms.sh`, `reports/build_reports.sh`: όλα στο [ODIGIES_LINUX.md](docs/ODIGIES_LINUX.md).
+
 ## 📚 Τεκμηρίωση
 
 | Έγγραφο | Τι έχει |
@@ -98,6 +100,7 @@ java -jar target/mm-api.jar                      # http://localhost:8090
 | [ODIGIES_FORMS.md](docs/ODIGIES_FORMS.md) | Οι φόρμες: πώς φτιάχνονται και πώς τρέχουν. |
 | [ODIGIES_REPORTS.md](docs/ODIGIES_REPORTS.md) | Τα reports και ο Reports Server. |
 | [ODIGIES_ANDROID.md](docs/ODIGIES_ANDROID.md) | Η εφαρμογή Android. |
+| [ODIGIES_LINUX.md](docs/ODIGIES_LINUX.md) | Η μεταφορά στο Linux (forms1, Oracle Linux 9): wallet, δεδομένα από τα Windows, mm-api ως υπηρεσία systemd, φόρμες, reports, backup κάθε βράδυ. |
 | [ODIGIES_ENIMEROSI.md](docs/ODIGIES_ENIMEROSI.md) | Οι εντολές μετά από κάθε merge. |
 
 Οι δύο αναφορές ξαναφτιάχνονται με `MM_DSN=mm/<κωδικός>@host:1521/FREEPDB1 python tools/mkdocs.py`.
