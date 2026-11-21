@@ -591,7 +591,8 @@ def test_the_state_of_the_backup(api, env, users):
     try:
         db.cur.execute("delete from mm_setting where name like 'BACKUP\\_%' escape '\\'")
         db.commit()
-        assert get(api, '/api/backup')['state'] == 'NEVER'
+        r = get(api, '/api/backup')
+        assert r['state'] == 'NEVER' and r['os'] == ('windows' if os.name == 'nt' else 'linux')
         db.proc('backup_done', 'Y', 'mm_20261116_2315.dmp')
         db.commit()
         r = get(api, '/api/backup')
