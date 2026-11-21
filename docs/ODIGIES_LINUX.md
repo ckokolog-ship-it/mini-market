@@ -159,7 +159,7 @@ sudo /u01/app/oracle/mini-market/api/install_service.sh
 **Τι κάνει:**
 - χτίζει το jar ως `oracle`, με το `./mvnw`· την πρώτη φορά κατεβάζει το Maven, οπότε θέλει internet·
 - το βάζει στο `/u01/app/oracle/mm-api`·
-- φτιάχνει την υπηρεσία **`mm-api`**, που ξεκινά μετά τη βάση και ξαναξεκινά μόνη της αν σταματήσει·
+- φτιάχνει την υπηρεσία **`mm-api`**, που ξεκινά μετά τη βάση από το `/u01/app/oracle/scripts/mm-api.sh` (για το SELinux, όπως τα Forms), και ξαναξεκινά μόνη της αν σταματήσει· αν αποτύχει 5 φορές σε 10 λεπτά σταματά να προσπαθεί, και το `journalctl -u mm-api` λέει γιατί·
 - περιμένει το `/api/health`.
 
 Στο τέλος γράφει `{"status":"ok","db":"ok"}`.
@@ -264,6 +264,7 @@ sudo ./api/install_service.sh                        # 3. api/ (ως chris)
 | `ORA-12578` ή `ORA-01017` με `/@MM_DB` | λείπει το wallet, ή άλλαξε ο κωδικός του MM | `tools/linux/mm_wallet.sh` ξανά: με το `MM_DB` ήδη μέσα, ζητά τον νέο κωδικό |
 | `no wallet with MM_DB` (install_service.sh) | δεν έτρεξε το βήμα 3 | το βήμα 3 |
 | `MM may not use DATA_PUMP_DIR` | δεν έτρεξε το `GRANT_BACKUP.sql` | το βήμα 2 |
+| `Unable to access jarfile /u01/app/oracle/mm-api/mm-api.jar` (`mm-api`, «restart counter» που ανεβαίνει) | SELinux: η `java` που ξεκινά κατευθείαν από το systemd δεν διαβάζει το jar στο `/u01` | `sudo .../api/install_service.sh` ξανά: ξεκινά πλέον από το `/u01/app/oracle/scripts/mm-api.sh` (ετικέτα `bin_t`, όπως τα Forms). Έλεγχος: `ls -laZ /u01/app/oracle/mm-api /u01/app/oracle/scripts` |
 | `status=203/EXEC` στο `mm-backup` | ετικέτα SELinux | `sudo restorecon -Rv /u01/app/oracle/scripts` |
 | `?????` αντί για ελληνικά στις φόρμες | `NLS_LANG` του `default.env` χωρίς ελληνικά | `AMERICAN_GREECE.AL32UTF8` στο `default.env`, και `sudo systemctl restart weblogic-forms` |
 | `REP-3000` στο `build_reports.sh` | χωρίς οθόνη | MobaXterm με X11-forwarding (`echo $DISPLAY` → `localhost:10.0`) |
