@@ -138,7 +138,7 @@ powershell -ExecutionPolicy Bypass -File fsal.ps1 -Form MM_MAIN -Config mm
 
 Ή από τον browser: `http://192.168.178.165:9001/forms/frmservlet?config=mm&form=MM_MAIN`. Από το μενού ανοίγουν όλες οι άλλες.
 
-Στο Linux (forms1) το ίδιο κάνει το `forms/build_forms.sh`, με το `forms_wallet.sh` για το `MM_DB`.
+Στο Linux (forms1) το ίδιο κάνει το `forms/build_forms.sh`, με το `tools/linux/mm_wallet.sh` για το `MM_DB` ([ODIGIES_LINUX.md](ODIGIES_LINUX.md)).
 
 ## Πώς φτιάχνονται
 

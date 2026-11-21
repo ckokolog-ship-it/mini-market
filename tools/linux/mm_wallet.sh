@@ -9,7 +9,7 @@
 #      (config/fmwconfig/forms_wallet; made if there is none). mkstore asks every password (the wallet's,
 #      and mm's); none shows, none is written anywhere else;
 #   2. MM_DB in tnsnames.ora, WALLET_LOCATION and SQLNET.WALLET_OVERRIDE in sqlnet.ora of the domain, and
-#      TNS_ADMIN = that folder in default.env of the forms;
+#      TNS_ADMIN = that folder in default.env of the forms (and NLS_LANG with Greek, if it has none);
 #   3. a section [mm] in formsweb.cfg: [standaloneapp] (FSAL) plus userid=/@MM_DB;
 #   4. the key mm in cgicmd.dat of WLS_REPORTS: userid=/@MM_DB %*;
 #   5. a check: /@MM_DB connects (sqlplus of the database), the page of config=mm carries no password.
@@ -91,6 +91,15 @@ if ! grep -qx "TNS_ADMIN=$CFG" "$FENV"; then
   sed -i '/^TNS_ADMIN=/d' "$FENV"
   echo "TNS_ADMIN=$CFG" >> "$FENV"
   echo "== TNS_ADMIN=$CFG in default.env"
+fi
+# the Greek of the forms (MM_TEXT, from the database): a character set with Greek for the runtime; one there
+# already: as it is (its value shown)
+if ! grep -q '^NLS_LANG=' "$FENV"; then
+  backup "$FENV"
+  echo "NLS_LANG=AMERICAN_GREECE.AL32UTF8" >> "$FENV"
+  echo "== NLS_LANG=AMERICAN_GREECE.AL32UTF8 in default.env (the Greek of the forms)"
+else
+  echo "== default.env: $(grep '^NLS_LANG=' "$FENV" | tail -1) (AL32UTF8 or EL8ISO8859P7: Greek; US7ASCII: ????)"
 fi
 
 # 3. formsweb.cfg: [mm] = [standaloneapp] + userid=/@MM_DB
