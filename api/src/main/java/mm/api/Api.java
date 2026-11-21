@@ -51,7 +51,8 @@ import java.util.Optional;
  *                                              (MANAGER, Chart.java)
  *   /api/day?date=                             the summary of a day: its Z, sales, VAT, items, scratch, orders,
  *                                              myDATA, minimum stock, backup (MANAGER, Day.java)
- *   /api/backup                              the last backup (db/backup.ps1): state OK, OLD, FAILED, NEVER (MANAGER)
+ *   /api/backup                              the last backup (db/backup.ps1, db/backup.sh): state OK, OLD, FAILED,
+ *                                            NEVER; os: windows or linux, of this server (MANAGER)
  *   /api/reports/trial-items|trial-customers|trial-suppliers?from=&to=&all=1   the trial balances
  *   /api/reports/profit?from=&to=&method=   /api/reports/stock-value?method=   the gross profit, the value
  *                                              of the stock: FIFO or LAST (the cost of the last purchase)
@@ -692,7 +693,11 @@ final class Api {
             }
             case "backup" -> {
                 if (n == 1) {
-                    return Db.rows(c, "select state, days, ok_at, ok_file, failed_at, error from mm_backup_state").get(0);
+                    Map<String, Object> b = new LinkedHashMap<>(
+                            Db.rows(c, "select state, days, ok_at, ok_file, failed_at, error from mm_backup_state").get(0));
+                    // the system of this server: the pages say the command of the backup there
+                    b.put("os", System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win") ? "windows" : "linux");
+                    return b;
                 }
             }
             case "reports" -> {

@@ -240,7 +240,7 @@ function bellStart() {
   bellCheck();
   bell.timer = setInterval(bellCheck, 30000);
 }
-// -- the backup (db/backup.ps1): a manager sees on every page when the last good one is too old or the
+// -- the backup (db/backup.ps1, db/backup.sh): a manager sees on every page when the last good one is too old or the
 // last one failed; asked at the login and every 30 minutes
 const backupCheck = { timer: null };
 async function backupNotice() {
@@ -248,9 +248,12 @@ async function backupNotice() {
   if (!session || !may('DAY')) { box.hidden = true; return; }
   let r;
   try { r = await api('backup'); } catch (e) { return; }
+  // (the command of the server: Windows backup.ps1, Linux db/backup.sh: docs/ODIGIES_LINUX.md)
+  const linux = r.os === 'linux';
   const text = {
-    NEVER: 'Δεν έχει γίνει ακόμα backup της βάσης: backup.ps1 -Install στο PC του μαγαζιού.',
-    OLD: `Το τελευταίο backup της βάσης έγινε πριν από ${Math.floor(r.days)} μέρες (${day(r.ok_at)}): backup.ps1 -Status στο PC του μαγαζιού.`,
+    NEVER: 'Δεν έχει γίνει ακόμα backup της βάσης: ' + (linux ? 'sudo db/backup.sh --install στον server.' : 'backup.ps1 -Install στο PC του μαγαζιού.'),
+    OLD: `Το τελευταίο backup της βάσης έγινε πριν από ${Math.floor(r.days)} μέρες (${day(r.ok_at)}): `
+      + (linux ? 'db/backup.sh --status στον server.' : 'backup.ps1 -Status στο PC του μαγαζιού.'),
     FAILED: `Το τελευταίο backup της βάσης απέτυχε (${day(r.failed_at)}): ${r.error || ''}`,
   }[r.state];
   box.textContent = text || '';
