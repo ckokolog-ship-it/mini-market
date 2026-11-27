@@ -6,9 +6,9 @@
 cd C:\Users\chris\eclipse-workspace\mini-market\api
 powershell -ExecutionPolicy Bypass -File run_api.ps1 -Build
 ```
-Μετά, στον browser: **`http://127.0.0.1:8090/`**. Συνδέεσαι με τους ίδιους χρήστες με τις φόρμες, π.χ. `chris`. Το `-Build` χρειάζεται μία φορά, για να μπουν οι σελίδες στο jar.
+Μετά, στον browser: **`http://127.0.0.1:8300/`** (Windows· στο forms1: `http://192.168.178.200:8090/`). Συνδέεσαι με τους ίδιους χρήστες με τις φόρμες, π.χ. `chris`. Το `-Build` χρειάζεται μία φορά, για να μπουν οι σελίδες στο jar.
 
-**Από κινητό ή άλλο PC του μαγαζιού:** `run_api.ps1 -Build -Bind 0.0.0.0`, και στον browser `http://<IP του PC>:8090/`.
+**Από κινητό ή άλλο PC του μαγαζιού:** `run_api.ps1 -Build -Bind 0.0.0.0`, και στον browser `http://<IP του PC>:8300/`. Στο Android γράψε και τη θύρα (`192.168.1.10:8300`): μόνη της συμπληρώνει την 8090 του forms1.
 - Το firewall των Windows θα ρωτήσει για τη θύρα.
 - Είναι απλό HTTP, οπότε μόνο σε δίκτυο που εμπιστεύεσαι (το WiFi του μαγαζιού, το Tailscale), ποτέ ανοιχτό στο Internet.
 

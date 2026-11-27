@@ -15,7 +15,7 @@
 # -DryRun: the files of the service only, nothing installed (no administrator needed).
 # This file is ASCII on purpose: Windows PowerShell 5 reads a file without BOM as ANSI.
 param(
-  [int]$Port = 8090,
+  [int]$Port = 8300,
   [string]$Bind = '0.0.0.0',
   [string]$Domain = 'C:\Oracle\Middleware\Oracle_Home\user_projects\domains\forms_domain',
   [string]$TnsAdmin = '',

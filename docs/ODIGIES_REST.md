@@ -23,8 +23,11 @@
    ```
    - **Την πρώτη φορά:** χτίζει το `target\mm-api.jar` με το `mvnw.cmd`, κατεβάζοντας το Maven και τον driver της Oracle (λίγα λεπτά).
    - **Μετά από `git pull`:** `run_api.ps1 -Build` για να ξαναχτιστεί.
-   - **Ρυθμίσεις:** θύρα **8090** (`-Port` για άλλη)· σταματά με Ctrl+C.
-3. **Δοκιμή:** στον browser, `http://127.0.0.1:8090/api/health` → `{"status":"ok","db":"ok"}`.
+   - **Ρυθμίσεις:** θύρα **8300** στα Windows (`-Port` για άλλη)· σταματά με Ctrl+C.
+   - **Γιατί 8300:** στο ίδιο PC τρέχουν και άλλες εφαρμογές, και κάθε μία έχει το δικό της εύρος: PROPOApplication 3000,
+     8000, 8080–8097· Cafe POS 8100· WheelLab 8200· Mini market **8300**. Στο forms1 (Linux, `install_service.sh`) η θύρα
+     μένει **8090**, όπως τη γνωρίζουν τα ταμεία, το Android και τα QR.
+3. **Δοκιμή:** στον browser, `http://127.0.0.1:8300/api/health` → `{"status":"ok","db":"ok"}`.
 
 **Από το δίκτυο** (π.χ. τα κινητά της απογραφής): `run_api.ps1 -Bind 0.0.0.0`.
 - **Πριν:** το login είναι πια υποχρεωτικό για όλα, εκτός από το `health`.
@@ -56,7 +59,7 @@ powershell -ExecutionPolicy Bypass -File install_service.ps1
   - αν υπάρχει το service της βάσης `OracleServiceFREE`, περιμένει πρώτα εκείνο·
   - αν πέσει, ξαναξεκινά μόνο του σε 10, 30 και 60 δευτερόλεπτα.
 - **Logs:** `api\service\logs\mm-api.out.log` και `mm-api.err.log`. Κρατιούνται 5 αρχεία των 10 MB.
-- **Firewall:** με `-Bind 0.0.0.0` (η προεπιλογή εδώ) ανοίγει η θύρα 8090 μόνο για **ιδιωτικό** δίκτυο (κανόνας «mm-api 8090»). Με `-Bind 127.0.0.1` ακούει μόνο το ίδιο το PC.
+- **Firewall:** με `-Bind 0.0.0.0` (η προεπιλογή εδώ) ανοίγει η θύρα 8300 μόνο για **ιδιωτικό** δίκτυο (κανόνας «mm-api 8300»). Με `-Bind 127.0.0.1` ακούει μόνο το ίδιο το PC.
 - **Ο runner:** το service τρέχει μέσω του **WinSW 2.12.0** (MIT, github.com/winsw/winsw). Την πρώτη φορά κατεβαίνει, και αν το SHA-256 του δεν είναι το αναμενόμενο, δεν χρησιμοποιείται.
 - **Μετά από `git pull`:** τρέχεις ξανά το ίδιο. Σταματά το service, χτίζει το νέο jar, και το ξεκινά.
 - **Οι άλλες εντολές:**
@@ -195,18 +198,18 @@ commit;
 
 Παραδείγματα, από PowerShell:
 ```powershell
-$t = (Invoke-RestMethod -Method Post http://127.0.0.1:8090/api/auth/login -ContentType 'application/json' `
+$t = (Invoke-RestMethod -Method Post http://127.0.0.1:8300/api/auth/login -ContentType 'application/json' `
       -Body (@{ username = 'chris'; password = (Read-Host 'Κωδικός') } | ConvertTo-Json)).token
-Invoke-RestMethod http://127.0.0.1:8090/api/items?q=ψωμί -Headers @{ Authorization = "Bearer $t" }
+Invoke-RestMethod http://127.0.0.1:8300/api/items?q=ψωμί -Headers @{ Authorization = "Bearer $t" }
 ```
 Ο κωδικός ζητείται με το `Read-Host`, για να μη μείνει γραμμένος σε script ή στο ιστορικό.
 
 Οι διευθύνσεις (με το token):
 ```
-http://127.0.0.1:8090/api/items?q=ψωμί
-http://127.0.0.1:8090/api/items/2000000000015
-http://127.0.0.1:8090/api/ledger/customer/2?from=2026-01-01
-http://127.0.0.1:8090/api/reports/vat?from=2026-10-01&to=2026-10-31
+http://127.0.0.1:8300/api/items?q=ψωμί
+http://127.0.0.1:8300/api/items/2000000000015
+http://127.0.0.1:8300/api/ledger/customer/2?from=2026-01-01
+http://127.0.0.1:8300/api/reports/vat?from=2026-10-01&to=2026-10-31
 ```
 
 ## myDATA της ΑΑΔΕ
@@ -256,7 +259,7 @@ key=<subscription key>
 | Μεταβλητή | Προεπιλογή | Τι |
 |---|---|---|
 | `MM_API_BIND` | `127.0.0.1` | η διεύθυνση όπου ακούει |
-| `MM_API_PORT` | `8090` | η θύρα |
+| `MM_API_PORT` | `8090` | η θύρα (τα scripts των Windows δίνουν **8300**· στο Linux, forms1, μένει 8090) |
 | `MM_DB_URL` | `jdbc:oracle:thin:/@MM_DB` | η βάση (το alias του wallet) |
 | `MM_TNS_ADMIN` | — | ο φάκελος του `tnsnames.ora` (το `run_api.ps1` βάζει τον φάκελο του domain) |
 | `MM_WALLET` | `MM_TNS_ADMIN\forms_wallet` | ο φάκελος του wallet |

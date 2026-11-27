@@ -1,7 +1,8 @@
-# docker-compose.yml -- mm-api in Docker (run_docker.ps1 starts it): port 8090 of this computer (the
+# docker-compose.yml -- mm-api in Docker (run_docker.ps1 starts it): port 8300 of this computer (the
 # phones too), started again with Docker. The wallet of the Forms read-only; docker/tns (made by
 # run_docker.ps1) has the MM_DB of the container: the database of this computer (host.docker.internal).
-# The Windows service (install_service.ps1) and this use the same port: one of the two at a time.
+# The Windows service (install_service.ps1) and this use the same port: one of the two at a time. 8300 on Windows
+# (the map of ports: PROPOApplication 8000/8080-8097, Cafe POS 8100, WheelLab 8200); the container listens on 8090.
 services:
   mm-api:
     build: .
@@ -9,7 +10,7 @@ services:
     container_name: mm-api
     restart: unless-stopped
     ports:
-      - "${MM_API_PUBLISH:-0.0.0.0}:${MM_API_PORT:-8090}:8090"
+      - "${MM_API_PUBLISH:-0.0.0.0}:${MM_API_PORT:-8300}:8090"
     environment:
       MM_API_CORS: "${MM_API_CORS:-http://localhost}"
     volumes:

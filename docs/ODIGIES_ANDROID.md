@@ -16,7 +16,7 @@ powershell -ExecutionPolicy Bypass -File run_api.ps1 -Build -Bind 0.0.0.0
 
 - **Μόνιμα, χωρίς παράθυρο:** ως Windows service (`install_service.ps1`) ή σε Docker (`run_docker.ps1`). Δες το `ODIGIES_REST.md`, «Χωρίς παράθυρο».
 - Η IP του PC φαίνεται με το `ipconfig` (π.χ. `192.168.1.10`). Δώσε του σταθερή IP από τον router (DHCP reservation), αλλιώς τα κινητά θα θέλουν ξανά ρύθμιση όταν αλλάξει.
-- Την πρώτη φορά, το firewall των Windows ρωτά για τη θύρα 8090. Επίτρεψέ την μόνο για **ιδιωτικό δίκτυο**.
+- Την πρώτη φορά, το firewall των Windows ρωτά για τη θύρα 8300 (στα Windows· στο forms1 είναι η 8090). Επίτρεψέ την μόνο για **ιδιωτικό δίκτυο**.
 - Είναι απλό HTTP: μόνο στο WiFi του μαγαζιού ή μέσω Tailscale, ποτέ ανοιχτό στο Internet.
 
 ## 2. Το APK: χτίσιμο στο PC (μόνο με Docker)
