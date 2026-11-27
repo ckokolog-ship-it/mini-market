@@ -6,7 +6,7 @@
 #   powershell -ExecutionPolicy Bypass -File run_api.ps1 -Build      (the jar again, after a git pull)
 #
 # The jar: built here with the Maven Wrapper (mvnw.cmd: it downloads Maven the first time, no install)
-# when it is missing or with -Build. Then: http://127.0.0.1:8090/api/health (docs\ODIGIES_REST.md).
+# when it is missing or with -Build. Then: http://127.0.0.1:8300/api/health (docs\ODIGIES_REST.md).
 # -Bind 127.0.0.1 (the default): this computer only. 0.0.0.0: the network too (the phones), with
 # the login; plain HTTP, so only a network you trust. Ctrl+C stops it.
 # Once before: forms_wallet.cmd -DbUser mm -Alias MM_DB -Section mm (PROPOApplication); the first user
@@ -15,7 +15,7 @@
 # forms_wallet>, copied from the Forms server.
 # This file is ASCII on purpose: Windows PowerShell 5 reads a file without BOM as ANSI.
 param(
-  [int]$Port = 8090,
+  [int]$Port = 8300,
   [string]$Bind = '127.0.0.1',
   [string]$Domain = 'C:\Oracle\Middleware\Oracle_Home\user_projects\domains\forms_domain',
   [string]$TnsAdmin = '',

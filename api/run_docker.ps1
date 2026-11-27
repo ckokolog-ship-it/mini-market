@@ -12,7 +12,7 @@
 # domain, copied to api\docker\tns (localhost there becomes host.docker.internal: the computer).
 # This file is ASCII on purpose: Windows PowerShell 5 reads a file without BOM as ANSI.
 param(
-  [int]$Port = 8090,
+  [int]$Port = 8300,
   [string]$Domain = 'C:\Oracle\Middleware\Oracle_Home\user_projects\domains\forms_domain',
   [string]$TnsAdmin = '',
   [string]$Jdk = 'C:\Program Files\Java\jdk-17.0.21.0.3',
