@@ -39,8 +39,15 @@ public final class Main {
             t.setDaemon(true);
             return t;
         }).scheduleWithFixedDelay(() -> {
-            try (java.sql.Connection c = db.connection()) {
-                MyData.sendWaiting(c);
+            // one mm-api sends at a time (k3s: 2 replicas, and the one of forms1): never a document twice
+            try (java.sql.Connection turn = db.connection(); java.sql.Connection c = db.connection()) {
+                try {
+                    if (MyData.takeTurn(turn)) {
+                        MyData.sendWaiting(c);
+                    }
+                } finally {
+                    turn.rollback();            // the turn given back
+                }
             } catch (Exception e) {
                 System.err.println("== myDATA: " + e.getMessage());
             }

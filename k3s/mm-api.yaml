@@ -1,0 +1,118 @@
+# The REST service and the pages of the mini market (mm-api) in k3s (docs/ODIGIES_K3S.md), beside the bank and PROPO:
+#   Namespace mm
+#   mm-api (2 replicas)      the database: MMPDB on Data Guard (mm_rw: whichever is the primary), user MM, its password
+#                            from the Secret mm-db (k3s/deploy.sh asks it: never in a file of the repo); the logins are
+#                            checked by the database (any replica answers any token); myDATA: one mm-api sends at a
+#                            time (MyData.takeTurn), its account from the Secret mm-mydata if there is one
+#   Service mm-api           outside: the port 8300 of every node (ServiceLB of k3s): the tills, the phones, the web
+#   PodDisruptionBudget      a node drained: one replica up all the time
+# @TAG@ and @DB_URL@: k3s/deploy.sh.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mm
+  labels:
+    app.kubernetes.io/part-of: mini-market
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mm-api
+  namespace: mm
+  labels:
+    app: mm-api
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: mm-api
+  template:
+    metadata:
+      labels:
+        app: mm-api
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        # the Secrets readable by the user mm of the image (not root): their group
+        fsGroup: 2000
+      containers:
+        - name: mm-api
+          image: localhost/mm/mm-api:@TAG@
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MM_API_BIND
+              value: "0.0.0.0"
+            - name: MM_API_PORT
+              value: "8090"
+            - name: MM_DB_URL
+              value: "@DB_URL@"
+            - name: MM_DB_USER
+              value: "mm"
+            - name: MM_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mm-db
+                  key: password
+            # no wallet here (the one of the domain is on forms1): the user and its password above
+            - name: MM_TNS_ADMIN
+              value: ""
+            - name: MM_MYDATA_CONFIG
+              value: /etc/mm/mydata.properties
+          ports:
+            - containerPort: 8090
+          resources:
+            requests:
+              cpu: 25m
+              memory: 256Mi
+            limits:
+              memory: 768Mi
+          volumeMounts:
+            - name: mydata
+              mountPath: /etc/mm
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8090
+            initialDelaySeconds: 40
+            periodSeconds: 30
+      volumes:
+        # the account of myDATA (mydata.properties): optional -- without it the documents wait (Q), as on forms1
+        - name: mydata
+          secret:
+            secretName: mm-mydata
+            optional: true
+            defaultMode: 0440
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mm-api
+  namespace: mm
+spec:
+  # ServiceLB of k3s: the port 8300 on every node (http://192.168.178.211:8300, .212, .213)
+  type: LoadBalancer
+  selector:
+    app: mm-api
+  ports:
+    - name: http
+      port: 8300
+      targetPort: 8090
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mm-api
+  namespace: mm
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: mm-api
