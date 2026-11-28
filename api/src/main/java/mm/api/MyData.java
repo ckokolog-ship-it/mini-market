@@ -420,7 +420,22 @@ final class MyData {
         return new LinkedHashMap<>(r.get(0));
     }
 
-    /** the documents waiting (Q), sent one by one (with an account): by the minute, from Main */
+    /**
+     * the turn to send, for this mm-api: a lock of the row MYDATA_SENDER of MM_SETTING (SELECT ... FOR UPDATE SKIP
+     * LOCKED), held on its own connection while the documents are sent; another mm-api with it now: false, this
+     * round skipped. More than one mm-api (k3s, forms1) never sends the same document twice.
+     */
+    static boolean takeTurn(Connection turn) throws SQLException {
+        Db.exec(turn, """
+                begin
+                  merge into mm_setting s using (select 'MYDATA_SENDER' name from dual) v on (s.name = v.name)
+                  when not matched then insert (name, value) values (v.name, 'the turn of a mm-api to send to myDATA');
+                end;""");
+        turn.commit();
+        return !Db.rows(turn, "select name from mm_setting where name = 'MYDATA_SENDER' for update skip locked").isEmpty();
+    }
+
+    /** the documents waiting (Q), sent one by one (with an account): by the minute, from Main (with the turn) */
     static int sendWaiting(Connection c) throws SQLException {
         if (config() == null) {
             return 0;
